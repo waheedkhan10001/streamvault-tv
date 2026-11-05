@@ -1,0 +1,143 @@
+package com.streamvault.tv.data
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
+import java.io.File
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+class SubtitleService(private val context: Context) {
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
+    private val subtitleCacheDir = File(context.cacheDir, "downloaded_subs").apply { mkdirs() }
+
+    private val langCodeToName = mapOf(
+        "en" to "English", "ur" to "Urdu", "hi" to "Hindi", "ar" to "Arabic",
+        "es" to "Spanish", "fr" to "French", "de" to "German", "tr" to "Turkish",
+        "ko" to "Korean", "ja" to "Japanese", "pt" to "Portuguese", "ru" to "Russian",
+        "it" to "Italian", "fa" to "Persian"
+    )
+
+    suspend fun searchOnlineSubtitles(
+        tmdbId: Int,
+        imdbId: String,
+        season: Int? = null,
+        episode: Int? = null,
+        preferredLangs: List<String> = listOf("en", "ur", "hi", "ar")
+    ): List<SubtitleTrackItem> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<SubtitleTrackItem>()
+        val lookupId = when {
+            tmdbId > 0 -> tmdbId.toString()
+            imdbId.isNotBlank() -> imdbId
+            else -> return@withContext emptyList()
+        }
+
+        runCatching {
+            val epParams = if (season != null && episode != null) "&season=$season&episode=$episode" else ""
+            val url = "https://sub.wyzie.ru/search?id=$lookupId$epParams"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "StreamVaultTV/1.0")
+                .build()
+
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@use
+                val body = resp.body?.string() ?: return@use
+                val arr = JSONArray(body)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val id = obj.optString("id", "sub_$i")
+                    val subUrl = obj.optString("url")
+                    val langCode = obj.optString("language", "en").lowercase(Locale.ROOT)
+                    val displayLang = obj.optString("display", langCodeToName[langCode] ?: langCode.uppercase())
+                    val format = obj.optString("format", "srt")
+                    if (subUrl.isNotBlank()) {
+                        results.add(
+                            SubtitleTrackItem(
+                                id = id,
+                                label = "🌐 Online: $displayLang (${format.uppercase()})",
+                                languageCode = langCode,
+                                languageName = displayLang,
+                                isEmbedded = false,
+                                downloadUrl = subUrl,
+                                format = format
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        results.sortedWith(
+            compareBy<SubtitleTrackItem> { item ->
+                val idx = preferredLangs.indexOf(item.languageCode)
+                if (idx >= 0) idx else 999
+            }.thenBy { it.languageName }
+        )
+    }
+
+    suspend fun downloadAndPrepareSubtitleFile(
+        track: SubtitleTrackItem,
+        offsetMs: Long = 0L
+    ): File? = withContext(Dispatchers.IO) {
+        runCatching {
+            val rawFile = File(subtitleCacheDir, "raw_${track.id.replace(Regex("[^a-zA-Z0-9_-]"), "")}.srt")
+            if (!rawFile.exists() || rawFile.length() == 0L) {
+                val req = Request.Builder().url(track.downloadUrl).header("User-Agent", "StreamVaultTV/1.0").build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext null
+                    val content = resp.body?.string() ?: return@withContext null
+                    rawFile.writeText(content, Charsets.UTF_8)
+                }
+            }
+            if (offsetMs == 0L) {
+                return@withContext rawFile
+            }
+            val shiftedFile = File(subtitleCacheDir, "shifted_${offsetMs}_${rawFile.name}")
+            val shiftedContent = shiftSrtTimestamps(rawFile.readText(Charsets.UTF_8), offsetMs)
+            shiftedFile.writeText(shiftedContent, Charsets.UTF_8)
+            shiftedFile
+        }.getOrNull()
+    }
+
+    private val SRT_TIME_LINE_REGEX = Regex(
+        """(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})"""
+    )
+
+    private fun shiftSrtTimestamps(srtText: String, offsetMs: Long): String {
+        return SRT_TIME_LINE_REGEX.replace(srtText) { match ->
+            val startMs = parseSrtTime(
+                match.groupValues[1], match.groupValues[2], match.groupValues[3], match.groupValues[4]
+            )
+            val endMs = parseSrtTime(
+                match.groupValues[5], match.groupValues[6], match.groupValues[7], match.groupValues[8]
+            )
+            val newStart = (startMs + offsetMs).coerceAtLeast(0L)
+            val newEnd = (endMs + offsetMs).coerceAtLeast(newStart + 100L)
+            "${formatSrtTime(newStart)} --> ${formatSrtTime(newEnd)}"
+        }
+    }
+
+    private fun parseSrtTime(h: String, m: String, s: String, ms: String): Long {
+        return h.toLong() * 3600_000L + m.toLong() * 60_000L + s.toLong() * 1000L + ms.toLong()
+    }
+
+    private fun formatSrtTime(totalMs: Long): String {
+        val h = totalMs / 3600_000L
+        val rem1 = totalMs % 3600_000L
+        val m = rem1 / 60_000L
+        val rem2 = rem1 % 60_000L
+        val s = rem2 / 1000L
+        val ms = rem2 % 1000L
+        return String.format(Locale.US, "%02d:%02d:%02d,%03d", h, m, s, ms)
+    }
+}
