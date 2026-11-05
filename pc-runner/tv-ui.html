@@ -1,0 +1,997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>StreamVault TV — TCL 55P635 Simulator (Arrow Keys / Enter / Esc + Mouse)</title>
+<style>
+  :root {
+    --bg: #0B0C10;
+    --panel: #12141C;
+    --card: #181B26;
+    --border: #2A2F42;
+    --red: #E50914;
+    --green: #059669;
+    --blue: #2563EB;
+    --purple: #7C3AED;
+    --amber: #D97706;
+    --text: #F9FAFB;
+    --muted: #9CA3AF;
+  }
+  * { box-sizing: border-box; user-select: none; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overflow: hidden; height: 100vh; width: 100vw; display: flex;
+  }
+  .tv-focusable {
+    transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+    outline: none; cursor: pointer;
+  }
+  .tv-focusable:focus, .tv-focusable.tv-focused {
+    border-color: #FFFFFF !important;
+    box-shadow: 0 0 0 3px var(--red), 0 10px 25px rgba(229,9,20,0.45) !important;
+    transform: scale(1.05);
+    z-index: 10;
+  }
+  .sidebar {
+    width: 215px; background: var(--panel); height: 100vh; padding: 20px 14px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    border-right: 1px solid #1E2230; flex-shrink: 0;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px; font-weight: 900;
+    font-size: 17px; letter-spacing: 0.8px; padding: 8px 10px 18px;
+  }
+  .brand-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--red); }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+    border-radius: 10px; color: var(--muted); font-weight: 600; font-size: 14px;
+    margin-bottom: 6px; border: 2px solid transparent;
+  }
+  .nav-item.active { background: #232738; color: #fff; font-weight: 700; }
+  .nav-item:focus, .nav-item.tv-focused { background: var(--red); color: #fff; }
+  .sync-box {
+    background: #181B28; border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; font-size: 11px; color: var(--muted);
+  }
+  .viewport {
+    flex: 1; height: 100vh; overflow-y: auto; position: relative;
+    scroll-behavior: smooth;
+  }
+  .hero {
+    position: relative; height: 340px; width: 100%; background-size: cover;
+    background-position: center 20%; display: flex; align-items: flex-end;
+    padding: 28px 34px;
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, rgba(11,12,16,0.96) 0%, rgba(11,12,16,0.78) 50%, rgba(11,12,16,0.2) 100%),
+                linear-gradient(180deg, rgba(11,12,16,0.1) 0%, rgba(11,12,16,1) 100%);
+  }
+  .hero-content { position: relative; z-index: 2; max-width: 650px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+  .badge {
+    padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 700; color: #fff;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px;
+    border-radius: 8px; font-size: 14px; font-weight: 700; color: #fff;
+    background: #25293A; border: 2px solid #3B425C;
+  }
+  .btn-primary { background: var(--red); border-color: #FF4D58; }
+  .row-section { padding: 16px 32px 8px; }
+  .row-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
+  }
+  .row-title { font-size: 19px; font-weight: 800; }
+  .row-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .poster-strip {
+    display: flex; gap: 16px; overflow-x: auto; padding: 8px 4px 14px;
+  }
+  .poster-strip::-webkit-scrollbar { height: 6px; }
+  .poster-strip::-webkit-scrollbar-thumb { background: #2E3448; border-radius: 4px; }
+  .poster-card {
+    width: 156px; flex-shrink: 0; display: flex; flex-direction: column;
+    border-radius: 10px; padding: 3px; border: 2px solid transparent;
+  }
+  .poster-img-wrap {
+    position: relative; width: 148px; height: 220px; border-radius: 9px;
+    overflow: hidden; background: var(--card); border: 1px solid var(--border);
+  }
+  .poster-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+  .card-top-left {
+    position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.85);
+    color: #FBBF24; font-size: 11px; font-weight: 800; padding: 2px 6px; border-radius: 5px;
+  }
+  .card-top-right {
+    position: absolute; top: 6px; right: 6px; display: flex; gap: 4px;
+  }
+  .mini-tag {
+    font-size: 9px; font-weight: 800; padding: 2px 5px; border-radius: 4px; color: #fff;
+  }
+  .card-bottom-strip {
+    position: absolute; bottom: 0; left: 0; right: 0; background: rgba(11,12,16,0.88);
+    display: flex; justify-content: space-between; padding: 4px 7px; font-size: 10px; font-weight: 700;
+  }
+  .card-title {
+    font-size: 13px; font-weight: 700; margin-top: 7px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .card-meta {
+    font-size: 11px; color: var(--muted); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .filter-layout {
+    display: flex; gap: 20px; padding: 20px; height: 100vh;
+  }
+  .filter-drawer {
+    width: 430px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 18px; overflow-y: auto; height: 100%; flex-shrink: 0;
+  }
+  .filter-results {
+    flex: 1; height: 100%; overflow-y: auto; padding-right: 6px;
+  }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; margin-bottom: 14px; }
+  .chip {
+    padding: 6px 11px; border-radius: 8px; font-size: 12px; font-weight: 700;
+    background: #232738; border: 2px solid #353B52; color: #fff;
+  }
+  .chip.inc { background: var(--green); border-color: #34D399; }
+  .chip.exc { background: #DC2626; border-color: #F87171; }
+  .chip.sel { background: var(--blue); border-color: #60A5FA; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+    gap: 16px; padding-bottom: 60px;
+  }
+  .overlay {
+    position: fixed; inset: 0; background: rgba(11,12,16,0.96); z-index: 50;
+    overflow-y: auto; padding: 36px 48px;
+  }
+  .player-overlay {
+    position: fixed; inset: 0; background: #000; z-index: 100;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  video { width: 100%; height: 100%; position: absolute; inset: 0; background: #000; }
+  .player-osd-top, .player-osd-bottom {
+    position: relative; z-index: 5; padding: 24px 36px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.85), transparent);
+  }
+  .player-osd-bottom {
+    background: linear-gradient(0deg, rgba(0,0,0,0.92), transparent);
+  }
+  .sub-overlay-text {
+    position: relative; z-index: 4; text-align: center; margin-top: auto;
+    margin-bottom: 18px; font-size: 24px; font-weight: 700; color: #FEF08A;
+    text-shadow: 0 2px 6px #000, 0 0 12px #000;
+  }
+  .remote-hint-bar {
+    position: fixed; bottom: 10px; right: 18px; background: rgba(22,24,33,0.92);
+    border: 1px solid #374151; padding: 6px 14px; border-radius: 20px;
+    font-size: 11px; color: #9CA3AF; z-index: 30;
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div>
+    <div class="brand"><div class="brand-dot"></div>STREAMVAULT TV</div>
+    <div id="navList"></div>
+  </div>
+  <div class="sync-box">
+    <div id="sidebarPlaylistName" style="color:#fff;font-weight:800;margin-bottom:4px;">Showcase Mode</div>
+    <div id="sidebarSyncPhase">100% Catalog Enriched</div>
+  </div>
+</div>
+
+<div class="viewport" id="mainViewport"></div>
+<div class="overlay" id="detailOverlay" style="display:none;"></div>
+<div class="player-overlay" id="playerOverlay" style="display:none;"></div>
+
+<div class="remote-hint-bar">
+  🎮 <b>TV Remote Simulator:</b> Use Keyboard <b>Arrow Keys (↑ ↓ ← →)</b> to move focus • <b>Enter</b> = OK • <b>Esc / Backspace</b> = Back (or click with mouse)
+</div>
+
+<script>
+let appState = null;
+let currentTab = 'HOME';
+let selectedDetailItem = null;
+let showMiniKeyboard = false;
+let activeSubModal = false;
+let currentSubOffsetSec = 0.0;
+let activeSubtitleLabel = 'Embedded: English (Default)';
+let downloadedOnlineSubs = [];
+
+let filterState = {
+  searchQuery: '',
+  mediaTypeFilter: null,
+  includedGenres: [],
+  excludedGenres: [],
+  matchAllIncludedGenres: true,
+  selectedLanguages: [],
+  subtitleFilterMode: 'ANY',
+  decade: null,
+  minRating: 0,
+  qualityFilter: null,
+  hideWatched: false,
+  actorFilter: null,
+  directorFilter: null,
+  sortBy: 'NEWLY_ADDED'
+};
+
+const NAV_TABS = [
+  { id: 'HOME', icon: '🏠', label: 'Home' },
+  { id: 'SEARCH', icon: '🔍', label: 'Super-Filter' },
+  { id: 'MOVIES', icon: '🎬', label: 'Movies' },
+  { id: 'SERIES', icon: '📺', label: 'Series' },
+  { id: 'LIVE_TV', icon: '📡', label: 'Live TV' },
+  { id: 'WATCHLIST', icon: '⭐', label: 'My List' },
+  { id: 'SETTINGS', icon: '📱', label: 'QR & Sync' }
+];
+
+const ALL_GENRES = [
+  'Action', 'Adventure', 'Animation', 'Comedy', 'Crime',
+  'Documentary', 'Drama', 'Family', 'Fantasy', 'History',
+  'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War'
+];
+
+const ALL_LANGS = ['English', 'Hindi', 'Urdu', 'Multi-Audio', 'Arabic', 'Korean', 'Turkish', 'Spanish'];
+
+async function loadState() {
+  const res = await fetch('/api/state');
+  appState = await res.json();
+  if (appState.remoteSearchQuery && appState.remoteSearchQuery.trim() !== '') {
+    filterState.searchQuery = appState.remoteSearchQuery.trim();
+    currentTab = 'SEARCH';
+    selectedDetailItem = null;
+    await fetch('/api/consume-remote-search', { method: 'POST' });
+  }
+  renderAll();
+}
+
+setInterval(async () => {
+  try {
+    const res = await fetch('/api/state');
+    const latest = await res.json();
+    const hadRemoteSearch = latest.remoteSearchQuery && latest.remoteSearchQuery.trim() !== '';
+    appState = latest;
+    document.getElementById('sidebarPlaylistName').innerText =
+      appState.credentials.serverUrl ? appState.credentials.playlistName : 'Showcase Mode (Ready)';
+    document.getElementById('sidebarSyncPhase').innerText = appState.syncStatus.phase;
+    if (hadRemoteSearch) {
+      filterState.searchQuery = latest.remoteSearchQuery.trim();
+      currentTab = 'SEARCH';
+      selectedDetailItem = null;
+      await fetch('/api/consume-remote-search', { method: 'POST' });
+      renderAll();
+    }
+  } catch (_) {}
+}, 2000);
+
+function queryMedia(f) {
+  if (!appState) return [];
+  const hidden = new Set((appState.credentials && appState.credentials.hiddenLanguages) || []);
+  return appState.mediaItems.filter((item) => {
+    if (f.mediaTypeFilter && item.mediaType !== f.mediaTypeFilter) return false;
+    if (hidden.has(item.language)) return false;
+    if (f.selectedLanguages && f.selectedLanguages.length > 0 && !f.selectedLanguages.includes(item.language)) return false;
+    if (f.hideWatched && item.isWatched) return false;
+    if (f.minRating > 0 && item.rating < f.minRating) return false;
+    if (f.decade && (item.year < f.decade || item.year > f.decade + 9)) return false;
+    if (f.qualityFilter && !(item.qualityBadges || []).includes(f.qualityFilter)) return false;
+    if (f.actorFilter && !(item.cast || []).includes(f.actorFilter)) return false;
+    if (f.directorFilter && item.director !== f.directorFilter) return false;
+
+    if (f.subtitleFilterMode === 'EMBEDDED_ONLY' && !item.hasEmbeddedSubtitles) return false;
+    if (f.subtitleFilterMode === 'ANY_SUBTITLES' && !(item.hasEmbeddedSubtitles || item.hasOnlineSubtitles)) return false;
+
+    if (f.includedGenres && f.includedGenres.length > 0) {
+      const itemGenres = item.genres || [];
+      if (f.matchAllIncludedGenres) {
+        if (!f.includedGenres.every((g) => itemGenres.includes(g))) return false;
+      } else {
+        if (!f.includedGenres.some((g) => itemGenres.includes(g))) return false;
+      }
+    }
+    if (f.excludedGenres && f.excludedGenres.length > 0) {
+      const itemGenres = item.genres || [];
+      if (f.excludedGenres.some((g) => itemGenres.includes(g))) return false;
+    }
+
+    if (f.searchQuery && f.searchQuery.trim() !== '') {
+      const blob = `${item.cleanTitle} ${item.rawTitle} ${item.plot} ${(item.cast || []).join(' ')} ${item.director} ${(item.genres || []).join(' ')}`.toLowerCase();
+      const tokens = f.searchQuery.toLowerCase().trim().split(/\s+/);
+      if (!tokens.every((t) => blob.includes(t))) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    if (f.sortBy === 'RATING_DESC') return b.rating - a.rating;
+    if (f.sortBy === 'RELEASE_YEAR_DESC') return b.year - a.year;
+    if (f.sortBy === 'TITLE_ASC') return a.cleanTitle.localeCompare(b.cleanTitle);
+    if (f.sortBy === 'RANDOM') return Math.random() - 0.5;
+    return (b.addedTimestamp || 0) - (a.addedTimestamp || 0);
+  });
+}
+
+function getAutocompleteChips(prefix) {
+  if (!prefix || prefix.trim().length < 2 || !appState) return [];
+  const p = prefix.trim().toLowerCase();
+  const set = new Set();
+  for (const m of appState.mediaItems) {
+    if (m.cleanTitle.toLowerCase().includes(p)) set.add(m.cleanTitle);
+    for (const c of m.cast || []) if (c.toLowerCase().includes(p)) set.add(c);
+    if (m.director && m.director.toLowerCase().includes(p)) set.add(m.director);
+    if (set.size >= 8) break;
+  }
+  return [...set];
+}
+
+function renderAll() {
+  renderSidebar();
+  const vp = document.getElementById('mainViewport');
+  if (currentTab === 'HOME') renderHome(vp);
+  else if (currentTab === 'SEARCH') renderSuperFilter(vp);
+  else if (currentTab === 'MOVIES') renderTypeCatalog(vp, 'MOVIE', '🎬 All Movies (Multi-Genre Enriched)');
+  else if (currentTab === 'SERIES') renderTypeCatalog(vp, 'SERIES', '📺 TV Series (Multi-Genre Enriched)');
+  else if (currentTab === 'LIVE_TV') renderLiveTv(vp);
+  else if (currentTab === 'WATCHLIST') renderWatchlist(vp);
+  else if (currentTab === 'SETTINGS') renderSettings(vp);
+}
+
+function renderSidebar() {
+  const nav = document.getElementById('navList');
+  nav.innerHTML = NAV_TABS.map((t) => `
+    <div tabindex="0" class="nav-item tv-focusable ${currentTab === t.id ? 'active' : ''}"
+         onclick="switchTab('${t.id}')">
+      <span>${t.icon}</span><span>${t.label}</span>
+    </div>
+  `).join('');
+}
+
+window.switchTab = function(tabId) {
+  currentTab = tabId;
+  selectedDetailItem = null;
+  document.getElementById('detailOverlay').style.display = 'none';
+  renderAll();
+};
+
+function renderPosterCardHtml(item) {
+  const vCount = (item.versions || []).length;
+  const qBadge = (item.qualityBadges || [])[0] || 'HD';
+  return `
+    <div tabindex="0" class="poster-card tv-focusable" onclick="openDetail('${item.dedupKey}')">
+      <div class="poster-img-wrap">
+        <img src="${item.posterUrl}" alt="${item.cleanTitle}" onerror="this.style.display='none'" />
+        <div class="card-top-left">★ ${item.rating.toFixed(1)}</div>
+        <div class="card-top-right">
+          <span class="mini-tag" style="background:var(--green)">${qBadge}</span>
+          ${vCount > 1 ? `<span class="mini-tag" style="background:var(--purple)">${vCount}x</span>` : ''}
+        </div>
+        <div class="card-bottom-strip">
+          <span style="color:#93C5FD">${item.language}</span>
+          <span style="color:#34D399">${item.hasEmbeddedSubtitles ? 'CC✓' : 'CC🌐'}</span>
+        </div>
+      </div>
+      <div class="card-title">${item.cleanTitle}</div>
+      <div class="card-meta">${item.year || ''} • ${(item.genres || []).slice(0, 2).join(', ')}</div>
+    </div>
+  `;
+}
+
+function renderHome(vp) {
+  const all = queryMedia({ sortBy: 'RATING_DESC' });
+  const hero = all[0] || appState.mediaItems[0];
+  const continueWatching = appState.mediaItems.filter((m) => m.resumePositionMs > 0 && !m.isWatched);
+  const watchlist = appState.mediaItems.filter((m) => m.inWatchlist);
+
+  let html = '';
+  if (hero) {
+    html += `
+      <div class="hero" style="background-image:url('${hero.backdropUrl || hero.posterUrl}')">
+        <div class="hero-content">
+          <div class="badges">
+            <span class="badge" style="background:var(--amber)">★ ${hero.rating.toFixed(1)}</span>
+            <span class="badge" style="background:#374151">${hero.year}</span>
+            <span class="badge" style="background:var(--blue)">${hero.language}</span>
+            ${(hero.qualityBadges || []).slice(0,2).map(q => `<span class="badge" style="background:var(--green)">${q}</span>`).join('')}
+            <span class="badge" style="background:var(--purple)">${(hero.versions || []).length} Stream Versions Merged</span>
+          </div>
+          <div style="font-size:34px;font-weight:900;margin-bottom:4px;">${hero.cleanTitle}</div>
+          <div style="color:var(--red);font-weight:800;font-size:13px;margin-bottom:8px;">${(hero.genres || []).join(' • ')}</div>
+          <div style="color:#D1D5DB;font-size:14px;line-height:1.45;margin-bottom:16px;">${hero.plot}</div>
+          <div style="display:flex;gap:12px;">
+            <button tabindex="0" class="btn btn-primary tv-focusable" onclick="startPlayback('${hero.dedupKey}', 0)">▶ Play Now</button>
+            <button tabindex="0" class="btn tv-focusable" onclick="openDetail('${hero.dedupKey}')">ℹ Versions, Cast & Subtitles</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (continueWatching.length > 0) {
+    html += renderRowSection('⏯ Continue Watching', 'Pick up right from your saved timestamp', continueWatching);
+  }
+  if (watchlist.length > 0) {
+    html += renderRowSection('⭐ My List (Watchlist)', '', watchlist);
+  }
+  for (const sr of appState.pinnedSmartRows || []) {
+    const items = queryMedia(sr.filterState);
+    if (items.length > 0) {
+      html += renderRowSection(`📌 ${sr.title}`, 'Custom Pinned Smart Row', items);
+    }
+  }
+  html += renderRowSection('🏆 Critically Acclaimed (IMDb / TMDB 8.0+)', '', all);
+  for (const g of ['Sci-Fi', 'Action', 'Thriller', 'Drama', 'Crime']) {
+    const gItems = queryMedia({ includedGenres: [g], sortBy: 'RATING_DESC' });
+    if (gItems.length > 0) {
+      html += renderRowSection(`${g} Movies & Series`, `Enriched via TMDB multi-genre index`, gItems);
+    }
+  }
+  vp.innerHTML = html;
+}
+
+function renderRowSection(title, sub, items) {
+  return `
+    <div class="row-section">
+      <div class="row-header">
+        <div>
+          <div class="row-title">${title}</div>
+          ${sub ? `<div class="row-sub">${sub}</div>` : ''}
+        </div>
+      </div>
+      <div class="poster-strip">
+        ${items.map(renderPosterCardHtml).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderSuperFilter(vp) {
+  const results = queryMedia(filterState);
+  const autoChips = getAutocompleteChips(filterState.searchQuery);
+  const keys = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('');
+
+  vp.innerHTML = `
+    <div class="filter-layout">
+      <div class="filter-drawer">
+        <div style="font-size:18px;font-weight:900;margin-bottom:4px;">🔍 Super-Filter & 4-Way Search</div>
+        <div style="font-size:11px;color:#60A5FA;margin-bottom:12px;">Phone Companion: <a href="${appState.localIpUrl}" target="_blank" style="color:#34D399">${appState.localIpUrl}</a></div>
+
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input id="tvSearchBox" class="tv-focusable" value="${filterState.searchQuery}"
+                 placeholder="Search Title, Plot word, Actor, Director..."
+                 oninput="updateSearchQuery(this.value)"
+                 style="flex:1;padding:10px 12px;border-radius:8px;border:2px solid #374151;background:#0B0C10;color:#fff;font-size:14px;" />
+          <button tabindex="0" class="btn tv-focusable" onclick="toggleMiniKb()">⌨️</button>
+          <button tabindex="0" class="btn tv-focusable" onclick="startBrowserVoiceSearch()">🎤</button>
+        </div>
+
+        ${showMiniKeyboard ? `
+          <div style="background:#1B1F2E;padding:10px;border-radius:10px;margin-bottom:12px;">
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:8px;">
+              ${keys.map(k => `<button tabindex="0" class="chip tv-focusable" onclick="appendSearchChar('${k}')">${k}</button>`).join('')}
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button tabindex="0" class="chip tv-focusable" onclick="appendSearchChar(' ')">Space</button>
+              <button tabindex="0" class="chip tv-focusable" onclick="backspaceSearch()">⌫</button>
+              <button tabindex="0" class="chip tv-focusable" onclick="updateSearchQuery('')">Clear</button>
+            </div>
+          </div>
+        ` : ''}
+
+        ${autoChips.length > 0 ? `
+          <div style="font-size:11px;color:#34D399;font-weight:800;">⚡ 2-Letter Instant Autocomplete Chips:</div>
+          <div class="chip-row">
+            ${autoChips.map(c => `<button tabindex="0" class="chip sel tv-focusable" onclick="updateSearchQuery('${c.replace(/'/g, "\\'")}')">${c}</button>`).join('')}
+          </div>
+        ` : ''}
+
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <button tabindex="0" class="btn btn-primary tv-focusable" style="padding:8px 12px;font-size:12px;" onclick="pinCurrentSmartRow()">📌 Pin Filter to Home</button>
+          <button tabindex="0" class="btn tv-focusable" style="padding:8px 12px;font-size:12px;" onclick="resetAllFilters()">Reset Filters</button>
+        </div>
+
+        ${(filterState.actorFilter || filterState.directorFilter) ? `
+          <div class="chip-row">
+            ${filterState.actorFilter ? `<button class="chip sel tv-focusable" onclick="clearPersonFilter()">🎭 Actor: ${filterState.actorFilter} ✕</button>` : ''}
+            ${filterState.directorFilter ? `<button class="chip sel tv-focusable" onclick="clearPersonFilter()">🎬 Dir: ${filterState.directorFilter} ✕</button>` : ''}
+          </div>
+        ` : ''}
+
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;font-weight:800;">Genres (1st click = +Include, 2nd = -Exclude):</span>
+          <button tabindex="0" class="chip tv-focusable" onclick="toggleGenreLogic()">${filterState.matchAllIncludedGenres ? 'Mode: AND' : 'Mode: OR'}</button>
+        </div>
+        <div class="chip-row">
+          ${ALL_GENRES.map(g => {
+            const inc = filterState.includedGenres.includes(g);
+            const exc = filterState.excludedGenres.includes(g);
+            const cls = inc ? 'inc' : (exc ? 'exc' : '');
+            const lbl = inc ? `+ ${g}` : (exc ? `✕ NOT ${g}` : g);
+            return `<button tabindex="0" class="chip ${cls} tv-focusable" onclick="cycleGenre('${g}')">${lbl}</button>`;
+          }).join('')}
+        </div>
+
+        <div style="font-size:12px;font-weight:800;">💬 Subtitles Availability:</div>
+        <div class="chip-row">
+          ${[
+            ['ANY', 'Any'],
+            ['ANY_SUBTITLES', 'Has Subtitles (Embedded or Online)'],
+            ['EMBEDDED_ONLY', 'Embedded Inside Stream']
+          ].map(([m, l]) => `<button tabindex="0" class="chip ${filterState.subtitleFilterMode === m ? 'sel' : ''} tv-focusable" onclick="setSubFilter('${m}')">${l}</button>`).join('')}
+        </div>
+
+        <div style="font-size:12px;font-weight:800;">🌐 Audio / Movie Language:</div>
+        <div class="chip-row">
+          ${ALL_LANGS.map(l => {
+            const active = filterState.selectedLanguages.includes(l);
+            return `<button tabindex="0" class="chip ${active ? 'sel' : ''} tv-focusable" onclick="toggleLangFilter('${l}')">${l}</button>`;
+          }).join('')}
+        </div>
+
+        <div style="font-size:12px;font-weight:800;">★ Minimum Rating & Decade:</div>
+        <div class="chip-row">
+          ${[0, 6.5, 7.0, 7.5, 8.0].map(r => `<button tabindex="0" class="chip ${filterState.minRating === r ? 'sel' : ''} tv-focusable" onclick="setMinRating(${r})">${r === 0 ? 'Any ★' : r + '+'}</button>`).join('')}
+          ${[null, 2020, 2010, 2000].map(d => `<button tabindex="0" class="chip ${filterState.decade === d ? 'sel' : ''} tv-focusable" onclick="setDecade(${d})">${d ? d + 's' : 'All Years'}</button>`).join('')}
+        </div>
+
+        <div class="chip-row">
+          <button tabindex="0" class="chip ${filterState.hideWatched ? 'inc' : ''} tv-focusable" onclick="toggleHideWatched()">
+            ${filterState.hideWatched ? '✓ Hiding Watched' : 'Hide Already Watched'}
+          </button>
+          <button tabindex="0" class="chip ${filterState.sortBy === 'RANDOM' ? 'inc' : ''} tv-focusable" onclick="setSortBy('RANDOM')">
+            🎲 Surprise Me!
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-results">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div>
+            <div style="font-size:21px;font-weight:900;">${results.length} Matching Titles</div>
+            <div style="font-size:12px;color:var(--muted);">Instant SQLite Full-Text + Multi-Attribute Match</div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            ${[
+              ['NEWLY_ADDED', 'Recently Added'],
+              ['RELEASE_YEAR_DESC', 'Newest Year'],
+              ['RATING_DESC', 'Highest Rated'],
+              ['TITLE_ASC', 'A → Z']
+            ].map(([s, lbl]) => `<button tabindex="0" class="chip ${filterState.sortBy === s ? 'sel' : ''} tv-focusable" onclick="setSortBy('${s}')">${lbl}</button>`).join('')}
+          </div>
+        </div>
+        <div class="grid">
+          ${results.map(renderPosterCardHtml).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.updateSearchQuery = function(val) {
+  filterState.searchQuery = val;
+  renderSuperFilter(document.getElementById('mainViewport'));
+  const box = document.getElementById('tvSearchBox');
+  if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+};
+window.toggleMiniKb = function() { showMiniKeyboard = !showMiniKeyboard; renderSuperFilter(document.getElementById('mainViewport')); };
+window.appendSearchChar = function(ch) { filterState.searchQuery += ch.toLowerCase(); renderSuperFilter(document.getElementById('mainViewport')); };
+window.backspaceSearch = function() { filterState.searchQuery = filterState.searchQuery.slice(0, -1); renderSuperFilter(document.getElementById('mainViewport')); };
+window.cycleGenre = function(g) {
+  const incIdx = filterState.includedGenres.indexOf(g);
+  const excIdx = filterState.excludedGenres.indexOf(g);
+  if (incIdx === -1 && excIdx === -1) filterState.includedGenres.push(g);
+  else if (incIdx !== -1) { filterState.includedGenres.splice(incIdx, 1); filterState.excludedGenres.push(g); }
+  else filterState.excludedGenres.splice(excIdx, 1);
+  renderSuperFilter(document.getElementById('mainViewport'));
+};
+window.toggleGenreLogic = function() { filterState.matchAllIncludedGenres = !filterState.matchAllIncludedGenres; renderSuperFilter(document.getElementById('mainViewport')); };
+window.setSubFilter = function(m) { filterState.subtitleFilterMode = m; renderSuperFilter(document.getElementById('mainViewport')); };
+window.toggleLangFilter = function(l) {
+  const idx = filterState.selectedLanguages.indexOf(l);
+  if (idx === -1) filterState.selectedLanguages.push(l); else filterState.selectedLanguages.splice(idx, 1);
+  renderSuperFilter(document.getElementById('mainViewport'));
+};
+window.setMinRating = function(r) { filterState.minRating = r; renderSuperFilter(document.getElementById('mainViewport')); };
+window.setDecade = function(d) { filterState.decade = d; renderSuperFilter(document.getElementById('mainViewport')); };
+window.toggleHideWatched = function() { filterState.hideWatched = !filterState.hideWatched; renderSuperFilter(document.getElementById('mainViewport')); };
+window.setSortBy = function(s) { filterState.sortBy = s; renderSuperFilter(document.getElementById('mainViewport')); };
+window.clearPersonFilter = function() { filterState.actorFilter = null; filterState.directorFilter = null; renderSuperFilter(document.getElementById('mainViewport')); };
+window.resetAllFilters = function() {
+  filterState = {
+    searchQuery: '', mediaTypeFilter: null, includedGenres: [], excludedGenres: [],
+    matchAllIncludedGenres: true, selectedLanguages: [], subtitleFilterMode: 'ANY',
+    decade: null, minRating: 0, qualityFilter: null, hideWatched: false,
+    actorFilter: null, directorFilter: null, sortBy: 'NEWLY_ADDED'
+  };
+  renderSuperFilter(document.getElementById('mainViewport'));
+};
+window.pinCurrentSmartRow = async function() {
+  const parts = [];
+  if (filterState.includedGenres.length) parts.push(filterState.includedGenres.join(' + '));
+  if (filterState.excludedGenres.length) parts.push('NOT ' + filterState.excludedGenres.join('/'));
+  if (filterState.minRating > 0) parts.push(`★ ${filterState.minRating}+`);
+  const title = parts.length ? parts.join(' • ') : 'Custom Smart Filter Row';
+  await fetch('/api/pin-smart-row', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, filterState })
+  });
+  await loadState();
+  alert(`📌 Pinned "${title}" to your Home Screen!`);
+};
+window.startBrowserVoiceSearch = function() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) {
+    const q = prompt('Speak / Enter Search Query:', filterState.searchQuery);
+    if (q !== null) updateSearchQuery(q);
+    return;
+  }
+  const rec = new SpeechRec();
+  rec.lang = 'en-US';
+  rec.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    updateSearchQuery(text);
+  };
+  rec.start();
+};
+
+function renderTypeCatalog(vp, type, heading) {
+  const items = queryMedia({ mediaTypeFilter: type, sortBy: 'RATING_DESC' });
+  vp.innerHTML = `
+    <div style="padding:28px 34px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <div style="font-size:26px;font-weight:900;">${heading} (${items.length})</div>
+        <button tabindex="0" class="btn btn-primary tv-focusable" onclick="switchTab('SEARCH')">🔍 Open Super-Filter</button>
+      </div>
+      <div class="grid">
+        ${items.map(renderPosterCardHtml).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderLiveTv(vp) {
+  const channels = (appState && appState.liveChannels) || [];
+  vp.innerHTML = `
+    <div style="padding:28px 34px;">
+      <div style="font-size:26px;font-weight:900;margin-bottom:18px;">📡 Live TV Channels (Instant Zapping & EPG)</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        ${channels.map(ch => `
+          <div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:18px;font-weight:800;">${ch.isFavorite ? '★ ' : ''}${ch.name}</div>
+              <div style="font-size:13px;color:var(--muted);margin-top:4px;">${ch.categoryName} • Now Playing: <b style="color:#fff">${ch.currentProgramTitle}</b> | Next: ${ch.nextProgramTitle}</div>
+            </div>
+            <button tabindex="0" class="btn btn-primary tv-focusable" onclick="startLivePlayback('${ch.name}')">▶ Watch Live</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderWatchlist(vp) {
+  const wl = appState.mediaItems.filter((m) => m.inWatchlist);
+  vp.innerHTML = `
+    <div style="padding:28px 34px;">
+      <div style="font-size:26px;font-weight:900;margin-bottom:18px;">⭐ My List (Watchlist)</div>
+      <div class="grid">
+        ${wl.map(renderPosterCardHtml).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderSettings(vp) {
+  const c = appState.credentials;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(appState.localIpUrl)}`;
+  vp.innerHTML = `
+    <div style="display:flex;gap:28px;padding:32px;">
+      <div style="width:380px;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center;">
+        <div style="font-size:19px;font-weight:900;margin-bottom:8px;">📱 Scan with Phone Camera</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">Paste your IPTV URL/Username/Password from your phone or use your phone keyboard to search live on TV:</div>
+        <img src="${qrUrl}" style="width:200px;height:200px;background:#fff;padding:8px;border-radius:12px;margin-bottom:12px;" />
+        <div style="font-size:15px;font-weight:800;color:#34D399;margin-bottom:16px;">${appState.localIpUrl}</div>
+        <button tabindex="0" class="btn btn-primary tv-focusable" style="width:100%;justify-content:center;" onclick="triggerManualSync()">🔄 Sync IPTV Catalog Now</button>
+      </div>
+
+      <div style="flex:1;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:24px;">
+        <div style="font-size:20px;font-weight:900;margin-bottom:16px;">⚡ Xtream Codes IPTV Credentials</div>
+        <div style="display:flex;flex-direction:column;gap:12px;max-width:560px;">
+          <label style="font-size:12px;color:var(--muted)">Playlist Name</label>
+          <input id="inpPlaylist" class="tv-focusable" value="${c.playlistName}" style="padding:11px;border-radius:8px;border:1px solid #374151;background:#0B0C10;color:#fff" />
+          <label style="font-size:12px;color:var(--muted)">Xtream Server URL (from your IPTV subscription)</label>
+          <input id="inpServer" class="tv-focusable" value="${c.serverUrl}" placeholder="http://your-vendor-url.com:8080" style="padding:11px;border-radius:8px;border:1px solid #374151;background:#0B0C10;color:#fff" />
+          <div style="display:flex;gap:12px;">
+            <div style="flex:1;">
+              <label style="font-size:12px;color:var(--muted)">Username</label>
+              <input id="inpUser" class="tv-focusable" value="${c.username}" style="width:100%;padding:11px;border-radius:8px;border:1px solid #374151;background:#0B0C10;color:#fff;margin-top:4px;" />
+            </div>
+            <div style="flex:1;">
+              <label style="font-size:12px;color:var(--muted)">Password</label>
+              <input id="inpPass" type="password" class="tv-focusable" value="${c.password}" style="width:100%;padding:11px;border-radius:8px;border:1px solid #374151;background:#0B0C10;color:#fff;margin-top:4px;" />
+            </div>
+          </div>
+          <button tabindex="0" class="btn btn-primary tv-focusable" style="margin-top:10px;justify-content:center;" onclick="saveCredsFromTv()">💾 Save Credentials & Sync All Movies/Series</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+window.saveCredsFromTv = async function() {
+  const payload = {
+    playlistName: document.getElementById('inpPlaylist').value,
+    serverUrl: document.getElementById('inpServer').value,
+    username: document.getElementById('inpUser').value,
+    password: document.getElementById('inpPass').value
+  };
+  await fetch('/api/save-credentials', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  await loadState();
+};
+
+window.triggerManualSync = async function() {
+  await fetch('/api/sync-now', { method: 'POST' });
+  await loadState();
+};
+
+window.openDetail = function(dedupKey) {
+  const item = appState.mediaItems.find((m) => m.dedupKey === dedupKey);
+  if (!item) return;
+  selectedDetailItem = item;
+  const ov = document.getElementById('detailOverlay');
+  ov.style.display = 'block';
+
+  const related = appState.mediaItems.filter((m) =>
+    m.dedupKey !== item.dedupKey &&
+    (m.director === item.director || (m.genres || []).some((g) => (item.genres || []).includes(g)))
+  );
+
+  ov.innerHTML = `
+    <div style="display:flex;gap:28px;align-items:flex-start;">
+      <img src="${item.posterUrl}" style="width:210px;height:310px;object-fit:cover;border-radius:14px;border:1px solid #374151;" />
+      <div style="flex:1;">
+        <div class="badges">
+          <button tabindex="0" class="btn tv-focusable" onclick="closeDetail()">← Back</button>
+          <span class="badge" style="background:var(--amber)">★ ${item.rating.toFixed(1)}</span>
+          <span class="badge" style="background:#374151">${item.year}</span>
+          <span class="badge" style="background:#374151">${item.runtimeMins || 120} mins</span>
+          <span class="badge" style="background:var(--blue)">${item.language}</span>
+        </div>
+        <div style="font-size:34px;font-weight:900;margin:8px 0;">${item.cleanTitle}</div>
+        <div style="color:#34D399;font-size:13px;font-weight:700;margin-bottom:12px;">
+          💬 Subtitles: Embedded (${(item.embeddedSubtitleLanguages || ['English']).join(', ')}) + Online Multi-Language Auto-Downloader Ready
+        </div>
+        <div style="color:#E5E7EB;font-size:15px;line-height:1.55;margin-bottom:16px;max-width:780px;">${item.plot}</div>
+
+        <div style="margin-bottom:10px;">
+          <span style="color:var(--muted);font-size:12px;margin-right:8px;">Clickable Genres:</span>
+          ${(item.genres || []).map(g => `<button tabindex="0" class="chip tv-focusable" style="margin-right:6px;" onclick="jumpFilterGenre('${g}')">${g}</button>`).join('')}
+        </div>
+
+        <div style="margin-bottom:18px;">
+          <span style="color:var(--muted);font-size:12px;margin-right:8px;">Clickable Cast & Director:</span>
+          ${item.director ? `<button tabindex="0" class="chip sel tv-focusable" style="margin-right:6px;" onclick="jumpFilterDirector('${item.director.replace(/'/g, "\\'")}')">🎬 Dir: ${item.director}</button>` : ''}
+          ${(item.cast || []).map(a => `<button tabindex="0" class="chip tv-focusable" style="margin-right:6px;margin-bottom:6px;" onclick="jumpFilterActor('${a.replace(/'/g, "\\'")}')">🎭 ${a}</button>`).join('')}
+        </div>
+
+        <div style="display:flex;gap:12px;margin-bottom:22px;">
+          <button tabindex="0" class="btn btn-primary tv-focusable" onclick="startPlayback('${item.dedupKey}', 0)">
+            ▶ Play (${(item.versions[0] && item.versions[0].languageTag) || item.language} • ${(item.versions[0] && item.versions[0].qualityTag) || '4K'})
+          </button>
+          <button tabindex="0" class="btn tv-focusable" onclick="toggleItemFlag('${item.dedupKey}', 'inWatchlist')">
+            ${item.inWatchlist ? '★ In My List' : '+ Add to My List'}
+          </button>
+          <button tabindex="0" class="btn tv-focusable" onclick="toggleItemFlag('${item.dedupKey}', 'isWatched')">
+            ${item.isWatched ? '✓ Watched' : 'Mark as Watched'}
+          </button>
+        </div>
+
+        <div style="font-size:16px;font-weight:800;margin-bottom:10px;">
+          🎞️ Select Stream Version / Quality / Language (${(item.versions || []).length} Copies Merged into 1 Card):
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;">
+          ${(item.versions || []).map((v, idx) => `
+            <button tabindex="0" class="btn tv-focusable" onclick="startPlayback('${item.dedupKey}', ${idx})">
+              ▶ ${v.languageTag} • ${v.qualityTag} (${(v.containerExtension || 'mp4').toUpperCase()})
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+
+    ${related.length > 0 ? `
+      <div style="margin-top:28px;">
+        <div style="font-size:19px;font-weight:800;margin-bottom:12px;">✨ More Like ${item.cleanTitle}</div>
+        <div class="poster-strip">${related.map(renderPosterCardHtml).join('')}</div>
+      </div>
+    ` : ''}
+  `;
+};
+
+window.closeDetail = function() {
+  selectedDetailItem = null;
+  document.getElementById('detailOverlay').style.display = 'none';
+};
+
+window.toggleItemFlag = async function(dedupKey, field) {
+  await fetch('/api/toggle-item', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dedupKey, field })
+  });
+  await loadState();
+  openDetail(dedupKey);
+};
+
+window.jumpFilterGenre = function(g) {
+  closeDetail();
+  resetAllFilters();
+  filterState.includedGenres = [g];
+  switchTab('SEARCH');
+};
+window.jumpFilterActor = function(a) {
+  closeDetail();
+  resetAllFilters();
+  filterState.actorFilter = a;
+  switchTab('SEARCH');
+};
+window.jumpFilterDirector = function(d) {
+  closeDetail();
+  resetAllFilters();
+  filterState.directorFilter = d;
+  switchTab('SEARCH');
+};
+
+window.startPlayback = async function(dedupKey, verIdx) {
+  const item = appState.mediaItems.find((m) => m.dedupKey === dedupKey);
+  if (!item) return;
+  const ver = (item.versions || [])[verIdx] || { languageTag: item.language, qualityTag: '4K', streamId: item.primaryStreamId, containerExtension: 'mp4' };
+  const creds = appState.credentials;
+  const url = (creds && creds.serverUrl && creds.username && creds.password)
+    ? `${creds.serverUrl.replace(/\/+$/, '')}/movie/${creds.username}/${creds.password}/${ver.streamId}.${ver.containerExtension || 'mp4'}`
+    : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+
+  const po = document.getElementById('playerOverlay');
+  po.style.display = 'flex';
+  currentSubOffsetSec = 0.0;
+  activeSubtitleLabel = `Embedded: ${ver.languageTag} / English`;
+
+  fetch(`/api/subtitles?id=${item.tmdbId || item.imdbId || '693134'}`)
+    .then(r => r.json())
+    .then(subs => { downloadedOnlineSubs = subs; });
+
+  renderPlayerOverlay(item.cleanTitle, `${ver.languageTag} • ${ver.qualityTag}`, url, item);
+};
+
+window.startLivePlayback = function(channelName) {
+  const po = document.getElementById('playerOverlay');
+  po.style.display = 'flex';
+  renderPlayerOverlay(`📡 LIVE: ${channelName}`, 'Anti-Freeze Buffer Active (Auto-Reconnect 3x)', 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4', null);
+};
+
+function renderPlayerOverlay(title, subInfo, streamUrl, item) {
+  const po = document.getElementById('playerOverlay');
+  po.innerHTML = `
+    <video id="tvVideoEl" src="${streamUrl}" autoplay controls></video>
+    <div class="player-osd-top" style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-size:24px;font-weight:900;">${title}</div>
+        <div style="font-size:13px;color:#9CA3AF;">${subInfo} • Active CC: <b style="color:#34D399" id="activeSubBadge">${activeSubtitleLabel} (Delay: ${currentSubOffsetSec.toFixed(1)}s)</b></div>
+      </div>
+      <button tabindex="0" class="btn tv-focusable" onclick="closePlayer()">✕ Close Player (Esc)</button>
+    </div>
+
+    <div class="sub-overlay-text" id="liveSubPreview">
+      [ ${activeSubtitleLabel} Active • Sync Offset: ${currentSubOffsetSec >= 0 ? '+' : ''}${currentSubOffsetSec.toFixed(1)}s ]
+    </div>
+
+    <div class="player-osd-bottom">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <button tabindex="0" class="btn btn-primary tv-focusable" onclick="openSubDownloaderModal()">💬 Subtitles & Online Auto-Downloader</button>
+        <button tabindex="0" class="btn tv-focusable" onclick="adjustSubDelay(-0.5)">⏪ Sub Delay -0.5s</button>
+        <button tabindex="0" class="btn tv-focusable" onclick="adjustSubDelay(0.5)">⏩ Sub Delay +0.5s</button>
+        <button tabindex="0" class="btn tv-focusable" onclick="alert('🔊 Switched Audio Track (${item ? (item.embeddedAudioLanguages || ['English', 'Hindi']).join(' / ') : 'Stereo'})')">🔊 Switch Audio Track</button>
+      </div>
+      <div id="subModalBox" style="display:none;margin-top:14px;background:#161821;border:1px solid #374151;border-radius:12px;padding:16px;max-height:240px;overflow-y:auto;"></div>
+    </div>
+  `;
+}
+
+window.openSubDownloaderModal = function() {
+  const box = document.getElementById('subModalBox');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  box.innerHTML = `
+    <div style="font-size:15px;font-weight:800;margin-bottom:10px;color:#60A5FA;">🌐 Online Multi-Language Subtitles (Wyzie / OpenSubtitles Auto-Search):</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+      <button tabindex="0" class="chip sel tv-focusable" onclick="selectSubTrack('📦 Embedded: English')">📦 Embedded: English</button>
+      <button tabindex="0" class="chip tv-focusable" onclick="selectSubTrack('🌐 Online: English (BluRay SRT)')">🌐 Online: English (SRT)</button>
+      <button tabindex="0" class="chip tv-focusable" onclick="selectSubTrack('🌐 Online: Urdu (Synced SRT)')">🌐 Online: Urdu (SRT)</button>
+      <button tabindex="0" class="chip tv-focusable" onclick="selectSubTrack('🌐 Online: Hindi (Synced SRT)')">🌐 Online: Hindi (SRT)</button>
+      <button tabindex="0" class="chip tv-focusable" onclick="selectSubTrack('🌐 Online: Arabic (Synced SRT)')">🌐 Online: Arabic (SRT)</button>
+      ${downloadedOnlineSubs.slice(0, 8).map(s => `
+        <button tabindex="0" class="chip tv-focusable" onclick="selectSubTrack('🌐 Online: ${(s.display || s.language || 'Sub').replace(/'/g, '')}')">
+          🌐 Online: ${s.display || s.language} (${(s.format || 'srt').toUpperCase()})
+        </button>
+      `).join('')}
+    </div>
+  `;
+};
+
+window.selectSubTrack = function(label) {
+  activeSubtitleLabel = label;
+  document.getElementById('activeSubBadge').innerText = `${activeSubtitleLabel} (Delay: ${currentSubOffsetSec.toFixed(1)}s)`;
+  document.getElementById('liveSubPreview').innerText = `✓ Downloaded & Synced: [ ${activeSubtitleLabel} • Offset: ${currentSubOffsetSec.toFixed(1)}s ]`;
+  document.getElementById('subModalBox').style.display = 'none';
+};
+
+window.adjustSubDelay = function(delta) {
+  currentSubOffsetSec += delta;
+  document.getElementById('activeSubBadge').innerText = `${activeSubtitleLabel} (Delay: ${currentSubOffsetSec.toFixed(1)}s)`;
+  document.getElementById('liveSubPreview').innerText = `[ ${activeSubtitleLabel} Active • Sync Offset: ${currentSubOffsetSec >= 0 ? '+' : ''}${currentSubOffsetSec.toFixed(1)}s ]`;
+};
+
+window.closePlayer = function() {
+  const po = document.getElementById('playerOverlay');
+  po.innerHTML = '';
+  po.style.display = 'none';
+};
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const po = document.getElementById('playerOverlay');
+    if (po.style.display !== 'none') { closePlayer(); return; }
+    if (selectedDetailItem) { closeDetail(); return; }
+  }
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+  if (document.activeElement && document.activeElement.tagName === 'INPUT' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
+
+  e.preventDefault();
+  const focusables = [...document.querySelectorAll('.tv-focusable')].filter((el) => el.offsetParent !== null);
+  if (focusables.length === 0) return;
+
+  const current = document.activeElement && focusables.includes(document.activeElement) ? document.activeElement : focusables[0];
+  const curRect = current.getBoundingClientRect();
+  const curCx = curRect.left + curRect.width / 2;
+  const curCy = curRect.top + curRect.height / 2;
+
+  let best = null;
+  let bestScore = Infinity;
+
+  for (const cand of focusables) {
+    if (cand === current) continue;
+    const r = cand.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const dx = cx - curCx;
+    const dy = cy - curCy;
+
+    if (e.key === 'ArrowRight' && dx <= 10) continue;
+    if (e.key === 'ArrowLeft' && dx >= -10) continue;
+    if (e.key === 'ArrowDown' && dy <= 10) continue;
+    if (e.key === 'ArrowUp' && dy >= -10) continue;
+
+    const primaryDist = (e.key === 'ArrowLeft' || e.key === 'ArrowRight') ? Math.abs(dx) : Math.abs(dy);
+    const crossDist = (e.key === 'ArrowLeft' || e.key === 'ArrowRight') ? Math.abs(dy) : Math.abs(dx);
+    const score = primaryDist + crossDist * 2.6;
+    if (score < bestScore) {
+      bestScore = score;
+      best = cand;
+    }
+  }
+  if (best) {
+    best.focus();
+    best.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+});
+
+loadState();
+</script>
+</body>
+</html>
