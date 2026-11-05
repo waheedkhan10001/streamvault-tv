@@ -1,0 +1,9 @@
+.toolchain/
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.keystore
+*.jks
+pc-runner/data/

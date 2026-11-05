@@ -1,0 +1,3 @@
+-keep class com.streamvault.tv.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
