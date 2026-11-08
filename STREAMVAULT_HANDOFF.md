@@ -224,16 +224,16 @@
 ---
 
 ## 5. Live TV Verification on TCL 55P635
+- **Latest GitHub Commit**: [`6efd7a1`](https://github.com/waheedkhan10001/streamvault-tv/commit/6efd7a1c7a9aebb0afcce31efcd76062da9d137a) on branch `main` (20 files, +9,799 insertions).
 - Built and signed release APK: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\StreamVault-TV.apk` (15.27 MB).
 - Installed live over Wi-Fi ADB to TCL 55P635 TV at `192.168.100.42:5555`.
 - Host PC companion running on `192.168.100.66:8765` over Wi-Fi SSID `EME-CORE-HAI`.
 - Live screenshot verification:
-  - `tv_movies_6col.png`: Verified 6-column cinematic grid displaying 12 complete posters across 2 full rows.
-  - `tv_search_hist.png`: Verified Search History popup displaying recent searches (`Heart of the Beast`, `Christopher Nolan`, `Action`, `Brad Pitt`) with soft keyboard active.
-  - `tv_profile.png`: Verified dedicated User Profiles & Cloud Sync screen with Who's Watching carousel, active profile settings, 6-digit TV pairing code (`SV-7482`), and live QR code.
-  - `tv_settings_actual.png`: Verified clean, dedicated Settings & System screen with IPTV credentials, HW+ ExoPlayer decoder stats, Parental PIN, and Clear History.
-  - `screen_home_verified.png`: Verified Home screen with hero banner and Continue Watching cards.
-  - `screen_version_pill_focus.png`: Verified Detail Modal with remote D-pad Down landing focus directly on `▶ ⭐ Clean HQ* (Clean HQ* • 995 MB)` version pill.
+  - `tv_movies_5col.png`: Verified 5-column cinematic grid displaying 10 complete posters ($5 \times 2$) with zero vertical clipping below the filter bar.
+  - `tv_profile_linked.png`: Verified dedicated User Profiles & Cloud Sync screen linked live to Cloudflare Account (`WKHAN.10001@GMAIL.COM`) with active code `SV-4FKQ`.
+  - `tv_settings_screen.png`: Verified clean, dedicated Settings & System screen with IPTV credentials, HW+ ExoPlayer decoder stats, Parental PIN, and Clear History.
+  - `tv_home_5col.png`: Verified Home screen with decoupled bottom Profile pill and Settings gear icon.
+  - `tv_search_hist.png`: Verified Search History popup displaying recent searches with TV remote soft keyboard active.
 
 ---
 
