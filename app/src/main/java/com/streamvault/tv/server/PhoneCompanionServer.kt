@@ -18,6 +18,13 @@ import java.net.Socket
 import java.net.URLDecoder
 import kotlin.concurrent.thread
 
+/**
+ * Lightweight embedded Wi-Fi HTTP Server running on port 8765 on the TCL TV.
+ * Enables:
+ * 1. Scanning a QR code on the TV to paste Xtream Server URL, Username, Password & TMDB Key from Phone/PC.
+ * 2. Typing search queries on the Phone's keyboard and beaming them live to the TV screen!
+ * 3. 1-Click Export / Import Backup of Watchlist, Watch Progress, and Pinned Smart Rows.
+ */
 class PhoneCompanionServer(
     private val prefs: PreferencesManager,
     private val db: StreamVaultDatabase,
@@ -197,26 +204,39 @@ class PhoneCompanionServer(
                 <h1>StreamVault TV</h1>
                 <div class="sub">Phone Keyboard Remote & Easy Credential Setup (TCL 55P635)</div>
                 $alertBanner
+
                 <div class="card">
                     <h2>📱 Instant Phone-to-TV Search</h2>
+                    <div class="sub">Type on your phone keyboard (or use phone voice dictation) to search Movies, Plot words, Actors, or Directors live on your TV screen!</div>
                     <input type="text" id="phoneSearchInput" placeholder="e.g. Christopher Nolan, Sci-Fi, Gladiator..." oninput="beamSearchLive(this.value)" />
                     <button class="secondary" onclick="beamSearchLive(document.getElementById('phoneSearchInput').value)">🔍 Show Results on TV Now</button>
                     <div id="searchStatus" style="font-size:12px;color:#34D399;margin-top:8px;"></div>
                 </div>
+
                 <div class="card">
                     <h2>⚡ IPTV Subscription Setup (Xtream Codes)</h2>
                     <form method="POST" action="/api/save-credentials">
                         <label>Playlist Name</label>
-                        <input type="text" name="playlistName" value="${creds.playlistName}" />
-                        <label>Server URL</label>
-                        <input type="text" name="serverUrl" value="${creds.serverUrl}" required />
+                        <input type="text" name="playlistName" value="${creds.playlistName}" placeholder="My IPTV" />
+                        <label>Server URL (from your IPTV vendor)</label>
+                        <input type="text" name="serverUrl" value="${creds.serverUrl}" placeholder="http://example-iptv.com:8080" required />
                         <label>Username</label>
-                        <input type="text" name="username" value="${creds.username}" required />
+                        <input type="text" name="username" value="${creds.username}" placeholder="Your username" required />
                         <label>Password</label>
-                        <input type="password" name="password" value="${creds.password}" required />
-                        <label>TMDB API Key</label>
+                        <input type="password" name="password" value="${creds.password}" placeholder="Your password" required />
+                        <label>TMDB API Key (Pre-filled free key, or paste your own)</label>
                         <input type="text" name="tmdbApiKey" value="${creds.tmdbApiKey}" />
                         <button type="submit">💾 Save & Sync TV Catalog</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>🛡️ 1-Click Backup & Restore</h2>
+                    <a href="/api/export-backup" style="display:block;text-align:center;padding:12px;background:#374151;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;margin-bottom:12px;">⬇️ Download My Watchlist & Smart Rows (.json)</a>
+                    <form method="POST" action="/api/import-backup">
+                        <label>Paste Backup JSON to Restore</label>
+                        <textarea name="backupJson" rows="3" placeholder='{"watchlist":...}'></textarea>
+                        <button type="submit" style="background:#4B5563;">⬆️ Restore Backup to TV</button>
                     </form>
                 </div>
             </div>

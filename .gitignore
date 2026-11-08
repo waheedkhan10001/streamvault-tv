@@ -7,3 +7,11 @@ local.properties
 *.keystore
 *.jks
 pc-runner/data/
+*.png
+*.db
+*.sqlite3
+node_modules/
+.wrangler/
+streamvault_pc_db.json
+streamvault_sync_data.json
+scratch/

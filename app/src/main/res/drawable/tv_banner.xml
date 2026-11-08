@@ -4,12 +4,15 @@
     android:height="180dp"
     android:viewportWidth="320"
     android:viewportHeight="180">
+    <!-- Dark Cinema Backdrop -->
     <path
         android:fillColor="#0B0C10"
         android:pathData="M0,0h320v180h-320z" />
+    <!-- Accent Crimson Glow Bar -->
     <path
         android:fillColor="#E50914"
         android:pathData="M0,0h12v180h-12z" />
+    <!-- Play Emblem -->
     <path
         android:fillColor="#E50914"
         android:pathData="M60,50 L125,90 L60,130 Z" />

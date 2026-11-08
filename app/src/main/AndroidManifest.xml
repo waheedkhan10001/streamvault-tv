@@ -2,11 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Required permissions for IPTV streaming, Wi-Fi QR Companion Server, and Voice Search -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- Android TV Leanback & Hardware Features (TCL 55P635 Android TV 11 compatible) -->
     <uses-feature
         android:name="android.software.leanback"
         android:required="false" />
@@ -17,6 +19,7 @@
         android:name="android.hardware.microphone"
         android:required="false" />
 
+    <!-- usesCleartextTraffic="true" is essential because most Xtream IPTV servers use http:// -->
     <application
         android:name=".StreamVaultApplication"
         android:allowBackup="true"

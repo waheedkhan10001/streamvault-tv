@@ -886,7 +886,7 @@ class CatalogSyncEngine(
                 rating = 8.5,
                 voteCount = 19000,
                 genres = listOf("Action", "Drama", "Adventure", "History"),
-                plot = "In the year 180, the death of emperor Marcus Aurelius throws the Roman Empire into chaos. Maximus is betrayed and reduced to slavery, rising through the gladiatorial ranks to avenge his family.",
+                plot = "In the year 180, the death of emperor Marcus Aurelius throws the Roman Empire into chaos. Maximus isplet betrayed and reduced to slavery, rising through the gladiatorial ranks to avenge his family.",
                 cast = listOf("Russell Crowe", "Joaquin Phoenix", "Connie Nielsen", "Oliver Reed"),
                 director = "Ridley Scott",
                 runtimeMins = 155,

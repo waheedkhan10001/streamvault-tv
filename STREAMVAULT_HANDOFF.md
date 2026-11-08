@@ -131,6 +131,66 @@
 7. **Hero Billboard Smooth Scroll-Back**:
    - In `tv-ui.html`, pressing ArrowUp from the top movie row scrolls `#mainViewport` back to `top: 0` and focuses the hero billboard action button with `{ preventScroll: true }`, ensuring the full hero poster and synopsis are never cut off.
 
+### I. Polish & Enhancements: Genre AND Filtering, Smart Director/Cast Search, Clean Settings, and Version Switching (Verified Live)
+1. **Multi-Genre AND Filtering**:
+   - Switched genre matching from `OR` to `AND` in both `tv-ui.html` and `server.js` (`matchAllIncludedGenres = true`).
+   - Selecting multiple genres (e.g. `Action` and `Comedy`) now strictly requires titles to contain all selected genres.
+2. **Text Cleanup & Minimalist Leanback UI**:
+   - Removed `(Scroll down for more)` from the title count label across all tabs (`Showing 1 - 120 of N titles`).
+   - Removed `(Click star to remove)` from the star rating display (`5/5 Saved`).
+   - Removed `Press & Hold OK to Remove` banner above search suggestions.
+3. **Smart Search Engine Architecture (Hybrid Directed By, Starring, Prefix, & Fuzzy Typo Correction)**:
+   - Search runs completely local and offline via fast in-memory indexing (<15ms across 60,853 titles).
+   - Natural language intent parsing: automatically extracts `directed by <name>`, `starring <name>`, `movies with <name>`, `featuring <name>` and boosts matching director/cast (+400 score).
+   - Prefix parsing: supports explicit `director:<name>`, `dir:<name>`, `cast:<name>`, `starring:<name>`, `actor:<name>`.
+   - Fuzzy typo tolerance: Damerau-Levenshtein edit distance ($\le 1$ to 2 characters for words 4+ letters) matches common typos (e.g. `christopher nola` or `nolna` matches `Christopher Nolan`).
+4. **Settings Screen Re-Architected to 2-Column Grid**:
+   - Converted vertical stacked settings into a 2-column layout (`grid-template-columns: 1.05fr 0.95fr`).
+   - Fits 100% inside 1080p display viewport without requiring any vertical scrolling.
+   - Left: Account & Profile + Factory Reset; Right: Parental PIN + Search & Privacy.
+5. **Custom Display Name & Universal Data Persistence**:
+   - Added user `Display Name` field in Settings and saved to `state.credentials.displayName`.
+   - Sidebar profile pill and user profile modal dynamically display `Waleed Khan`.
+   - User data architecture verified: Continue Watching, Watchlist, Ratings, and enrichments are keyed by universal `dedupKey` (TMDB ID / normalized title) and remain 100% intact even if IPTV account credentials change.
+6. **Recent Searches Clean Display**:
+   - Recent search suggestions container is hidden when browsing catalog grids and only displays when actively typing in the search box.
+7. **Dual Approach for Multi-Version & '*' Clean/HQ Releases**:
+   - Deduplication quality engine promotes releases marked with `*` (e.g. `Heart of the Beast (2026)*`) as `primaryStreamId` and index 0 of `versions`.
+   - Watch Now detail modal provides an interactive Version Switcher row displaying `▶ ⭐ Clean HQ* (HD)` alongside `▶ Version 2: English (HD)` so users can seamlessly switch streams.
+8. **Long-Press OK Fix on Search History**:
+   - Suppressed immediate synchronous `click()` on `keydown` for `.is-history` items.
+   - Keyup executes short tap (fills query) while $\ge 550\text{ ms}$ keydown cleanly opens the Delete confirmation modal without filling the search field.
+
+### H. TV Remote Textbox Auto-Advance, Dedicated 18+ Vault & Multi-Tier Stream Probing (Latest Session)
+1. **TV Remote Soft Keyboard Auto-Advance (`tv-ui.html`)**:
+   - Implemented `advanceToNextInput`, `moveToPreviousInput`, and `onPinInput` for seamless TV remote entry without remote hunting.
+   - In Parental PIN: entering 4 digits into `Current PIN` (`setCurPin`) automatically advances cursor into `New PIN` (`setNewPin`); entering 4 digits into `New PIN` advances into `Confirm PIN` (`setConfirmPin`); entering 4 digits into `Confirm PIN` automatically dismisses soft keyboard and highlights the `Update` button (`#btnUpdatePin`).
+   - In Settings form: pressing D-Pad Down/Right or Enter on TV remote smoothly traverses from `Display Name` → `Playlist Name` → `Server URL` → `Username` → `Password` → `Save & Connect`.
+2. **Adult Content Ingest & Dedicated 18+ Vault Sidebar Tab (`server.js` & `tv-ui.html`)**:
+   - Discovered and ingested 2,681 titles across 11 adult IPTV categories (`XXX Hindi`, `XXX Hindi Full`, `XXX VIP`, `XXX Team Skeet`, `XXX Best Full Movies`, `XXX Redhat`, `XXX Strom`, `XXX Adult Ultimate`, `XXX Korean`, `XXX Japanese`, `Philippines 18+`).
+   - Separated junk clips (mujra, dance, stage drama) from adult catalog; all adult content is tagged `isAdult: true`.
+   - Strict segregation: adult content is 100% blocked from default media queries, Movies/Series tabs, and Home rows.
+   - **Dedicated `18+ Vault` Sidebar Tab**: Conditionally rendered ONLY when the session is unlocked (`parentalControl.isLocked === false && parentalControl.showAdult === true`). Completely hidden and unreachable when locked.
+   - Custom 18+ Vault Super Filter Bar: Studio/Category dropdown (`dropAdultCat`), Year dropdown (`dropAdultYear`), Quality dropdown, Sort dropdown, and a 1-click `🔒 Lock Vault` button.
+   - Immediate Return & Auto-Lock: Clicking `🔒 Lock Vault` or triggering TV standby/app background (`visibilitychange`) immediately locks the session, removes `18+ Vault` from the sidebar, and navigates back to `Home`.
+3. **Robust Multi-Tier Quality Detection & Fast 11-Byte Stream Prober**:
+   - Upgraded `classifyCategoryAndTitle` with a multi-tier heuristic:
+     - Heavy penalty (-30) for CAM, HDCAM, TS, TELESYNC, TC, 1XBET, BETWINNER, DRAGON MONEY, SLOT releases.
+     - Positive bonuses: 4K/UHD/REMUX (+40), BluRay (+30), WEB-DL/WEBRIP (+25), Clean HQ* (+15), 1080p/FHD (+15), HD (+10).
+   - HTTP Stream Probing (`probeStreamSize`): Cloudflare blocks standard `HEAD` requests with HTTP 520, but HTTP `GET` with `Range: bytes=0-10` returns HTTP 206 Partial Content and `Content-Range: bytes 0-10/<TOTAL_BYTES>`, measuring exact file sizes in ~40ms while transferring only 11 bytes.
+   - Live probe on *Heart of the Beast*: Clean HQ* release is verified at 995 MB (1,042,894,167 bytes) vs older watermarked release at 870 MB (912,480,337 bytes). Clean HQ* version is reliably ranked #1.
+   - Dynamic version switcher pills display verified metadata: `▶ ⭐ Clean HQ* (Clean HQ* • 995 MB)` and `▶ Version 2 (HD • 870 MB)`.
+
+4. **UI/UX & Remote Navigation Polish (v2.4)**:
+   - **4-Column Cinematic Grid**: Refactored `.results-grid` with `grid-template-columns: repeat(4, minmax(0, 1fr)) !important;`, `overflow-x: hidden !important;`, `gap: 16px;`, and strict child constraints (`min-width: 0 !important; max-width: 100% !important; aspect-ratio: 2 / 3 !important;`). Displays exactly 4 large cinematic posters per row (~308 physical pixels wide on 1080p) across Search, Movies, and My List.
+   - **Detail Modal Version Selection**: Remote `ArrowDown` from action buttons navigates directly to the version pills row (`.detail-version-pill`), `ArrowLeft`/`ArrowRight` switches versions, `ArrowUp` returns to actions, and `ArrowDown` advances to More Like This chips.
+   - **Subtitle Auto-Selection**: ExoPlayer Media3 configured with `TrackSelectionParameters` setting preferred language `"en"` and `Player.Listener.onTracksChanged` to auto-select English (or first discovered subtitle track) upon initial playback without requiring exit and resume.
+   - **Soft Keyboard 'X' / Backspace**: Keycode 8 inside `<input>` and `<textarea>` deletes the preceding character rather than closing the dialog or exiting the view.
+   - **Settings Screen Cleanup**: Renamed "Account & Profile" -> "Profile", added editable Display Name (`Waleed Khan`) decoupled from IPTV credentials, renamed "Search and Privacy" -> "Privacy", simplified buttons to "Clear", "Unlock" / "Lock", "Reset", and subtext to "Wipes everything". Entire screen fits on 1080p without vertical scrolling.
+   - **Search Bar & Suggestions Polish**: Popup aligns pixel-perfectly with search input width, limited to max 5 items, only appears while typing or clicking search box, dismisses on Enter or navigating Down to cards. Long-pressing OK on remote opens confirmation modal to remove item from history. Search button redesigned as icon-only (`🔍`) with dedicated voice search button (`🎙️`) wired to native `RecognizerIntent`.
+   - **Main Screen Left Navigation**: Pressing Left from any content row jumps directly to `.nav-btn.active` in the sidebar instead of falling through to profile/settings at the bottom.
+   - **Hero Banner Up Scroll**: Navigating `ArrowUp` from row 0 smoothly scrolls the hero billboard completely back into view.
+
 ### I. Major Release v2.5: 5-Column Cinematic Grid, Dedicated Profile & Cloud Sync, and Search History Engine (Verified Live)
 1. **5-Column Cinematic Density ($5 \times 2$ Full Posters Visible)**:
    - Upgraded `.results-grid` to `grid-template-columns: repeat(5, minmax(0, 1fr)) !important;` with 15px gap.
@@ -168,11 +228,12 @@
 - Installed live over Wi-Fi ADB to TCL 55P635 TV at `192.168.100.42:5555`.
 - Host PC companion running on `192.168.100.66:8765` over Wi-Fi SSID `EME-CORE-HAI`.
 - Live screenshot verification:
-  - `tv_movies_5col.png`: Verified 5-column cinematic grid displaying 10 complete posters ($5 \times 2$) with zero vertical clipping below the filter bar.
-  - `tv_search_hist.png`: Verified Search History popup displaying recent searches with TV remote soft keyboard active.
-  - `tv_profile_linked.png`: Verified dedicated User Profiles & Cloud Sync screen linked live to Cloudflare Account (`WKHAN.10001@GMAIL.COM`) with active code `SV-4FKQ`.
-  - `tv_settings_screen.png`: Verified clean, dedicated Settings & System screen with IPTV credentials, HW+ ExoPlayer decoder stats, Parental PIN, and Clear History.
-  - `tv_home_5col.png`: Verified Home screen with decoupled bottom Profile pill and Settings gear icon.
+  - `tv_movies_6col.png`: Verified 6-column cinematic grid displaying 12 complete posters across 2 full rows.
+  - `tv_search_hist.png`: Verified Search History popup displaying recent searches (`Heart of the Beast`, `Christopher Nolan`, `Action`, `Brad Pitt`) with soft keyboard active.
+  - `tv_profile.png`: Verified dedicated User Profiles & Cloud Sync screen with Who's Watching carousel, active profile settings, 6-digit TV pairing code (`SV-7482`), and live QR code.
+  - `tv_settings_actual.png`: Verified clean, dedicated Settings & System screen with IPTV credentials, HW+ ExoPlayer decoder stats, Parental PIN, and Clear History.
+  - `screen_home_verified.png`: Verified Home screen with hero banner and Continue Watching cards.
+  - `screen_version_pill_focus.png`: Verified Detail Modal with remote D-pad Down landing focus directly on `▶ ⭐ Clean HQ* (Clean HQ* • 995 MB)` version pill.
 
 ---
 

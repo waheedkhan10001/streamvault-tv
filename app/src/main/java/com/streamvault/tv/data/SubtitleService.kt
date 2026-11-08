@@ -6,10 +6,18 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+/**
+ * Built-in Online Multi-Language Subtitle Downloader.
+ * Queries free Wyzie Subs / OpenSubtitles / SubDL index by TMDB ID or IMDb ID
+ * so even IPTV movies that have zero embedded subtitles can play with synced
+ * multi-language subtitles (English, Urdu, Hindi, Arabic, Spanish, etc.)
+ * plus live +/- timing offset adjustments!
+ */
 class SubtitleService(private val context: Context) {
 
     private val httpClient = OkHttpClient.Builder()
@@ -21,12 +29,25 @@ class SubtitleService(private val context: Context) {
     private val subtitleCacheDir = File(context.cacheDir, "downloaded_subs").apply { mkdirs() }
 
     private val langCodeToName = mapOf(
-        "en" to "English", "ur" to "Urdu", "hi" to "Hindi", "ar" to "Arabic",
-        "es" to "Spanish", "fr" to "French", "de" to "German", "tr" to "Turkish",
-        "ko" to "Korean", "ja" to "Japanese", "pt" to "Portuguese", "ru" to "Russian",
-        "it" to "Italian", "fa" to "Persian"
+        "en" to "English",
+        "ur" to "Urdu",
+        "hi" to "Hindi",
+        "ar" to "Arabic",
+        "es" to "Spanish",
+        "fr" to "French",
+        "de" to "German",
+        "tr" to "Turkish",
+        "ko" to "Korean",
+        "ja" to "Japanese",
+        "pt" to "Portuguese",
+        "ru" to "Russian",
+        "it" to "Italian",
+        "fa" to "Persian"
     )
 
+    /**
+     * Searches online subtitle providers for a given movie or episode by TMDB ID / IMDb ID.
+     */
     suspend fun searchOnlineSubtitles(
         tmdbId: Int,
         imdbId: String,
@@ -77,6 +98,7 @@ class SubtitleService(private val context: Context) {
             }
         }
 
+        // Sort so user's preferred subtitle languages appear at the very top of the list
         results.sortedWith(
             compareBy<SubtitleTrackItem> { item ->
                 val idx = preferredLangs.indexOf(item.languageCode)
@@ -85,6 +107,10 @@ class SubtitleService(private val context: Context) {
         )
     }
 
+    /**
+     * Downloads an online subtitle file (.srt / .vtt) and optionally applies a timing offset
+     * (e.g. +1.5s or -1.0s) so the user can fix out-of-sync IPTV subtitles on the fly!
+     */
     suspend fun downloadAndPrepareSubtitleFile(
         track: SubtitleTrackItem,
         offsetMs: Long = 0L
@@ -102,6 +128,7 @@ class SubtitleService(private val context: Context) {
             if (offsetMs == 0L) {
                 return@withContext rawFile
             }
+            // Apply live SRT timestamp shift
             val shiftedFile = File(subtitleCacheDir, "shifted_${offsetMs}_${rawFile.name}")
             val shiftedContent = shiftSrtTimestamps(rawFile.readText(Charsets.UTF_8), offsetMs)
             shiftedFile.writeText(shiftedContent, Charsets.UTF_8)

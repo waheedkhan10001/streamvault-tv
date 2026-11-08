@@ -48,6 +48,7 @@ data class XtreamCredentials(
         }
 
     companion object {
+        // Public community read key fallback; user can also paste their own free TMDB key via QR Setup
         const val DEFAULT_TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8"
     }
 }
@@ -177,18 +178,18 @@ data class LiveChannel(
 
 data class SuperFilterState(
     val searchQuery: String = "",
-    val mediaTypeFilter: MediaType? = null,
+    val mediaTypeFilter: MediaType? = null, // null = All (Movies + Series)
     val includedGenres: Set<String> = emptySet(),
     val excludedGenres: Set<String> = emptySet(),
-    val matchAllIncludedGenres: Boolean = true,
+    val matchAllIncludedGenres: Boolean = true, // true = AND, false = OR
     val selectedLanguages: Set<String> = emptySet(),
     val subtitleFilterMode: SubtitleFilterMode = SubtitleFilterMode.ANY,
     val specificSubtitleLanguage: String = "English",
     val minYear: Int? = null,
     val maxYear: Int? = null,
-    val decade: Int? = null,
+    val decade: Int? = null, // e.g. 1990, 2000, 2010, 2020
     val minRating: Double = 0.0,
-    val qualityFilter: String? = null,
+    val qualityFilter: String? = null, // e.g. "4K", "1080p", "HEVC"
     val hideWatched: Boolean = false,
     val serverCategoryId: String? = null,
     val actorFilter: String? = null,

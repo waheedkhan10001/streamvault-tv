@@ -62,6 +62,7 @@ export default {
         }
 
         if (!env.DB) {
+          // Mock response if DB not yet bound
           return new Response(JSON.stringify({ status: 'pending' }), { headers: corsHeaders });
         }
 
@@ -74,6 +75,7 @@ export default {
         }
 
         if (row.status === 'claimed' && row.account_id) {
+          // Fetch full account data, profiles, and sync payload
           const account = await env.DB.prepare(
             `SELECT * FROM accounts WHERE account_id = ?`
           ).bind(row.account_id).first();

@@ -2,6 +2,20 @@ package com.streamvault.tv.data
 
 import java.util.Locale
 
+/**
+ * Cleans messy IPTV stream titles such as:
+ *   "|EN| [4K-HEVC] Gladiator II (2024) [MULTI-SUB]"
+ *   "HI - Jawan 2023 FHD Dual Audio"
+ *   "AR - The Dark Knight (2008) 1080p"
+ *
+ * Extracts:
+ *   - Clean searchable title ("Gladiator II")
+ *   - 4-digit Release Year (2024)
+ *   - Language ("English", "Hindi", "Urdu", "Arabic", "Korean", etc.)
+ *   - Quality badges ("4K", "1080p", "HEVC", "HDR")
+ *   - Subtitle hints ("Multi-Sub", "English Sub")
+ *   - Canonical deduplication key so multiple copies merge into one card.
+ */
 object TitleParser {
 
     data class ParsedTitleInfo(
@@ -15,32 +29,99 @@ object TitleParser {
     )
 
     private val LANGUAGE_PREFIX_MAP = mapOf(
-        "EN" to "English", "ENG" to "English", "US" to "English", "UK" to "English",
-        "HI" to "Hindi", "HIN" to "Hindi", "HINDI" to "Hindi", "BOLLYWOOD" to "Hindi", "IND" to "Hindi", "IN" to "Hindi",
-        "UR" to "Urdu", "URDU" to "Urdu", "PK" to "Urdu", "PAK" to "Urdu", "PUNJABI" to "Punjabi",
-        "AR" to "Arabic", "ARA" to "Arabic", "ARABIC" to "Arabic",
-        "TR" to "Turkish", "TUR" to "Turkish", "TURKISH" to "Turkish",
-        "KR" to "Korean", "KOR" to "Korean", "KOREAN" to "Korean",
-        "JA" to "Japanese", "JP" to "Japanese", "JAP" to "Japanese", "ANIME" to "Japanese",
-        "ES" to "Spanish", "ESP" to "Spanish", "LAT" to "Spanish", "SPA" to "Spanish",
-        "FR" to "French", "FRE" to "French", "VF" to "French",
-        "DE" to "German", "GER" to "German", "IT" to "Italian", "ITA" to "Italian",
-        "PT" to "Portuguese", "BR" to "Portuguese", "RU" to "Russian", "PL" to "Polish",
-        "NL" to "Dutch", "FA" to "Persian", "IR" to "Persian", "TA" to "Tamil", "TAMIL" to "Tamil",
-        "TE" to "Telugu", "TELUGU" to "Telugu", "ML" to "Malayalam",
-        "MULTI" to "Multi-Audio", "DUAL" to "Multi-Audio"
+        "EN" to "English",
+        "ENG" to "English",
+        "US" to "English",
+        "UK" to "English",
+        "HI" to "Hindi",
+        "HIN" to "Hindi",
+        "HINDI" to "Hindi",
+        "BOLLYWOOD" to "Hindi",
+        "IND" to "Hindi",
+        "IN" to "Hindi",
+        "UR" to "Urdu",
+        "URDU" to "Urdu",
+        "PK" to "Urdu",
+        "PAK" to "Urdu",
+        "PUNJABI" to "Punjabi",
+        "AR" to "Arabic",
+        "ARA" to "Arabic",
+        "ARABIC" to "Arabic",
+        "TR" to "Turkish",
+        "TUR" to "Turkish",
+        "TURKISH" to "Turkish",
+        "KR" to "Korean",
+        "KOR" to "Korean",
+        "KOREAN" to "Korean",
+        "JA" to "Japanese",
+        "JP" to "Japanese",
+        "JAP" to "Japanese",
+        "ANIME" to "Japanese",
+        "ES" to "Spanish",
+        "ESP" to "Spanish",
+        "LAT" to "Spanish",
+        "SPA" to "Spanish",
+        "FR" to "French",
+        "FRE" to "French",
+        "VF" to "French",
+        "DE" to "German",
+        "GER" to "German",
+        "IT" to "Italian",
+        "ITA" to "Italian",
+        "PT" to "Portuguese",
+        "BR" to "Portuguese",
+        "RU" to "Russian",
+        "PL" to "Polish",
+        "NL" to "Dutch",
+        "FA" to "Persian",
+        "IR" to "Persian",
+        "TA" to "Tamil",
+        "TAMIL" to "Tamil",
+        "TE" to "Telugu",
+        "TELUGU" to "Telugu",
+        "ML" to "Malayalam",
+        "MULTI" to "Multi-Audio",
+        "DUAL" to "Multi-Audio"
     )
 
     private val GENRE_KEYWORDS_IN_FOLDER = mapOf(
-        "action" to "Action", "adventure" to "Adventure", "animat" to "Animation", "anime" to "Animation",
-        "kids" to "Family", "children" to "Family", "family" to "Family", "disney" to "Family", "pixar" to "Animation",
-        "comedy" to "Comedy", "standup" to "Comedy", "stand-up" to "Comedy", "crime" to "Crime", "mafia" to "Crime",
-        "documentary" to "Documentary", "docu" to "Documentary", "nature" to "Documentary", "drama" to "Drama",
-        "fantasy" to "Fantasy", "history" to "History", "biograph" to "History", "horror" to "Horror", "scary" to "Horror",
-        "music" to "Music", "mystery" to "Mystery", "romance" to "Romance", "romantic" to "Romance",
-        "sci-fi" to "Sci-Fi", "scifi" to "Sci-Fi", "science fiction" to "Sci-Fi",
-        "marvel" to "Action", "dc " to "Action", "superhero" to "Action",
-        "thriller" to "Thriller", "suspense" to "Thriller", "war" to "War", "western" to "Western"
+        "action" to "Action",
+        "adventure" to "Adventure",
+        "animat" to "Animation",
+        "anime" to "Animation",
+        "kids" to "Family",
+        "children" to "Family",
+        "family" to "Family",
+        "disney" to "Family",
+        "pixar" to "Animation",
+        "comedy" to "Comedy",
+        "standup" to "Comedy",
+        "stand-up" to "Comedy",
+        "crime" to "Crime",
+        "mafia" to "Crime",
+        "documentary" to "Documentary",
+        "docu" to "Documentary",
+        "nature" to "Documentary",
+        "drama" to "Drama",
+        "fantasy" to "Fantasy",
+        "history" to "History",
+        "biograph" to "History",
+        "horror" to "Horror",
+        "scary" to "Horror",
+        "music" to "Music",
+        "mystery" to "Mystery",
+        "romance" to "Romance",
+        "romantic" to "Romance",
+        "sci-fi" to "Sci-Fi",
+        "scifi" to "Sci-Fi",
+        "science fiction" to "Sci-Fi",
+        "marvel" to "Action",
+        "dc " to "Action",
+        "superhero" to "Action",
+        "thriller" to "Thriller",
+        "suspense" to "Thriller",
+        "war" to "War",
+        "western" to "Western"
     )
 
     private val YEAR_REGEX = Regex("""(?:^|[\s(\[._-])((?:19[2-9]\d|20[0-2]\d))(?:[\s)\]._-]|$)""")
@@ -56,6 +137,7 @@ object TitleParser {
         val qualities = mutableSetOf<String>()
         var subtitleHint = ""
 
+        // 1. Check category name for language & genre hints
         val upperCat = categoryName.uppercase(Locale.ROOT)
         for ((code, langName) in LANGUAGE_PREFIX_MAP) {
             if (Regex("""(^|[\s|\[\-_:])$code([\s|\]\-_:]|$)""").containsMatchIn(upperCat)) {
@@ -72,6 +154,7 @@ object TitleParser {
             }
         }
 
+        // 2. Inspect bracketed or piped tags e.g. |EN| [4K-HEVC] [MULTI-SUB]
         BRACKET_TAG_REGEX.findAll(working).forEach { match ->
             val token = (match.groups[1]?.value ?: match.groups[2]?.value ?: "").trim().uppercase(Locale.ROOT)
             LANGUAGE_PREFIX_MAP[token]?.let { detectedLanguage = it }
@@ -79,6 +162,7 @@ object TitleParser {
         }
         working = BRACKET_TAG_REGEX.replace(working, " ")
 
+        // 3. Inspect leading prefix like "EN - " or "HI: "
         val prefixMatch = LEADING_PREFIX_REGEX.find(working)
         if (prefixMatch != null) {
             val token = (prefixMatch.groups[1]?.value ?: "").trim().uppercase(Locale.ROOT)
@@ -88,25 +172,30 @@ object TitleParser {
             }
         }
 
+        // 4. Extract 4-digit Release Year (prefer last match in string, e.g. "2001: A Space Odyssey (1968)")
         var extractedYear = 0
         val yearMatches = YEAR_REGEX.findAll(working).toList()
         if (yearMatches.isNotEmpty()) {
             val lastMatch = yearMatches.last()
             extractedYear = lastMatch.groupValues[1].toIntOrNull() ?: 0
+            // Remove the year & anything after it if it was in parentheses at the end
             val idx = lastMatch.range.first
             if (idx > 2) {
                 working = working.substring(0, idx)
             }
         } else {
+            // Check if category name is a 4-digit year e.g. "2024 Movies"
             YEAR_REGEX.find(categoryName)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let {
                 extractedYear = it
             }
         }
 
+        // 5. Extract quality & subtitle tokens from remaining title
         extractQualityAndSubFromToken(rawTitle.uppercase(Locale.ROOT), qualities)?.let {
             if (subtitleHint.isBlank()) subtitleHint = it
         }
 
+        // 6. Strip quality noise, empty brackets, underscores, extra whitespace
         working = QUALITY_NOISE_REGEX.replace(working, " ")
         working = working
             .replace(Regex("""\(\s*\)|\[\s*]"""), " ")
@@ -122,6 +211,7 @@ object TitleParser {
         val finalLanguage = detectedLanguage ?: "English"
         val finalQualities = if (qualities.isEmpty()) listOf("HD") else qualities.toList()
 
+        // 7. Build canonical deduplication key so identical movies across folders merge into 1 card
         val normalizedAlphaNum = working.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]"""), "")
         val dedupKey = when {
             tmdbId > 0 -> "tmdb:$tmdbId"

@@ -6,16 +6,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * Manages IPTV credentials, preferred/hidden languages, recent searches,
+ * and the strict "1-Connection Playback Lock" that prevents background IPTV
+ * requests while a movie, episode, or live stream is actively playing.
+ */
 class PreferencesManager(context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("streamvault_prefs", Context.MODE_PRIVATE)
 
+    // Strict 1-Connection Lock: true whenever ExoPlayer is actively streaming
     val isPlaybackActive = AtomicBoolean(false)
 
     private val _credentialsFlow = MutableStateFlow(loadCredentials())
     val credentialsFlow: StateFlow<XtreamCredentials> = _credentialsFlow
 
+    // Live remote search pushed from the Phone/PC Wi-Fi QR Companion Web Page
     private val _remoteSearchCommand = MutableStateFlow<String?>(null)
     val remoteSearchCommand: StateFlow<String?> = _remoteSearchCommand
 
@@ -70,6 +77,7 @@ class PreferencesManager(context: Context) {
         val last = lastFullSyncTimestamp
         if (last == 0L) return true
         val elapsedHours = (System.currentTimeMillis() - last) / (1000L * 60 * 60)
+        // Enforce 24-hour interval so we never bother the IPTV server unnecessarily
         return elapsedHours >= 24
     }
 

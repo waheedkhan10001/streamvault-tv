@@ -36,6 +36,9 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.streamvault.tv.data.*
 import com.streamvault.tv.server.PhoneCompanionServer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class NavTab(val icon: String, val label: String) {
     HOME("🏠", "Home"),
@@ -65,6 +68,7 @@ fun StreamVaultTvApp(
     companionServer: PhoneCompanionServer,
     onLaunchVoiceSearch: ((String) -> Unit) -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     val syncState by syncEngine.syncState.collectAsState()
     val creds by prefs.credentialsFlow.collectAsState()
     val remoteSearchCmd by prefs.remoteSearchCommand.collectAsState()
@@ -73,8 +77,11 @@ fun StreamVaultTvApp(
     var selectedMediaDetail by remember { mutableStateOf<MediaItem?>(null) }
     var activePlayback by remember { mutableStateOf<ActivePlaybackRequest?>(null) }
     var catalogRefreshTick by remember { mutableStateOf(0) }
+
+    // Super-Filter state
     var filterState by remember { mutableStateOf(SuperFilterState()) }
 
+    // React to live Phone-to-TV search beamed from the QR web portal
     LaunchedEffect(remoteSearchCmd) {
         val cmd = remoteSearchCmd
         if (!cmd.isNullOrBlank()) {
@@ -85,6 +92,7 @@ fun StreamVaultTvApp(
         }
     }
 
+    // Trigger initial showcase or 24-hour delta sync
     LaunchedEffect(Unit) {
         if (!creds.isConfigured) {
             syncEngine.seedSampleShowcaseCatalogIfEmpty()
@@ -96,6 +104,7 @@ fun StreamVaultTvApp(
         }
     }
 
+    // Build stream URL from Xtream credentials (with fallback sample stream for demo mode)
     fun buildVodStreamUrl(item: MediaItem, version: StreamVersion): String {
         if (!creds.isConfigured) {
             return "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
@@ -119,6 +128,7 @@ fun StreamVaultTvApp(
         return "${creds.normalizedServerUrl}/live/${creds.username}/${creds.password}/${channel.streamId}.m3u8"
     }
 
+    // Full-screen Video Player takes priority when active
     val playback = activePlayback
     if (playback != null) {
         StreamVaultPlayerScreen(
@@ -150,6 +160,7 @@ fun StreamVaultTvApp(
         return
     }
 
+    // Movie / Series Full Detail Screen
     val detailItem = selectedMediaDetail
     if (detailItem != null) {
         BackHandler { selectedMediaDetail = null }
@@ -186,11 +197,13 @@ fun StreamVaultTvApp(
         return
     }
 
+    // Main TV Layout: Left Navigation Rail + Right Content Viewport
     Row(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0B0C10))
     ) {
+        // Left TV Navigation Sidebar
         Column(
             modifier = Modifier
                 .width(195.dp)
@@ -200,6 +213,7 @@ fun StreamVaultTvApp(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Brand Header
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp)
@@ -253,6 +267,7 @@ fun StreamVaultTvApp(
                 }
             }
 
+            // Bottom Quick Sync Badge
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -285,6 +300,7 @@ fun StreamVaultTvApp(
             }
         }
 
+        // Right Main Content Area
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -418,6 +434,7 @@ private fun HomeScreen(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 48.dp)
     ) {
+        // Netflix Hero Billboard Banner
         if (heroItem != null) {
             item {
                 Box(
@@ -505,6 +522,7 @@ private fun HomeScreen(
             }
         }
 
+        // Continue Watching Row
         if (continueWatching.isNotEmpty()) {
             item {
                 MediaHorizontalRow(
@@ -515,6 +533,7 @@ private fun HomeScreen(
             }
         }
 
+        // My List (Watchlist) Row
         if (watchlist.isNotEmpty()) {
             item {
                 MediaHorizontalRow(
@@ -525,6 +544,7 @@ private fun HomeScreen(
             }
         }
 
+        // User's Pinned Custom Smart Filter Rows!
         items(pinnedSmartRows) { smartRow ->
             val rowItems = remember(smartRow, refreshTick, creds.hiddenLanguages) {
                 db.queryMedia(smartRow.filterState, creds.hiddenLanguages, limit = 25)
@@ -540,6 +560,7 @@ private fun HomeScreen(
             }
         }
 
+        // Recently Added to IPTV Server
         if (recentlyAdded.isNotEmpty()) {
             item {
                 MediaHorizontalRow(
@@ -550,6 +571,7 @@ private fun HomeScreen(
             }
         }
 
+        // Top Rated on IMDb / TMDB
         if (topRated.isNotEmpty()) {
             item {
                 MediaHorizontalRow(
@@ -560,6 +582,7 @@ private fun HomeScreen(
             }
         }
 
+        // Enriched Multi-Genre Rows (Fixes broken server folders!)
         val coreGenres = listOf("Action", "Sci-Fi", "Thriller", "Comedy", "Crime", "Drama", "Adventure", "Horror")
         items(coreGenres) { genre ->
             val genreItems = remember(genre, refreshTick, creds.hiddenLanguages) {
@@ -664,6 +687,7 @@ fun NetflixPosterCard(
                 }
             }
 
+            // Top-Left Rating Badge
             if (item.rating > 0) {
                 Box(
                     modifier = Modifier
@@ -681,6 +705,7 @@ fun NetflixPosterCard(
                 }
             }
 
+            // Top-Right Quality + Version Count Badge
             Row(
                 modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -705,6 +730,7 @@ fun NetflixPosterCard(
                 }
             }
 
+            // Bottom Subtitle & Language Strip
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -729,6 +755,7 @@ fun NetflixPosterCard(
                 )
             }
 
+            // Resume Progress Bar if partially watched
             if (item.progressFraction > 0f) {
                 LinearProgressIndicator(
                     progress = item.progressFraction,
@@ -764,6 +791,9 @@ fun NetflixPosterCard(
     }
 }
 
+/**
+ * 4-Way Fast Search + Multi-Attribute Include/Exclude Super-Filter Screen.
+ */
 @Composable
 private fun SuperFilterScreen(
     db: StreamVaultDatabase,
@@ -788,6 +818,7 @@ private fun SuperFilterScreen(
     var pinRowBanner by remember { mutableStateOf<String?>(null) }
 
     Row(modifier = Modifier.fillMaxSize().padding(18.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        // Left Column: Super-Filter Controls & 4-Way Search
         LazyColumn(
             modifier = Modifier
                 .width(410.dp)
@@ -810,6 +841,7 @@ private fun SuperFilterScreen(
                 )
             }
 
+            // Search Input Box + Voice Search + Mini Grid Toggle
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -829,6 +861,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Compact 6x6 On-Screen TV Remote Keyboard + 2-Letter Instant Autocomplete Chips!
             if (showMiniKeyboard) {
                 item {
                     Column(
@@ -869,6 +902,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // 2-Letter Instant Autocomplete Suggestions (No need to finish typing!)
             if (autocompleteChips.isNotEmpty()) {
                 item {
                     Text("⚡ Instant Matches (1-Click):", color = Color(0xFF34D399), fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -892,6 +926,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Pin Current Filter to Home Screen as Smart Row + Reset
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TvOsdButton("📌 Pin Filter to Home", isPrimary = true) {
@@ -911,6 +946,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Active Actor / Director Chip Notice
             if (filterState.actorFilter != null || filterState.directorFilter != null) {
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -924,6 +960,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Include (+ Green) / Exclude (- Red) Genre Matrix
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -981,6 +1018,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Subtitle Availability & Language Filter
             item {
                 Text("💬 Subtitles Filter:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
@@ -997,6 +1035,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Audio / Movie Language Filter
             item {
                 Text("🌐 Language Filter:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1014,6 +1053,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Rating, Decade, Quality & Hide Watched
             item {
                 Text("★ Minimum Rating & Decade:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1040,6 +1080,7 @@ private fun SuperFilterScreen(
                 }
             }
 
+            // Quality, Hide Watched, & Sort Order
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(null to "All Qualities", "4K" to "4K UHD", "1080p" to "1080p", "HEVC" to "HEVC").forEach { (q, lbl) ->
@@ -1069,6 +1110,7 @@ private fun SuperFilterScreen(
             }
         }
 
+        // Right Column: Live Matching Results Grid
         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
@@ -1114,6 +1156,13 @@ private fun SuperFilterScreen(
     }
 }
 
+/**
+ * Rich Movie & Series Detail Screen with:
+ * - Multi-Version / Quality / Language Picker
+ * - Clickable Genre, Cast & Director Chips
+ * - Series Episodes Browser
+ * - "More Like This" Recommendations
+ */
 @Composable
 private fun MediaDetailScreen(
     item: MediaItem,
@@ -1131,6 +1180,7 @@ private fun MediaDetailScreen(
     var selectedSeason by remember(item) { mutableStateOf(1) }
     val moreLikeThis = remember(item) { db.getMoreLikeThis(item) }
 
+    // Auto-refresh Series episodes when opening a Series page
     LaunchedEffect(item) {
         if (item.mediaType == MediaType.SERIES) {
             episodes = syncEngine.fetchSeriesEpisodesOnDemand(item)
@@ -1163,6 +1213,7 @@ private fun MediaDetailScreen(
         ) {
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    // Left Poster
                     AsyncImage(
                         model = item.posterUrl,
                         contentDescription = item.cleanTitle,
@@ -1174,6 +1225,7 @@ private fun MediaDetailScreen(
                             .border(1.dp, Color(0xFF374151), RoundedCornerShape(12.dp))
                     )
 
+                    // Right Metadata & Actions
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             TvOsdButton("← Back") { onBack() }
@@ -1204,6 +1256,7 @@ private fun MediaDetailScreen(
                             lineHeight = 20.sp
                         )
 
+                        // Clickable Genre Chips
                         if (item.genres.isNotEmpty()) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text("Genres:", color = Color(0xFF9CA3AF), fontSize = 12.sp)
@@ -1215,6 +1268,7 @@ private fun MediaDetailScreen(
                             }
                         }
 
+                        // Clickable Director & Cast Chips!
                         if (item.director.isNotBlank() || item.cast.isNotEmpty()) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (item.director.isNotBlank()) {
@@ -1232,6 +1286,7 @@ private fun MediaDetailScreen(
                             }
                         }
 
+                        // Watchlist & Watched Buttons + Play Versions
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             if (item.mediaType == MediaType.MOVIE) {
                                 val primaryVer = item.versions.firstOrNull() ?: StreamVersion(
@@ -1255,6 +1310,7 @@ private fun MediaDetailScreen(
                 }
             }
 
+            // Deduplicated Stream Versions / Qualities / Languages Selector
             if (item.mediaType == MediaType.MOVIE && item.versions.size > 1) {
                 item {
                     Text(
@@ -1274,6 +1330,7 @@ private fun MediaDetailScreen(
                 }
             }
 
+            // Series Seasons & Episodes Selector
             if (item.mediaType == MediaType.SERIES) {
                 val seasons = episodes.map { it.seasonNumber }.distinct().sorted()
                 item {
@@ -1318,6 +1375,7 @@ private fun MediaDetailScreen(
                 }
             }
 
+            // "More Like This" Row
             if (moreLikeThis.isNotEmpty()) {
                 item {
                     MediaHorizontalRow(
@@ -1387,6 +1445,9 @@ private fun CatalogGridByTypeScreen(
     }
 }
 
+/**
+ * 3-Column Live TV Browser: Categories -> Channels with EPG -> Instant Playback & Favorites
+ */
 @Composable
 private fun LiveTvBrowserScreen(
     db: StreamVaultDatabase,
@@ -1402,6 +1463,7 @@ private fun LiveTvBrowserScreen(
     }
 
     Row(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Column 1: Live Categories
         LazyColumn(
             modifier = Modifier
                 .width(230.dp)
@@ -1424,6 +1486,7 @@ private fun LiveTvBrowserScreen(
             }
         }
 
+        // Column 2 & 3: Live Channels & EPG Program Info
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -1520,6 +1583,9 @@ private fun WatchlistScreen(
     }
 }
 
+/**
+ * Wi-Fi QR Code Setup, Sync Status, and Global Language Preferences Screen.
+ */
 @Composable
 private fun QrSetupAndSyncScreen(
     prefs: PreferencesManager,
@@ -1540,6 +1606,7 @@ private fun QrSetupAndSyncScreen(
         modifier = Modifier.fillMaxSize().padding(28.dp),
         horizontalArrangement = Arrangement.spacedBy(28.dp)
     ) {
+        // Left Card: Phone/PC Wi-Fi QR Code Setup
         Column(
             modifier = Modifier
                 .width(380.dp)
@@ -1576,6 +1643,7 @@ private fun QrSetupAndSyncScreen(
             Text(syncState.phase, color = Color(0xFF9CA3AF), fontSize = 12.sp)
         }
 
+        // Right Card: Direct TV Remote Setup & Global Hidden Languages
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
