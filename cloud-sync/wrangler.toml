@@ -1,0 +1,9 @@
+name = "streamvault-sync"
+main = "src/worker.js"
+compatibility_date = "2024-04-01"
+
+# Cloudflare D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "streamvault-db"
+database_id = "d1d96b37-9099-4455-8428-954c322cfa37"
