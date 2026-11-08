@@ -17,6 +17,10 @@ Built specifically for **TCL 55P635 (Android TV 11, API 30, 2GB RAM)** and local
 3. **Anti-Freeze ExoPlayer + Online Multi-Language Subtitle Downloader**:
    - **Built-in Online Subtitle Downloader (`SubtitleService.kt`)**: Fetches synced `.srt` subtitles in English, Urdu, Hindi, Arabic, and 50+ languages on the fly via Wyzie / OpenSubtitles—even when the IPTV stream has zero embedded subtitles—plus live **`+/-` Subtitle Timing Offset** (`-0.5s` / `+0.5s`).
    - **Smart IPTV Buffer & Auto-Reconnect**: 30s RAM buffer + automatic 3x reconnect from the exact timestamp on temporary IPTV stream drops.
+4. **v2.5 Cloud Sync & Decoupled User Profiles (Cloudflare Workers + D1)**:
+   - **Universal Cloud Continuity**: Multi-profile sync (Continue Watching, Watchlist, Ratings) decoupled from IPTV stream IDs using universal TMDB IDs.
+   - **OAuth 2.0 Device Flow**: 6-character TV pairing code + QR code for instant phone-to-TV authorization without TV remote typing.
+   - **5x2 Cinematic Grid**: 5 columns fitting exactly 10 full posters simultaneously with zero vertical clipping.
 
 ---
 
@@ -28,3 +32,6 @@ Double-click **[`Run-On-PC.bat`](./Run-On-PC.bat)** to launch the 16:9 TV Simula
 ### 2. Beam Over Wi-Fi to Your TCL 55P635 (No USB Stick Required)
 1. On your TCL 55P635 TV, enable **Developer Options -> Network Debugging** (`Settings -> Device Preferences -> About -> click Build 7 times`).
 2. Double-click **[`Push-To-TCL-TV.bat`](./Push-To-TCL-TV.bat)**, enter your TV's Wi-Fi IP address, and it will install and launch **`StreamVault-TV.apk`** directly on your TV screen over Wi-Fi.
+
+### 3. Architecture & Project Handoff
+For full system architecture, database decoupling design, Netflix OSD player specs, Bayesian rating calculations, and handoff instructions for continuing in a new session, refer to **[`STREAMVAULT_HANDOFF.md`](./STREAMVAULT_HANDOFF.md)**.
