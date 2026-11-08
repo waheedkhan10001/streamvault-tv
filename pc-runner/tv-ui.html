@@ -18,6 +18,34 @@
     --amber: #F59E0B;
     --text: #F9FAFB;
     --muted: #9CA3AF;
+    --theme-accent: #8B5CF6;
+    --theme-glow: rgba(139, 92, 246, 0.45);
+    --theme-border: #A78BFA;
+    --theme-badge-grad: linear-gradient(135deg, #7C3AED, #4C1D95);
+  }
+  body.theme-netflix {
+    --red: #E50914;
+    --red-glow: rgba(229, 9, 20, 0.45);
+    --theme-accent: #E50914;
+    --theme-glow: rgba(229, 9, 20, 0.45);
+    --theme-border: #EF4444;
+    --theme-badge-grad: linear-gradient(135deg, #E50914, #991B1B);
+  }
+  body.theme-disney {
+    --red: #0063E5;
+    --red-glow: rgba(0, 99, 229, 0.45);
+    --theme-accent: #0063E5;
+    --theme-glow: rgba(0, 99, 229, 0.45);
+    --theme-border: #60A5FA;
+    --theme-badge-grad: linear-gradient(135deg, #0063E5, #1E3A8A);
+  }
+  body.theme-prime {
+    --red: #00A8E1;
+    --red-glow: rgba(0, 168, 225, 0.45);
+    --theme-accent: #00A8E1;
+    --theme-glow: rgba(0, 168, 225, 0.45);
+    --theme-border: #38BDF8;
+    --theme-badge-grad: linear-gradient(135deg, #00A8E1, #0369A1);
   }
   * {
     box-sizing: border-box; user-select: none; margin: 0; padding: 0;
@@ -125,10 +153,10 @@
     transform: none !important;
   }
   .user-profile-pill.active {
-    border-color: #8B5CF6 !important;
+    border-color: var(--theme-accent, #8B5CF6) !important;
     color: #FFFFFF !important;
-    background: rgba(139, 92, 246, 0.25) !important;
-    box-shadow: 0 0 14px rgba(139, 92, 246, 0.35) !important;
+    background: var(--theme-glow, rgba(139, 92, 246, 0.25)) !important;
+    box-shadow: 0 0 14px var(--theme-glow, rgba(139, 92, 246, 0.35)) !important;
   }
   .user-avatar-circle {
     width: 20px; height: 20px; border-radius: 50%;
@@ -154,10 +182,10 @@
     transform: none !important;
   }
   .settings-icon-btn.active {
-    border-color: #8B5CF6 !important;
+    border-color: var(--theme-accent, #8B5CF6) !important;
     color: #FFFFFF !important;
-    background: rgba(139, 92, 246, 0.25) !important;
-    box-shadow: 0 0 14px rgba(139, 92, 246, 0.35) !important;
+    background: var(--theme-glow, rgba(139, 92, 246, 0.25)) !important;
+    box-shadow: 0 0 14px var(--theme-glow, rgba(139, 92, 246, 0.35)) !important;
   }
   .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 6px; }
 
@@ -225,7 +253,7 @@
   .row-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .row-strip-wrapper { position: relative; }
   .poster-strip {
-    display: flex; gap: 16px; overflow-x: auto; padding: 10px 4px 20px; scroll-behavior: auto;
+    display: flex; gap: 16px; overflow-x: auto; padding: 12px 14px 24px 14px; scroll-behavior: auto;
   }
   .poster-strip::-webkit-scrollbar { display: none; }
   .chevron-btn {
@@ -239,6 +267,21 @@
   .chevron-left { left: 0; border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
   .chevron-right { right: 0; border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
 
+  /* Netflix & Apple TV Standard: Home Carousel Scaled Posters (~195px) with Edge Peek */
+  .row-section .poster-card {
+    width: 195px !important;
+  }
+  .row-section .poster-img-wrap {
+    width: 187px !important;
+    height: 276px !important;
+  }
+  .row-section .card-title {
+    font-size: 13.5px !important;
+  }
+  .row-section .card-meta {
+    font-size: 11.5px !important;
+  }
+
   .poster-card {
     width: 154px; flex-shrink: 0; display: flex; flex-direction: column;
     border-radius: 12px; padding: 4px; border: 2px solid transparent;
@@ -251,15 +294,15 @@
   .poster-card.tv-focused {
     transform: scale(1.08) translateY(-4px) translateZ(0) !important;
     z-index: 25 !important;
-    border-color: transparent !important;
-    box-shadow: 0 12px 30px rgba(124, 58, 237, 0.42), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
+    border: 1.5px solid var(--theme-border, #A78BFA) !important;
+    box-shadow: 0 12px 30px var(--theme-glow, rgba(124, 58, 237, 0.42)), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
     outline: none !important;
   }
   .poster-card.is-series:hover,
   .poster-card.is-series:focus,
   .poster-card.is-series.tv-focused {
-    border: 2px solid #8B5CF6 !important;
-    box-shadow: 0 12px 32px rgba(139, 92, 246, 0.58), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
+    border: 1.5px solid var(--theme-border, #A78BFA) !important;
+    box-shadow: 0 12px 32px var(--theme-glow, rgba(139, 92, 246, 0.58)), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
   }
   .card-series-row {
     display: flex;
@@ -513,7 +556,7 @@
   .results-grid {
     flex: 1; overflow-y: auto; overflow-x: hidden !important; display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
-    gap: 15px; padding-bottom: 40px;
+    gap: 15px; padding: 12px 14px 40px 14px;
     width: 100%; box-sizing: border-box;
   }
   .results-grid .poster-card {
@@ -855,6 +898,20 @@
   </div>
 </div>
 
+<!-- Delete Profile Confirmation Modal -->
+<div id="deleteProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#120E24;border:1.5px solid #EF4444;border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
+    <div style="font-size:20px;font-weight:900;color:#FCA5A5;margin-bottom:8px;">Delete Profile?</div>
+    <div id="deleteProfileModalText" style="font-size:13.5px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
+      Are you sure you want to delete this profile? Watch history and watchlist will be permanently removed.
+    </div>
+    <div style="display:flex;gap:12px;justify-content:center;">
+      <button tabindex="0" id="btnCancelDeleteProfile" class="btn tv-focusable" style="background:#262A38;border-color:#374151;color:#FFFFFF;padding:10px 22px;" onclick="closeDeleteProfileModal()">Cancel</button>
+      <button tabindex="0" id="btnConfirmDeleteProfile" class="btn tv-focusable" style="background:#DC2626;border-color:#EF4444;color:#FFFFFF;padding:10px 22px;font-weight:800;" onclick="confirmDeleteProfile()">Delete</button>
+    </div>
+  </div>
+</div>
+
 <div class="viewport" id="mainViewport"></div>
 <div class="overlay" id="detailOverlay" style="display:none;"></div>
 <div class="player-overlay" id="playerOverlay" style="display:none;"></div>
@@ -887,14 +944,22 @@
 
 <!-- Factory Reset Confirmation Dialog -->
 <div id="factoryResetModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
-  <div style="background:#120E24;border:1.5px solid #EF4444;border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
-    <div style="font-size:22px;font-weight:900;color:#F87171;margin-bottom:8px;">Factory Reset</div>
-    <div style="font-size:14px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
-      Reset all watch history, resume bookmarks, and local ratings?
+  <div id="factoryResetCard" style="background:#120E24;border:1.5px solid #EF4444;border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
+    <div id="factoryResetConfirmView">
+      <div style="width:48px;height:48px;border-radius:50%;background:rgba(239,68,68,0.15);border:1.5px solid #EF4444;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:#F87171;font-size:22px;">⚠️</div>
+      <div style="font-size:22px;font-weight:900;color:#F87171;margin-bottom:8px;">Factory Reset</div>
+      <div style="font-size:13.5px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
+        This will permanently reset all watch history, resume bookmarks, and local preferences to clean defaults.
+      </div>
+      <div style="display:flex;gap:12px;justify-content:center;">
+        <button tabindex="0" id="btnCancelReset" class="btn tv-focusable" style="padding:10px 22px;" onclick="closeFactoryResetModal()">Cancel</button>
+        <button tabindex="0" id="btnConfirmReset" class="btn tv-focusable" style="background:#DC2626;border-color:#EF4444;color:#fff;padding:10px 22px;font-weight:800;" onclick="confirmFactoryReset()">Reset Everything</button>
+      </div>
     </div>
-    <div style="display:flex;gap:12px;justify-content:center;">
-      <button tabindex="0" id="btnCancelReset" class="btn tv-focusable" style="padding:10px 22px;" onclick="closeFactoryResetModal()">Cancel</button>
-      <button tabindex="0" class="btn tv-focusable" style="background:#DC2626;border-color:#EF4444;color:#fff;padding:10px 22px;font-weight:800;" onclick="confirmFactoryReset()">Reset Everything</button>
+    <div id="factoryResetProgressView" style="display:none;padding:12px 0;">
+      <div style="width:44px;height:44px;border:3px solid rgba(239,68,68,0.25);border-top:3px solid #EF4444;border-radius:50%;margin:0 auto 16px;animation:spin 0.8s linear infinite;"></div>
+      <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:6px;">Wiping Data...</div>
+      <div style="font-size:12px;color:#9CA3AF;">Restoring clean factory defaults</div>
     </div>
   </div>
 </div>
@@ -1096,6 +1161,7 @@ function playNavSound() {
 }
 
 async function init() {
+  applyProfileTheme(localStorage.getItem('streamvault_active_theme') || 'purple');
   renderSidebar();
   try {
     const res = await fetch('/api/state');
@@ -1979,7 +2045,7 @@ async function loadLiveTv(vp) {
   vp.innerHTML = `
     <div class="live-view-container">
       <div style="display:flex;gap:12px;margin-bottom:14px;max-width:900px;">
-        <input class="search-field tv-focusable"
+        <input id="liveSearchInput" class="search-field tv-focusable"
                readonly
                onclick="this.removeAttribute('readonly');this.focus();"
                onblur="this.setAttribute('readonly','true');"
@@ -2001,11 +2067,25 @@ function onLiveSearchInput(val) {
 }
 
 function selectLiveTab(tabId) {
+  playNavSound();
   currentLiveTab = tabId;
-  fetchLiveChannels();
+  const tabContainer = document.getElementById('liveTabBar');
+  if (tabContainer) {
+    const btns = tabContainer.querySelectorAll('.live-tab-btn');
+    btns.forEach(b => {
+      const isTarget = b.getAttribute('data-tab-id') === tabId;
+      if (isTarget) {
+        b.classList.add('active');
+        b.focus();
+      } else {
+        b.classList.remove('active');
+      }
+    });
+  }
+  fetchLiveChannels(false);
 }
 
-async function fetchLiveChannels() {
+async function fetchLiveChannels(rebuildTabs = true) {
   const tabContainer = document.getElementById('liveTabBar');
   const grid = document.getElementById('liveGrid');
   if (!grid) return;
@@ -2017,12 +2097,16 @@ async function fetchLiveChannels() {
     const tabs = data.tabs || [];
     const channels = data.channels || [];
 
-    if (tabContainer) {
+    if (tabContainer && (rebuildTabs || tabContainer.children.length === 0)) {
       tabContainer.innerHTML = tabs.map((t) => `
-        <button tabindex="0" class="live-tab-btn tv-focusable ${currentLiveTab === t.id ? 'active' : ''}" onclick="selectLiveTab('${t.id}')">
+        <button tabindex="0" data-tab-id="${t.id}" class="live-tab-btn tv-focusable ${currentLiveTab === t.id ? 'active' : ''}" onclick="selectLiveTab('${t.id}')">
           ${t.label}
         </button>
       `).join('');
+      const activeBtn = tabContainer.querySelector(`.live-tab-btn[data-tab-id="${currentLiveTab}"]`);
+      if (activeBtn && document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('live-tab-btn')) {
+        activeBtn.focus();
+      }
     }
 
     if (channels.length === 0) {
@@ -2112,7 +2196,30 @@ async function loadWatchlist(vp) {
 }
 
 // 4.5. USER PROFILES & CLOUD SYNC
-let currentActiveProfile = { id: 'prof_1', name: 'Waleed Khan', avatarColor: '#7C3AED', isKids: false };
+let currentActiveProfile = { id: 'prof_1', name: 'Waleed Khan', avatarColor: '#7C3AED', isKids: false, theme: 'purple' };
+
+function applyProfileTheme(themeKey) {
+  document.body.classList.remove('theme-netflix', 'theme-disney', 'theme-prime');
+  if (themeKey && themeKey !== 'purple' && themeKey !== 'streamvault') {
+    document.body.classList.add('theme-' + themeKey);
+  }
+  localStorage.setItem('streamvault_active_theme', themeKey || 'purple');
+}
+
+function setProfileTheme(themeKey) {
+  playNavSound();
+  currentActiveProfile.theme = themeKey;
+  applyProfileTheme(themeKey);
+  document.querySelectorAll('.profile-theme-chip').forEach(c => {
+    if (c.getAttribute('data-theme') === themeKey) {
+      c.style.border = '2.5px solid #FFFFFF';
+      c.style.transform = 'scale(1.08)';
+    } else {
+      c.style.border = '1.5px solid rgba(255,255,255,0.15)';
+      c.style.transform = 'scale(1)';
+    }
+  });
+}
 
 async function loadProfile(vp) {
   let profilesData = { profiles: [], activeProfileId: 'prof_1' };
@@ -2127,21 +2234,25 @@ async function loadProfile(vp) {
     if (cRes) cloudStatus = await cRes.json();
   } catch (_) {}
 
+  const savedTheme = localStorage.getItem('streamvault_active_theme') || 'purple';
   const profiles = (profilesData && profilesData.profiles && profilesData.profiles.length)
     ? profilesData.profiles
     : [
-        { id: 'prof_1', name: (appStatus?.credentials?.displayName || 'Waleed Khan'), avatarColor: '#7C3AED', isKids: false, isActive: true },
-        { id: 'prof_2', name: 'Family', avatarColor: '#059669', isKids: false, isActive: false },
-        { id: 'prof_3', name: 'Kids', avatarColor: '#D97706', isKids: true, isActive: false }
+        { id: 'prof_1', name: (appStatus?.credentials?.displayName || 'Waleed Khan'), avatarColor: '#7C3AED', isKids: false, isActive: true, theme: savedTheme },
+        { id: 'prof_2', name: 'Family', avatarColor: '#059669', isKids: false, isActive: false, theme: 'netflix' },
+        { id: 'prof_3', name: 'Kids', avatarColor: '#D97706', isKids: true, isActive: false, theme: 'disney' }
       ];
   const activeProf = profiles.find(p => p.id === profilesData.activeProfileId) || profiles[0];
+  if (!activeProf.theme) activeProf.theme = savedTheme;
   currentActiveProfile = { ...activeProf };
+  applyProfileTheme(currentActiveProfile.theme);
+
   const activeCodeStr = cloudStatus.activeCode?.code || 'SV-7482';
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent('https://streamvault.app/link?code=' + activeCodeStr)}`;
+  const qrUrl = activeCodeStr ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=6&data=${encodeURIComponent('https://streamvault-sync.streamvault-app.workers.dev/link?code=' + activeCodeStr)}` : '';
 
   vp.innerHTML = `
-    <div style="padding:22px 36px;max-width:1160px;margin:0 auto;box-sizing:border-box;">
-      <div style="font-size:24px;font-weight:900;letter-spacing:-0.4px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="padding:14px 32px;max-width:1160px;margin:0 auto;box-sizing:border-box;">
+      <div style="font-size:22px;font-weight:900;letter-spacing:-0.4px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
         <span>User Profiles &amp; Cloud Sync</span>
         <span style="font-size:12px;color:#A78BFA;font-weight:700;display:flex;align-items:center;gap:6px;">
           <span style="width:8px;height:8px;border-radius:50%;background:#10B981;display:inline-block;"></span>
@@ -2150,19 +2261,19 @@ async function loadProfile(vp) {
       </div>
 
       <!-- Who's Watching? Grid with Symmetrical Uniform Tiles -->
-      <div style="margin-bottom:16px;">
-        <div style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Who's Watching?</div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Who's Watching?</div>
         <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;">
           ${profiles.map(p => `
             <div tabindex="0" class="profile-card-item tv-focusable ${p.id === activeProf.id ? 'is-active-profile' : ''}"
                  onclick="switchUserProfile('${p.id}')" onfocus="playNavSound()"
-                 style="background:#120E24;border:${p.id === activeProf.id ? '2px solid #8B5CF6' : '1.5px solid #251C42'};border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;box-sizing:border-box;min-height:68px;box-shadow:${p.id === activeProf.id ? '0 0 16px rgba(139,92,246,0.35)' : 'none'};">
-              <div style="width:36px;height:36px;border-radius:50%;background:${p.avatarColor || '#7C3AED'};display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:900;flex-shrink:0;">
+                 style="background:#120E24;border:${p.id === activeProf.id ? '2px solid var(--theme-accent, #8B5CF6)' : '1.5px solid #251C42'};border-radius:12px;padding:8px 12px;display:flex;align-items:center;gap:12px;cursor:pointer;box-sizing:border-box;min-height:56px;box-shadow:${p.id === activeProf.id ? '0 0 16px var(--theme-glow, rgba(139,92,246,0.35))' : 'none'};">
+              <div class="profile-avatar-initials" style="width:34px;height:34px;border-radius:50%;background:${p.avatarColor || '#7C3AED'};display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:900;flex-shrink:0;">
                 ${escapeHtml((p.name || 'U').slice(0, 2).toUpperCase())}
               </div>
               <div style="min-width:0;flex:1;">
-                <div style="font-size:13px;font-weight:800;color:#FFFFFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name)}</div>
-                <div style="font-size:9.5px;color:${p.id === activeProf.id ? '#A78BFA' : '#9CA3AF'};font-weight:700;margin-top:2px;">
+                <div class="profile-name-text" style="font-size:13px;font-weight:800;color:#FFFFFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name)}</div>
+                <div style="font-size:9.5px;color:${p.id === activeProf.id ? 'var(--theme-border, #A78BFA)' : '#9CA3AF'};font-weight:700;margin-top:1px;">
                   ${p.id === activeProf.id ? '✓ Active Profile' : (p.isKids ? 'Kids Mode' : 'Switch')}
                 </div>
               </div>
@@ -2170,98 +2281,136 @@ async function loadProfile(vp) {
           `).join('')}
 
           <div tabindex="0" class="profile-card-item tv-focusable" onclick="promptAddNewProfile()" onfocus="playNavSound()"
-               style="background:rgba(255,255,255,0.03);border:1.5px dashed #374151;border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;box-sizing:border-box;min-height:68px;">
-            <div style="width:36px;height:36px;border-radius:50%;background:#1F2937;display:flex;align-items:center;justify-content:center;color:#9CA3AF;font-size:18px;font-weight:800;flex-shrink:0;">+</div>
+               style="background:rgba(255,255,255,0.03);border:1.5px dashed #374151;border-radius:12px;padding:8px 12px;display:flex;align-items:center;gap:12px;cursor:pointer;box-sizing:border-box;min-height:56px;">
+            <div style="width:34px;height:34px;border-radius:50%;background:#1F2937;display:flex;align-items:center;justify-content:center;color:#9CA3AF;font-size:18px;font-weight:800;flex-shrink:0;">+</div>
             <div style="font-size:13px;font-weight:700;color:#9CA3AF;">Add Profile</div>
           </div>
         </div>
       </div>
 
-      <!-- Symmetrical 50/50 Dual-Hero Cards with Identical Height & Padding -->
+      <!-- Symmetrical 50/50 Dual-Hero Cards: 100% Zero-Scroll 1080p Layout -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:stretch;">
-        <!-- Left: Active Profile Settings -->
-        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;min-height:280px;">
+        <!-- Left: Active Profile Settings & Theme Selector -->
+        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:14px 18px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;min-height:285px;">
           <div>
-            <div style="font-size:14px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <div style="font-size:13.5px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--theme-border, #A78BFA)" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               Profile Customization
             </div>
 
-            <div style="margin-bottom:10px;">
-              <label style="display:block;font-size:10.5px;font-weight:700;color:#9CA3AF;margin-bottom:4px;">Display Name</label>
+            <div style="margin-bottom:8px;">
+              <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:3px;">Display Name</label>
               <input id="profNameInput" class="search-field tv-focusable"
                      readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
                      onkeydown="onInputKeyDown(this, event)"
-                     style="width:100%;font-size:12.5px;padding:7px 10px;" value="${escapeHtml(activeProf.name)}" />
+                     style="width:100%;font-size:12px;padding:6px 10px;" value="${escapeHtml(activeProf.name)}" />
             </div>
 
-            <div style="margin-bottom:12px;">
-              <label style="display:block;font-size:10.5px;font-weight:700;color:#9CA3AF;margin-bottom:5px;">Avatar Color Theme</label>
-              <div style="display:flex;gap:8px;" id="avatarColorGroup">
-                ${['#7C3AED', '#059669', '#DC2626', '#D97706', '#2563EB', '#EC4899'].map(c => `
-                  <div tabindex="0" class="avatar-color-chip tv-focusable" onclick="setProfileAvatarColor('${c}')" onfocus="playNavSound()"
-                       data-color="${c}"
-                       style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;border:${c === activeProf.avatarColor ? '2.5px solid #FFFFFF' : '2px solid transparent'};box-sizing:border-box;"></div>
-                `).join('')}
-              </div>
-            </div>
-
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(255,255,255,0.06);">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
               <div>
-                <div style="font-size:12.5px;font-weight:800;color:#F3F4F6;">Kids Mode</div>
-                <div style="font-size:10px;color:#9CA3AF;margin-top:2px;">Filters catalog to family-friendly content</div>
+                <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:4px;">Avatar Color</label>
+                <div style="display:flex;gap:6px;" id="avatarColorGroup">
+                  ${['#7C3AED', '#059669', '#DC2626', '#D97706', '#2563EB', '#EC4899'].map(c => `
+                    <div tabindex="0" class="avatar-color-chip tv-focusable" onclick="setProfileAvatarColor('${c}')" onfocus="playNavSound()"
+                         data-color="${c}"
+                         style="width:20px;height:20px;border-radius:50%;background:${c};cursor:pointer;border:${c === activeProf.avatarColor ? '2.5px solid #FFFFFF' : '2px solid transparent'};box-sizing:border-box;"></div>
+                  `).join('')}
+                </div>
               </div>
-              <button tabindex="0" id="btnToggleKidsMode" class="btn tv-focusable" style="padding:5px 12px;font-size:11px;background:${activeProf.isKids ? '#059669' : '#1F2937'};" onclick="toggleKidsMode()">
+
+              <div>
+                <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:4px;">UI Theme Palette</label>
+                <div style="display:flex;gap:6px;" id="profileThemeGroup">
+                  <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('purple')" onfocus="playNavSound()" data-theme="purple"
+                       title="StreamVault HBO Purple"
+                       style="width:20px;height:20px;border-radius:50%;background:#8B5CF6;cursor:pointer;border:${(!activeProf.theme || activeProf.theme === 'purple') ? '2.5px solid #FFFFFF' : '1.5px solid rgba(255,255,255,0.15)'};box-sizing:border-box;"></div>
+                  <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('netflix')" onfocus="playNavSound()" data-theme="netflix"
+                       title="Netflix Red"
+                       style="width:20px;height:20px;border-radius:50%;background:#E50914;cursor:pointer;border:${activeProf.theme === 'netflix' ? '2.5px solid #FFFFFF' : '1.5px solid rgba(255,255,255,0.15)'};box-sizing:border-box;"></div>
+                  <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('disney')" onfocus="playNavSound()" data-theme="disney"
+                       title="Disney+ Blue"
+                       style="width:20px;height:20px;border-radius:50%;background:#0063E5;cursor:pointer;border:${activeProf.theme === 'disney' ? '2.5px solid #FFFFFF' : '1.5px solid rgba(255,255,255,0.15)'};box-sizing:border-box;"></div>
+                  <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('prime')" onfocus="playNavSound()" data-theme="prime"
+                       title="Prime Video Cyan"
+                       style="width:20px;height:20px;border-radius:50%;background:#00A8E1;cursor:pointer;border:${activeProf.theme === 'prime' ? '2.5px solid #FFFFFF' : '1.5px solid rgba(255,255,255,0.15)'};box-sizing:border-box;"></div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-size:12px;font-weight:800;color:#F3F4F6;">Kids Mode</div>
+                <div style="font-size:9.5px;color:#9CA3AF;">Filters catalog to family-friendly content</div>
+              </div>
+              <button tabindex="0" id="btnToggleKidsMode" class="btn tv-focusable" style="padding:4px 10px;font-size:10.5px;background:${activeProf.isKids ? '#059669' : '#1F2937'};" onclick="toggleKidsMode()">
                 ${activeProf.isKids ? 'Enabled' : 'Disabled'}
               </button>
             </div>
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);">
-            <span id="profSaveStatus" style="font-size:11px;font-weight:700;"></span>
-            <button tabindex="0" id="btnSaveProfile" class="btn btn-primary tv-focusable" style="padding:7px 18px;font-size:11.5px;" onclick="saveActiveProfile()">Save Profile</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
+            <div>
+              ${activeProf.id !== 'prof_1' ? `
+                <button tabindex="0" id="btnDeleteProfile" class="btn tv-focusable" style="background:rgba(220,38,38,0.12);border:1.5px solid #EF4444;color:#FCA5A5;padding:5px 12px;font-size:11px;font-weight:800;" onclick="openDeleteProfileModal('${activeProf.id}', '${escapeHtml(activeProf.name)}')">
+                  Delete Profile
+                </button>
+              ` : `
+                <span style="font-size:10px;font-weight:700;color:#9CA3AF;display:flex;align-items:center;gap:5px;">
+                  <span style="width:6px;height:6px;border-radius:50%;background:#10B981;"></span> Primary Profile (Default)
+                </span>
+              `}
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <span id="profSaveStatus" style="font-size:10.5px;font-weight:700;"></span>
+              <button tabindex="0" id="btnSaveProfile" class="btn btn-primary tv-focusable" style="padding:6px 18px;font-size:11px;" onclick="saveActiveProfile()">Save Profile</button>
+            </div>
           </div>
         </div>
 
-        <!-- Right: Cloud TV Link & Cross-Device Sync -->
-        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;min-height:280px;">
+        <!-- Right: Cloud TV Link & Cross-Device Sync with Large Bedside QR Code -->
+        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:14px 18px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;min-height:285px;">
           <div>
-            <div style="font-size:14px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+            <div style="font-size:13.5px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
               Cloud TV Link &amp; Multi-TV Sync
             </div>
 
             ${cloudStatus.isLinked ? `
-              <div style="display:flex;gap:12px;align-items:center;background:rgba(16,185,129,0.08);border:1.5px solid #059669;border-radius:10px;padding:12px;margin-bottom:10px;">
-                <div style="width:40px;height:40px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:900;flex-shrink:0;">✓</div>
+              <div style="display:flex;gap:14px;align-items:center;background:rgba(16,185,129,0.08);border:1.5px solid #059669;border-radius:12px;padding:14px;margin-bottom:8px;min-height:165px;">
+                <div style="width:48px;height:48px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:900;flex-shrink:0;box-shadow:0 0 20px rgba(16,185,129,0.4);">✓</div>
                 <div style="min-width:0;flex:1;">
-                  <div style="font-size:10px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:0.5px;">Cloud Account Linked</div>
-                  <div style="font-size:14px;font-weight:800;color:#FFFFFF;margin-top:2px;">${escapeHtml(cloudStatus.accountEmail || 'wkhan.10001@gmail.com')}</div>
-                  <div style="font-size:10px;color:#9CA3AF;margin-top:2px;">Auto-syncing profiles, continue watching &amp; ratings across all TVs</div>
+                  <div style="font-size:10px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:0.6px;">Cloud Account Linked</div>
+                  <div style="font-size:15px;font-weight:900;color:#FFFFFF;margin-top:3px;">${escapeHtml(cloudStatus.accountEmail || 'wkhan.10001@gmail.com')}</div>
+                  <div style="font-size:10.5px;color:#9CA3AF;line-height:1.4;margin-top:5px;">Multi-TV Cloud Synchronization is active on Cloudflare Workers &amp; D1. Watchlist, ratings, and resume progress are synchronized across all your TVs.</div>
                 </div>
               </div>
             ` : `
-              <div style="display:flex;gap:12px;align-items:center;background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:10px;margin-bottom:10px;">
-                <img id="tvLinkQrImg" src="${qrUrl}" alt="Scan QR" style="width:76px;height:76px;border-radius:6px;background:#fff;padding:2px;flex-shrink:0;" />
+              <div style="display:flex;gap:14px;align-items:center;background:#0A0814;border:1px solid #1E1736;border-radius:12px;padding:10px 14px;margin-bottom:8px;min-height:165px;">
+                <div style="background:#FFFFFF;border-radius:8px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,0.6);flex-shrink:0;">
+                  <img id="tvLinkQrImg" src="${qrUrl}" alt="Scan QR" style="width:155px;height:155px;display:block;border-radius:4px;" />
+                </div>
                 <div style="min-width:0;flex:1;">
-                  <div style="font-size:9.5px;font-weight:700;color:#9CA3AF;text-transform:uppercase;">6-Digit Pairing Code</div>
-                  <div style="font-size:20px;font-weight:900;letter-spacing:3px;color:#A78BFA;margin:2px 0;" id="tvLinkCodeDisplay">${escapeHtml(activeCodeStr)}</div>
-                  <div style="font-size:10px;color:#9CA3AF;line-height:1.35;">Scan QR or open <b style="color:#DDD6FE;">streamvault-app.workers.dev/link</b> to link any TV.</div>
+                  <div style="font-size:9.5px;font-weight:800;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.8px;">Bedside Quick Link</div>
+                  <div style="font-size:22px;font-weight:900;letter-spacing:3px;color:var(--theme-border, #A78BFA);margin:1px 0 4px;" id="tvLinkCodeDisplay">${escapeHtml(activeCodeStr)}</div>
+                  <div style="font-size:10.5px;color:#D1D5DB;line-height:1.45;">
+                    <div>• Scan with phone camera</div>
+                    <div>• Instant TV sync in 1 tap</div>
+                  </div>
+                  <div style="font-size:9.5px;color:var(--theme-border, #8B5CF6);margin-top:6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Or visit: streamvault-app.workers.dev/link</div>
                 </div>
               </div>
             `}
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);">
-            <button tabindex="0" id="btnSignOutAccount" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:6px 12px;font-size:11px;" onclick="openSignOutModal()">Sign Out</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
+            <button tabindex="0" id="btnSignOutAccount" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:5px 12px;font-size:10.5px;" onclick="openSignOutModal()">Sign Out</button>
             <div style="display:flex;gap:8px;align-items:center;">
-              <button tabindex="0" id="btnReqNewTvCode" class="btn tv-focusable" style="padding:6px 12px;font-size:11px;" onclick="requestNewTvCode()">New Code</button>
-              <button tabindex="0" id="btnSyncNow" class="btn btn-primary tv-focusable" style="padding:6px 16px;font-size:11.5px;background:#059669;border-color:#10B981;" onclick="triggerCloudSync()">Sync Now</button>
+              <button tabindex="0" id="btnReqNewTvCode" class="btn tv-focusable" style="padding:5px 12px;font-size:10.5px;" onclick="requestNewTvCode()">New Code</button>
+              <button tabindex="0" id="btnSyncNow" class="btn btn-primary tv-focusable" style="padding:5px 14px;font-size:11px;background:#059669;border-color:#10B981;" onclick="triggerCloudSync()">Sync Now</button>
             </div>
           </div>
         </div>
       </div>
-    </div>
     </div>
   `;
 
@@ -2313,6 +2462,8 @@ function setProfileAvatarColor(color) {
       c.style.border = '2px solid transparent';
     }
   });
+  const activeAvatar = document.querySelector('.profile-card-item.is-active-profile .profile-avatar-initials');
+  if (activeAvatar) activeAvatar.style.background = color;
 }
 
 function toggleKidsMode() {
@@ -2341,7 +2492,8 @@ async function saveActiveProfile() {
         profileId: currentActiveProfile.id,
         name: newName,
         avatarColor: currentActiveProfile.avatarColor,
-        isKids: currentActiveProfile.isKids
+        isKids: currentActiveProfile.isKids,
+        theme: currentActiveProfile.theme || 'purple'
       })
     });
     const d = await res.json();
@@ -2349,6 +2501,13 @@ async function saveActiveProfile() {
       if (status) { status.style.color = '#10B981'; status.innerText = '✓ Saved successfully'; }
       const sideName = document.getElementById('sidebarProfileName');
       if (sideName) sideName.innerText = newName.split(' ')[0];
+
+      // Update top active profile card in "Who's Watching?" row immediately!
+      const activeCardTitle = document.querySelector('.profile-card-item.is-active-profile .profile-name-text');
+      if (activeCardTitle) activeCardTitle.innerText = newName;
+      const activeCardAvatar = document.querySelector('.profile-card-item.is-active-profile .profile-avatar-initials');
+      if (activeCardAvatar) activeCardAvatar.innerText = (newName || 'U').slice(0, 2).toUpperCase();
+
       setTimeout(() => { if (status) status.innerText = ''; }, 2500);
     }
   } catch (err) {
@@ -2356,10 +2515,64 @@ async function saveActiveProfile() {
   }
 }
 
-function promptAddNewProfile() {
-  const pName = prompt('Enter new Profile name:', 'Family Member');
-  if (!pName || !pName.trim()) return;
-  saveActiveProfile();
+async function promptAddNewProfile() {
+  playNavSound();
+  try {
+    const res = await fetch('/api/profiles/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Family Member' })
+    });
+    const d = await res.json();
+    if (d.success && d.profile) {
+      await switchUserProfile(d.profile.id);
+    }
+  } catch (_) {}
+}
+
+let pendingDeleteProfileId = null;
+
+function openDeleteProfileModal(profileId, profileName) {
+  playNavSound();
+  pendingDeleteProfileId = profileId;
+  const modal = document.getElementById('deleteProfileModal');
+  const title = document.getElementById('deleteProfileModalText');
+  if (title) title.innerText = `Are you sure you want to delete profile "${profileName}"? Watch history and watchlist for this profile will be permanently removed.`;
+  if (modal) {
+    modal.style.display = 'flex';
+    const btnCancel = document.getElementById('btnCancelDeleteProfile');
+    if (btnCancel) btnCancel.focus();
+  }
+}
+
+function closeDeleteProfileModal() {
+  playNavSound();
+  pendingDeleteProfileId = null;
+  const modal = document.getElementById('deleteProfileModal');
+  if (modal) {
+    modal.style.display = 'none';
+    const btn = document.getElementById('btnDeleteProfile') || document.getElementById('btnSaveProfile');
+    if (btn) btn.focus();
+  }
+}
+
+async function confirmDeleteProfile() {
+  playNavSound();
+  if (!pendingDeleteProfileId) return;
+  try {
+    const res = await fetch('/api/profiles/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: pendingDeleteProfileId })
+    });
+    const d = await res.json();
+    if (d.success) {
+      closeDeleteProfileModal();
+      await loadProfile(document.getElementById('mainViewport'));
+    }
+  } catch (_) {
+    closeDeleteProfileModal();
+  }
 }
 
 async function requestNewTvCode() {
@@ -2421,7 +2634,7 @@ async function confirmSignOutAccount() {
   await loadProfile(document.getElementById('mainViewport'));
 }
 
-// 5. COMPREHENSIVE SETTINGS (System, IPTV, Playback & Privacy)
+// 5. COMPREHENSIVE SETTINGS (Symmetrical 2x2 Grid / 4 Equal Quadrants)
 function loadSettings(vp) {
   const creds = (appStatus && appStatus.credentials) || {};
 
@@ -2432,95 +2645,95 @@ function loadSettings(vp) {
         <span style="font-size:12px;color:var(--muted);font-weight:600;">StreamVault TV v2.5</span>
       </div>
 
-      <div style="display:grid;grid-template-columns:1.05fr 0.95fr;gap:14px;align-items:start;">
-        <!-- Left Column: IPTV Provider & Factory Reset -->
-        <div style="display:flex;flex-direction:column;gap:12px;">
-          <!-- 1. IPTV Provider Credentials -->
-          <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:12px 14px;">
-            <div style="font-size:14px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;box-sizing:border-box;">
+        <!-- Quadrant 1 (Top-Left): IPTV Provider & Playlists -->
+        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;justify-content:space-between;min-height:220px;box-sizing:border-box;">
+          <div>
+            <div style="font-size:14px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
               IPTV Provider &amp; Playlists
             </div>
             
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px;">
               <div style="grid-column:1/-1;">
-                <label style="display:block;font-size:10.5px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Playlist Name</label>
+                <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Playlist Name</label>
                 <input id="setPlaylistName" class="search-field tv-focusable"
                        readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
                        onkeydown="onInputKeyDown(this, event)"
                        style="width:100%;font-size:11.5px;padding:6px 9px;" value="${escapeHtml(creds.playlistName || 'StreamVault IPTV')}" />
               </div>
               <div style="grid-column:1/-1;">
-                <label style="display:block;font-size:10.5px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Server URL</label>
+                <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Server URL</label>
                 <input id="setServerUrl" class="search-field tv-focusable"
                        readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
                        onkeydown="onInputKeyDown(this, event)"
                        style="width:100%;font-size:11.5px;padding:6px 9px;" value="${escapeHtml(creds.serverUrl || '')}" placeholder="http://example.com:8080" />
               </div>
               <div>
-                <label style="display:block;font-size:10.5px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Username</label>
+                <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Username</label>
                 <input id="setUsername" class="search-field tv-focusable"
                        readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
                        onkeydown="onInputKeyDown(this, event)"
                        style="width:100%;font-size:11.5px;padding:6px 9px;" value="${escapeHtml(creds.username || '')}" placeholder="Username" />
               </div>
               <div>
-                <label style="display:block;font-size:10.5px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Password</label>
+                <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Password</label>
                 <input id="setPassword" type="password" class="search-field tv-focusable"
                        readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
                        onkeydown="onInputKeyDown(this, event)"
                        style="width:100%;font-size:11.5px;padding:6px 9px;" value="${escapeHtml(creds.password || '')}" placeholder="Password" />
               </div>
             </div>
-            
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span id="accountSaveStatus" style="font-size:11px;font-weight:700;"></span>
-              <button tabindex="0" id="btnSaveAccount" class="btn btn-primary tv-focusable" style="padding:6px 14px;font-size:11.5px;" onclick="saveAccountCredentials()">Save &amp; Connect</button>
-            </div>
           </div>
-
-          <!-- Clean Factory Reset -->
-          <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:12px 14px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <div>
-                <div style="font-size:13.5px;font-weight:800;color:#F87171;">Factory Reset</div>
-                <div style="font-size:10.5px;color:#9CA3AF;margin-top:2px;">Wipes local database &amp; settings</div>
-              </div>
-              <button tabindex="0" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:6px 14px;font-size:11px;" onclick="openFactoryResetModal()">Reset</button>
-            </div>
+          
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);">
+            <span id="accountSaveStatus" style="font-size:11px;font-weight:700;"></span>
+            <button tabindex="0" id="btnSaveAccount" class="btn btn-primary tv-focusable" style="padding:6px 16px;font-size:11.5px;" onclick="saveAccountCredentials()">Save &amp; Connect</button>
           </div>
         </div>
 
-        <!-- Right Column: Playback Defaults, Parental PIN & Privacy -->
-        <div style="display:flex;flex-direction:column;gap:12px;">
-          <!-- 2. Video & Audio Playback Defaults -->
-          <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:12px 14px;">
-            <div style="font-size:14px;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+        <!-- Quadrant 2 (Top-Right): Playback & Hardware Engine -->
+        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;justify-content:space-between;min-height:220px;box-sizing:border-box;">
+          <div>
+            <div style="font-size:14px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-              Playback &amp; Hardware Acceleration
+              Playback &amp; Hardware Engine
             </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#D1D5DB;margin-bottom:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#D1D5DB;margin-bottom:8px;">
               <span>Hardware Decoder</span>
-              <span style="color:#10B981;font-weight:800;">HW+ ExoPlayer Media3</span>
+              <span style="color:#10B981;font-weight:800;background:rgba(16,185,129,0.1);padding:2px 8px;border-radius:4px;border:1px solid rgba(16,185,129,0.3);">HW+ ExoPlayer Media3</span>
             </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#D1D5DB;margin-bottom:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#D1D5DB;margin-bottom:8px;">
               <span>Audio Priority</span>
-              <span style="color:#DDD6FE;font-weight:700;">English (5.1ch Surround)</span>
+              <button tabindex="0" id="btnAudioPriority" class="btn tv-focusable" style="padding:4px 10px;font-size:11px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleAudioPriority()">English (5.1ch Surround)</button>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#D1D5DB;margin-bottom:8px;">
+              <span>Stream Dedup Quality</span>
+              <button tabindex="0" id="btnDedupQuality" class="btn tv-focusable" style="padding:4px 10px;font-size:11px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleDedupQuality()">4K UHD &gt; Clean HQ* &gt; 1080p</button>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:#D1D5DB;">
-              <span>Stream Dedup Quality</span>
-              <span style="color:#DDD6FE;font-weight:700;">4K UHD &gt; Clean HQ* &gt; 1080p</span>
+              <span>Stream Probing</span>
+              <span style="color:#9CA3AF;font-weight:600;">11-Byte Fast Range Probe (40ms)</span>
             </div>
           </div>
 
-          <!-- 3. Master 4-Digit Parental PIN -->
-          <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:12px 14px;">
-            <div style="font-size:14px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);font-size:11px;color:#9CA3AF;">
+            <span style="display:flex;align-items:center;gap:5px;">
+              <span style="width:6px;height:6px;border-radius:50%;background:#10B981;"></span> Zero-Lag Precision Seek (10s Step)
+            </span>
+            <span style="color:#10B981;font-weight:800;">Optimal 60 FPS</span>
+          </div>
+        </div>
+
+        <!-- Quadrant 3 (Bottom-Left): Parental Controls & PIN -->
+        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;justify-content:space-between;min-height:190px;box-sizing:border-box;">
+          <div>
+            <div style="font-size:14px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Parental PIN
+              Parental Controls &amp; PIN
             </div>
 
-            <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:6px;">
+            <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;">
               <div style="flex:1;">
                 <label style="display:block;font-size:10px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Current</label>
                 <input id="setCurPin" type="password" maxlength="4" class="search-field tv-focusable"
@@ -2546,33 +2759,51 @@ function loadSettings(vp) {
                        style="width:100%;font-size:12.5px;letter-spacing:3px;text-align:center;padding:6px 4px;" placeholder="••••" />
               </div>
               <div>
-                <button tabindex="0" id="btnUpdatePin" class="btn tv-focusable" style="padding:6px 12px;font-size:11.5px;" onclick="changeParentalPin()">Update</button>
+                <button tabindex="0" id="btnUpdatePin" class="btn tv-focusable" style="padding:6px 14px;font-size:11.5px;" onclick="changeParentalPin()">Update</button>
               </div>
             </div>
-            <div id="pinChangeStatus" style="font-size:10.5px;font-weight:700;height:14px;"></div>
-          </div>
 
-          <!-- 4. Privacy & Vault Access -->
-          <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:12px 14px;">
-            <div style="font-size:14px;font-weight:800;margin-bottom:10px;display:flex;align-items:center;gap:8px;">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              Privacy &amp; Vault Access
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-              <div>
-                <div style="font-size:13px;font-weight:700;color:#F3F4F6;">Search History</div>
-                <div style="font-size:10.5px;color:#9CA3AF;margin-top:2px;">Wipe recent searches</div>
-              </div>
-              <button tabindex="0" class="btn tv-focusable" style="padding:6px 14px;font-size:11px;" onclick="openClearAllHistoryModal()">Clear</button>
-            </div>
             <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
-                <div style="font-size:13px;font-weight:700;color:#F3F4F6;">Adult Vault Session</div>
+                <div style="font-size:12px;font-weight:700;color:#F3F4F6;">Adult Vault Session</div>
                 <div id="parentalSessionStatusText" style="display:none;"></div>
+                <div style="font-size:10px;color:#9CA3AF;margin-top:1px;">Locked by default; auto-locks on standby</div>
               </div>
-              <button tabindex="0" id="btnToggleParentalLock" class="btn tv-focusable" style="padding:6px 14px;font-size:11px;" onclick="toggleParentalLockSession()">Unlock</button>
+              <button tabindex="0" id="btnToggleParentalLock" class="btn tv-focusable" style="padding:5px 14px;font-size:11px;" onclick="toggleParentalLockSession()">Unlock</button>
             </div>
-            <div id="searchHistoryClearStatus" style="font-size:10.5px;font-weight:700;height:12px;margin-top:4px;"></div>
+          </div>
+
+          <div id="pinChangeStatus" style="font-size:10.5px;font-weight:700;height:14px;margin-top:6px;"></div>
+        </div>
+
+        <!-- Quadrant 4 (Bottom-Right): Privacy & System Maintenance -->
+        <div class="settings-card" style="background:#120E24;border:1px solid #251C42;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;justify-content:space-between;min-height:190px;box-sizing:border-box;">
+          <div>
+            <div style="font-size:14px;font-weight:800;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              Privacy &amp; Maintenance
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div>
+                <div style="font-size:12.5px;font-weight:700;color:#F3F4F6;">Search History</div>
+                <div style="font-size:10px;color:#9CA3AF;margin-top:1px;">Wipe recent searches from remote suggestions</div>
+              </div>
+              <button tabindex="0" id="btnClearHistory" class="btn tv-focusable" style="padding:5px 14px;font-size:11px;" onclick="openClearAllHistoryModal()">Clear</button>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-size:12.5px;font-weight:800;color:#F87171;">Factory Reset</div>
+                <div style="font-size:10px;color:#9CA3AF;margin-top:1px;">Wipes local database &amp; settings</div>
+              </div>
+              <button tabindex="0" id="btnFactoryReset" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:5px 14px;font-size:11px;" onclick="openFactoryResetModal()">Reset</button>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);font-size:10.5px;color:#9CA3AF;">
+            <span>Data Protection Active</span>
+            <span style="color:#A78BFA;font-weight:700;">TMDB Universally Keyed</span>
           </div>
         </div>
       </div>
@@ -2588,6 +2819,24 @@ function loadSettings(vp) {
       playNavSound();
     }
   }, 40);
+}
+
+let currentAudioPriorityIdx = 0;
+const audioPriorityOptions = ['English (5.1ch Surround)', 'Original Stream (Pass-through)', 'Stereo (AAC 2.0)'];
+function toggleAudioPriority() {
+  playNavSound();
+  currentAudioPriorityIdx = (currentAudioPriorityIdx + 1) % audioPriorityOptions.length;
+  const btn = document.getElementById('btnAudioPriority');
+  if (btn) btn.innerText = audioPriorityOptions[currentAudioPriorityIdx];
+}
+
+let currentDedupIdx = 0;
+const dedupQualityOptions = ['4K UHD > Clean HQ* > 1080p', '1080p Only (Fast Buffer)', 'Adaptive Multi-Bitrate'];
+function toggleDedupQuality() {
+  playNavSound();
+  currentDedupIdx = (currentDedupIdx + 1) % dedupQualityOptions.length;
+  const btn = document.getElementById('btnDedupQuality');
+  if (btn) btn.innerText = dedupQualityOptions[currentDedupIdx];
 }
 
 // TV Remote & Soft Keyboard Auto-Advance and Spatial Navigation for Text Boxes
@@ -2670,31 +2919,34 @@ function moveToPreviousInput(currentInput) {
 function onPinInput(el) {
   el.value = el.value.replace(/\D/g, '');
   if (el.value.length >= 4) {
-    advanceToNextInput(el);
+    if (el.id === 'setCurPin') {
+      const next = document.getElementById('setNewPin');
+      if (next) { next.removeAttribute('readonly'); next.focus(); playNavSound(); }
+    } else if (el.id === 'setNewPin') {
+      const next = document.getElementById('setConfirmPin');
+      if (next) { next.removeAttribute('readonly'); next.focus(); playNavSound(); }
+    } else if (el.id === 'setConfirmPin') {
+      const next = document.getElementById('btnUpdatePin');
+      if (next) { next.focus(); playNavSound(); }
+    }
   }
 }
 
 function onInputKeyDown(el, event) {
   const isEnter = event.key === 'Enter' || event.keyCode === 13 || event.key === 'Select';
-  const isRight = event.key === 'ArrowRight' || event.keyCode === 39;
-  const isLeft = event.key === 'ArrowLeft' || event.keyCode === 37;
-  const isDown = event.key === 'ArrowDown' || event.keyCode === 40;
-  const isUp = event.key === 'ArrowUp' || event.keyCode === 38;
   const isBack = event.key === 'Backspace' || event.keyCode === 8;
 
   if (isEnter) {
     event.preventDefault();
-    advanceToNextInput(el);
-  } else if (isDown) {
-    event.preventDefault();
-    advanceToNextInput(el);
-  } else if (isUp) {
-    event.preventDefault();
-    moveToPreviousInput(el);
-  } else if (isRight && (el.maxLength <= 4 || el.selectionStart >= el.value.length)) {
-    if (advanceToNextInput(el)) event.preventDefault();
-  } else if (isLeft && (el.maxLength <= 4 || el.selectionStart === 0)) {
-    if (moveToPreviousInput(el)) event.preventDefault();
+    if (el.id === 'setPassword') {
+      const btn = document.getElementById('btnSaveAccount');
+      if (btn) btn.focus();
+    } else if (el.id === 'setConfirmPin') {
+      const btn = document.getElementById('btnUpdatePin');
+      if (btn) btn.focus();
+    } else {
+      advanceToNextInput(el);
+    }
   } else if (isBack && el.value.length === 0) {
     if (moveToPreviousInput(el)) event.preventDefault();
   }
@@ -2849,24 +3101,57 @@ function switchProfileFlow() {
   navigateToTab('SETTINGS');
 }
 
+function showToast(msg, durationMs = 3200) {
+  let toast = document.getElementById('tvToastNotification');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'tvToastNotification';
+    toast.style.cssText = 'position:fixed;bottom:36px;left:50%;transform:translateX(-50%);background:#1A1333;border:1.5px solid var(--theme-border,#8B5CF6);border-radius:30px;padding:11px 26px;font-size:13.5px;font-weight:800;color:#FFFFFF;box-shadow:0 12px 36px rgba(0,0,0,0.85);z-index:99999;pointer-events:none;opacity:0;transition:opacity 0.25s ease,transform 0.25s ease;display:flex;align-items:center;gap:10px;';
+    document.body.appendChild(toast);
+  }
+  toast.innerHTML = msg;
+  toast.style.opacity = '1';
+  toast.style.transform = 'translateX(-50%) translateY(0)';
+  if (window._toastTimer) clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(12px)';
+  }, durationMs);
+}
+
 function closeFactoryResetModal() {
   playNavSound();
   const m = document.getElementById('factoryResetModal');
   if (m) m.style.display = 'none';
+  const confirmView = document.getElementById('factoryResetConfirmView');
+  const progressView = document.getElementById('factoryResetProgressView');
+  if (confirmView && progressView) {
+    confirmView.style.display = 'block';
+    progressView.style.display = 'none';
+  }
 }
 
 async function confirmFactoryReset() {
   playNavSound();
+  const confirmView = document.getElementById('factoryResetConfirmView');
+  const progressView = document.getElementById('factoryResetProgressView');
+  if (confirmView && progressView) {
+    confirmView.style.display = 'none';
+    progressView.style.display = 'block';
+  }
   try {
     const res = await fetch('/api/factory-reset', { method: 'POST' });
     const d = await res.json();
-    closeFactoryResetModal();
-    alert('✅ StreamVault TV has been reset to clean factory defaults.');
-    const sRes = await fetch('/api/state');
-    appStatus = await sRes.json();
-    await navigateToTab('HOME');
+    setTimeout(async () => {
+      closeFactoryResetModal();
+      showToast('✓ Factory Reset Complete — TV restored to default state');
+      const sRes = await fetch('/api/state');
+      appStatus = await sRes.json();
+      await navigateToTab('HOME');
+    }, 700);
   } catch (err) {
-    alert(`Error: ${err.message}`);
+    closeFactoryResetModal();
+    showToast(`Error: ${err.message}`);
   }
 }
 
@@ -4247,6 +4532,19 @@ window.handleAppBackKey = function() {
 // 10. FAST O(1) DIRECT SIBLING & ROW NAVIGATION (Zero Reflow Remote Response)
 let lastContentFocusTarget = null;
 
+function getActiveSidebarElement() {
+  if (currentTab === 'PROFILE') {
+    return document.getElementById('sidebarUserProfilePill') || document.querySelector('.user-profile-pill');
+  }
+  if (currentTab === 'SETTINGS') {
+    return document.getElementById('sidebarSettingsBtn') || document.querySelector('.settings-icon-btn');
+  }
+  return document.querySelector(`.nav-btn[data-tab="${currentTab}"]`) ||
+         document.querySelector('.nav-btn.active') ||
+         document.querySelector('#navList .nav-btn') ||
+         document.getElementById('sidebarUserProfilePill');
+}
+
 function fastNavigate(current, key) {
   if (!current) return false;
   if (current.closest && current.closest('#mainViewport')) {
@@ -4575,7 +4873,7 @@ function fastNavigate(current, key) {
       const firstCard = document.querySelector('#filterResultsGrid .poster-card');
       if (firstCard) { firstCard.focus(); playNavSound(); return true; }
     } else if (key === 'ArrowLeft') {
-      const activeNav = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
+      const activeNav = getActiveSidebarElement();
       if (activeNav) { activeNav.focus(); playNavSound(); return true; }
     }
   }
@@ -4595,6 +4893,79 @@ function fastNavigate(current, key) {
       const firstCard = document.querySelector('#filterResultsGrid .poster-card');
       if (firstCard) { firstCard.focus(); playNavSound(); return true; }
     }
+  }
+
+  // Live TV Fast Navigation
+  if (current.id === 'liveSearchInput') {
+    if (key === 'ArrowLeft') {
+      const activeNav = getActiveSidebarElement();
+      if (activeNav) { activeNav.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowDown') {
+      const firstTab = document.querySelector('.live-tab-btn');
+      if (firstTab) { firstTab.focus(); playNavSound(); return true; }
+    }
+  }
+
+  if (current.classList && current.classList.contains('live-tab-btn')) {
+    const tabs = Array.from(document.querySelectorAll('.live-tab-btn'));
+    const idx = tabs.indexOf(current);
+    if (key === 'ArrowLeft') {
+      if (idx > 0) {
+        tabs[idx - 1].focus(); playNavSound(); return true;
+      } else {
+        const activeNav = getActiveSidebarElement();
+        if (activeNav) { activeNav.focus(); playNavSound(); return true; }
+      }
+    } else if (key === 'ArrowRight') {
+      if (idx >= 0 && idx < tabs.length - 1) {
+        tabs[idx + 1].focus(); playNavSound(); return true;
+      }
+    } else if (key === 'ArrowUp') {
+      const inp = document.getElementById('liveSearchInput');
+      if (inp) { inp.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowDown') {
+      const firstWatchBtn = document.querySelector('#liveGrid .live-channel-card button.tv-focusable');
+      if (firstWatchBtn) { firstWatchBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  if (current.closest && current.closest('.live-channel-card')) {
+    const cards = Array.from(document.querySelectorAll('#liveGrid .live-channel-card'));
+    const currentCard = current.closest('.live-channel-card');
+    const idx = cards.indexOf(currentCard);
+    if (idx >= 0) {
+      if (key === 'ArrowLeft') {
+        if (idx % 2 === 0) {
+          const activeNav = getActiveSidebarElement();
+          if (activeNav) { activeNav.focus(); playNavSound(); return true; }
+        } else {
+          const prevBtn = cards[idx - 1]?.querySelector('button.tv-focusable');
+          if (prevBtn) { prevBtn.focus(); playNavSound(); return true; }
+        }
+      } else if (key === 'ArrowRight') {
+        if (idx % 2 === 0 && idx + 1 < cards.length) {
+          const nextBtn = cards[idx + 1]?.querySelector('button.tv-focusable');
+          if (nextBtn) { nextBtn.focus(); playNavSound(); return true; }
+        }
+        return true;
+      } else if (key === 'ArrowUp') {
+        if (idx >= 2) {
+          const upBtn = cards[idx - 2]?.querySelector('button.tv-focusable');
+          if (upBtn) { upBtn.focus(); playNavSound(); upBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return true; }
+        } else {
+          const activeTab = document.querySelector('.live-tab-btn.active') || document.querySelector('.live-tab-btn');
+          if (activeTab) { activeTab.focus(); playNavSound(); return true; }
+        }
+      } else if (key === 'ArrowDown') {
+        if (idx + 2 < cards.length) {
+          const downBtn = cards[idx + 2]?.querySelector('button.tv-focusable');
+          if (downBtn) { downBtn.focus(); playNavSound(); downBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return true; }
+        }
+        return true;
+      }
+    }
+    return true;
   }
 
   if (current.id === 'btnVoiceSearch') {
@@ -4632,7 +5003,7 @@ function fastNavigate(current, key) {
         if (inp) { inp.focus(); playNavSound(); return true; }
       }
     } else if (key === 'ArrowLeft') {
-      const activeNav = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
+      const activeNav = getActiveSidebarElement();
       if (activeNav) { activeNav.focus(); playNavSound(); return true; }
     } else if (key === 'ArrowRight') {
       const btn = document.getElementById('filterSearchBtn');
@@ -4676,7 +5047,7 @@ function fastNavigate(current, key) {
       if (idx > 0) {
         cards[idx - 1].focus(); playNavSound(); return true;
       } else {
-        const userPill = document.getElementById('sidebarUserProfilePill');
+        const userPill = getActiveSidebarElement();
         if (userPill) { userPill.focus(); playNavSound(); return true; }
       }
     } else if (key === 'ArrowDown') {
@@ -4691,7 +5062,7 @@ function fastNavigate(current, key) {
       const activeCard = document.querySelector('.profile-card-item.is-active-profile') || document.querySelector('.profile-card-item');
       if (activeCard) { activeCard.focus(); playNavSound(); return true; }
     } else if (key === 'ArrowLeft') {
-      const userPill = document.getElementById('sidebarUserProfilePill');
+      const userPill = getActiveSidebarElement();
       if (userPill) { userPill.focus(); playNavSound(); return true; }
     } else if (key === 'ArrowRight') {
       const qrBtn = document.getElementById('btnReqNewTvCode') || document.getElementById('btnSyncNow');
@@ -4709,12 +5080,15 @@ function fastNavigate(current, key) {
     if (key === 'ArrowRight') {
       if (idx >= 0 && idx < chips.length - 1) {
         chips[idx + 1].focus(); playNavSound(); return true;
+      } else {
+        const firstTheme = document.querySelector('.profile-theme-chip');
+        if (firstTheme) { firstTheme.focus(); playNavSound(); return true; }
       }
     } else if (key === 'ArrowLeft') {
       if (idx > 0) {
         chips[idx - 1].focus(); playNavSound(); return true;
       } else {
-        const userPill = document.getElementById('sidebarUserProfilePill');
+        const userPill = getActiveSidebarElement();
         if (userPill) { userPill.focus(); playNavSound(); return true; }
       }
     } else if (key === 'ArrowUp') {
@@ -4727,14 +5101,195 @@ function fastNavigate(current, key) {
     return true;
   }
 
-  // Settings & Profile screen Left navigation to sidebar
-  if (currentTab === 'SETTINGS' && key === 'ArrowLeft') {
-    const leftInputs = ['setPlaylistName', 'setServerUrl', 'setUsername', 'btnSaveAccount'];
-    if (leftInputs.includes(current.id) || current.closest('#btnSaveAccount')) {
-      const settingsBtn = document.getElementById('sidebarSettingsBtn');
-      if (settingsBtn) { settingsBtn.focus(); playNavSound(); return true; }
+  if (current.classList && current.classList.contains('profile-theme-chip')) {
+    const themes = Array.from(document.querySelectorAll('.profile-theme-chip'));
+    const idx = themes.indexOf(current);
+    if (key === 'ArrowRight') {
+      if (idx >= 0 && idx < themes.length - 1) {
+        themes[idx + 1].focus(); playNavSound(); return true;
+      } else {
+        const rightBtn = document.getElementById('btnReqNewTvCode') || document.getElementById('btnSyncNow');
+        if (rightBtn) { rightBtn.focus(); playNavSound(); return true; }
+      }
+    } else if (key === 'ArrowLeft') {
+      if (idx > 0) {
+        themes[idx - 1].focus(); playNavSound(); return true;
+      } else {
+        const chips = Array.from(document.querySelectorAll('.avatar-color-chip'));
+        if (chips.length > 0) { chips[chips.length - 1].focus(); playNavSound(); return true; }
+      }
+    } else if (key === 'ArrowUp') {
+      const inp = document.getElementById('profNameInput');
+      if (inp) { inp.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowDown') {
+      const kidsBtn = document.getElementById('btnToggleKidsMode');
+      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  if (current.id === 'btnToggleKidsMode') {
+    if (key === 'ArrowLeft') {
+      const s = getActiveSidebarElement();
+      if (s) { s.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowUp') {
+      const firstChip = document.querySelector('.avatar-color-chip');
+      if (firstChip) { firstChip.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowDown') {
+      const saveBtn = document.getElementById('btnSaveProfile');
+      if (saveBtn) { saveBtn.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowRight') {
+      const rightBtn = document.getElementById('btnReqNewTvCode') || document.getElementById('btnSyncNow');
+      if (rightBtn) { rightBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  if (current.id === 'btnSaveProfile') {
+    if (key === 'ArrowLeft') {
+      const delBtn = document.getElementById('btnDeleteProfile');
+      if (delBtn) { delBtn.focus(); playNavSound(); return true; }
+      const s = getActiveSidebarElement();
+      if (s) { s.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowUp') {
+      const kidsBtn = document.getElementById('btnToggleKidsMode');
+      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowRight') {
+      const syncBtn = document.getElementById('btnSyncNow');
+      if (syncBtn) { syncBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  if (current.id === 'btnDeleteProfile') {
+    if (key === 'ArrowLeft') {
+      const s = getActiveSidebarElement();
+      if (s) { s.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowRight') {
+      const saveBtn = document.getElementById('btnSaveProfile');
+      if (saveBtn) { saveBtn.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowUp') {
+      const kidsBtn = document.getElementById('btnToggleKidsMode');
+      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  if (current.id === 'btnSignOutAccount') {
+    if (key === 'ArrowLeft') {
+      const saveBtn = document.getElementById('btnSaveProfile');
+      if (saveBtn) { saveBtn.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowRight') {
+      const newCodeBtn = document.getElementById('btnReqNewTvCode');
+      if (newCodeBtn) { newCodeBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  if (current.id === 'btnReqNewTvCode') {
+    if (key === 'ArrowLeft') {
+      const signOutBtn = document.getElementById('btnSignOutAccount');
+      if (signOutBtn) { signOutBtn.focus(); playNavSound(); return true; }
+    } else if (key === 'ArrowRight') {
+      const syncBtn = document.getElementById('btnSyncNow');
+      if (syncBtn) { syncBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  if (current.id === 'btnSyncNow') {
+    if (key === 'ArrowLeft') {
+      const newCodeBtn = document.getElementById('btnReqNewTvCode');
+      if (newCodeBtn) { newCodeBtn.focus(); playNavSound(); return true; }
+    }
+    return true;
+  }
+
+  // Settings Screen Full 2x2 Quadrant Navigation
+  if (currentTab === 'SETTINGS') {
+    // Quadrant 1 (Top-Left: IPTV Provider & Playlists)
+    if (current.id === 'setPlaylistName') {
+      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('setServerUrl'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { return true; }
+    } else if (current.id === 'setServerUrl') {
+      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('setPlaylistName'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('setUsername'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'setUsername') {
+      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('setPassword'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('setServerUrl'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'setPassword') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('setUsername'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('setServerUrl'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'btnSaveAccount') {
+      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('setPassword'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('setCurPin'); if (el) { el.focus(); playNavSound(); return true; } }
+    }
+
+    // Quadrant 2 (Top-Right: Playback & Hardware Engine)
+    else if (current.id === 'btnAudioPriority') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('setPlaylistName'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { return true; }
+      else if (key === 'ArrowUp') { return true; }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnDedupQuality'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'btnDedupQuality') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('setPassword'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { return true; }
+      else if (key === 'ArrowUp') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
+    }
+
+    // Quadrant 3 (Bottom-Left: Parental Controls & PIN)
+    else if (current.id === 'setCurPin') {
+      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('setNewPin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'setNewPin') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('setCurPin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('setConfirmPin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'setConfirmPin') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('setNewPin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('btnUpdatePin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'btnUpdatePin') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('setConfirmPin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'btnToggleParentalLock') {
+      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { const el = document.getElementById('btnFactoryReset'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowUp') { const el = document.getElementById('setCurPin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { return true; }
+    }
+
+    // Quadrant 4 (Bottom-Right: Privacy & System Maintenance)
+    else if (current.id === 'btnClearHistory') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('btnUpdatePin'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { return true; }
+      else if (key === 'ArrowUp') { const el = document.getElementById('btnDedupQuality'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { const el = document.getElementById('btnFactoryReset'); if (el) { el.focus(); playNavSound(); return true; } }
+    } else if (current.id === 'btnFactoryReset') {
+      if (key === 'ArrowLeft') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowRight') { return true; }
+      else if (key === 'ArrowUp') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
+      else if (key === 'ArrowDown') { return true; }
     }
   }
+
   if (current.classList.contains('filter-pill-btn')) {
     if (key === 'ArrowRight') {
       const allPills = Array.from(document.querySelectorAll('.filter-pill-row .filter-pill-btn'));
@@ -4753,7 +5308,7 @@ function fastNavigate(current, key) {
         playNavSound();
         return true;
       } else {
-        const activeNav = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
+        const activeNav = getActiveSidebarElement();
         if (activeNav) { activeNav.focus(); playNavSound(); return true; }
       }
       return true;
@@ -4782,7 +5337,7 @@ function fastNavigate(current, key) {
         playNavSound();
         return true;
       } else {
-        const activeNav = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
+        const activeNav = getActiveSidebarElement();
         if (activeNav) {
           activeNav.focus();
           playNavSound();
@@ -4828,7 +5383,7 @@ function fastNavigate(current, key) {
           return true;
         } else {
           // At beginning of row, Left jumps back to active sidebar tab
-          const activeNav = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
+          const activeNav = getActiveSidebarElement();
           if (activeNav) {
             activeNav.focus();
             playNavSound();
@@ -4947,7 +5502,7 @@ function fastNavigate(current, key) {
     if (key === 'ArrowDown') {
       return true; // Strictly stop at bottom of sidebar. Do not scroll right!
     } else if (key === 'ArrowRight') {
-      const settingsBtn = document.querySelector('.settings-icon-btn');
+      const settingsBtn = document.getElementById('sidebarSettingsBtn') || document.querySelector('.settings-icon-btn');
       if (settingsBtn) {
         settingsBtn.focus();
         playNavSound();
@@ -4963,15 +5518,20 @@ function fastNavigate(current, key) {
     }
   }
 
-
-
   if (current.classList.contains('settings-icon-btn')) {
     if (key === 'ArrowDown') {
       return true; // Strictly stop at bottom of sidebar. Do not scroll right!
     } else if (key === 'ArrowLeft') {
-      const userPill = document.querySelector('.user-profile-pill');
+      const userPill = document.getElementById('sidebarUserProfilePill') || document.querySelector('.user-profile-pill');
       if (userPill) {
         userPill.focus();
+        playNavSound();
+        return true;
+      }
+    } else if (key === 'ArrowRight') {
+      const target = document.querySelector('#mainViewport .tv-focusable');
+      if (target) {
+        target.focus();
         playNavSound();
         return true;
       }
@@ -4982,17 +5542,8 @@ function fastNavigate(current, key) {
         playNavSound();
         return true;
       }
-    } else if (key === 'ArrowRight') {
-      const firstTarget = document.querySelector('#mainViewport .tv-focusable');
-      if (firstTarget) {
-        firstTarget.focus();
-        playNavSound();
-        return true;
-      }
     }
   }
-
-
 
   // 5. Results Grid in Search / Movies:
   if (current.closest('.results-grid')) {
@@ -5011,7 +5562,7 @@ function fastNavigate(current, key) {
         }
       } else if (key === 'ArrowLeft') {
         if (idx % cols === 0) {
-          const activeNav = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
+          const activeNav = getActiveSidebarElement();
           if (activeNav) {
             activeNav.focus();
             playNavSound();
@@ -5163,16 +5714,8 @@ window.handleTvKeyEvent = function(k, code) {
   if (isUp || isDown || isLeft || isRight) {
     const cur = document.activeElement;
     if (cur && (cur.tagName === 'INPUT' || cur.tagName === 'TEXTAREA') && !cur.readOnly) {
-      if (isDown) {
-        if (advanceToNextInput(cur)) return true;
-      } else if (isUp) {
-        if (moveToPreviousInput(cur)) return true;
-      } else if (isRight && (cur.maxLength <= 4 || cur.selectionStart >= cur.value.length)) {
-        if (advanceToNextInput(cur)) return true;
-      } else if (isLeft && (cur.maxLength <= 4 || cur.selectionStart === 0)) {
-        if (moveToPreviousInput(cur)) return true;
-      }
-      if (isLeft || isRight) return false;
+      if (isLeft && cur.selectionStart > 0) return false;
+      if (isRight && cur.selectionStart < (cur.value ? cur.value.length : 0)) return false;
     }
     const dir = isUp ? 'ArrowUp' : isDown ? 'ArrowDown' : isLeft ? 'ArrowLeft' : 'ArrowRight';
     navigateSpatial(dir);
@@ -5284,6 +5827,10 @@ function navigateSpatial(key) {
     container = document.getElementById('userProfileModal');
   } else if (document.getElementById('detailOverlay') && document.getElementById('detailOverlay').style.display !== 'none') {
     container = document.getElementById('detailOverlay');
+  } else if (document.getElementById('deleteProfileModal') && document.getElementById('deleteProfileModal').style.display === 'flex') {
+    container = document.getElementById('deleteProfileModal');
+  } else if (document.getElementById('signOutModal') && document.getElementById('signOutModal').style.display === 'flex') {
+    container = document.getElementById('signOutModal');
   } else if (document.getElementById('deleteHistoryModal') && document.getElementById('deleteHistoryModal').style.display === 'flex') {
     container = document.getElementById('deleteHistoryModal');
   } else if (document.getElementById('clearAllHistoryModal') && document.getElementById('clearAllHistoryModal').style.display === 'flex') {
@@ -5343,12 +5890,12 @@ function navigateSpatial(key) {
     }
   }
 
-  if (key === 'ArrowLeft' && current && !current.closest('#sidebarNav')) {
-    const activeNav = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
-    if (bestCandidate && bestCandidate.closest('#sidebarNav')) {
-      bestCandidate = activeNav || bestCandidate;
+  if (key === 'ArrowLeft' && current && !current.closest('.sidebar')) {
+    const targetSidebar = getActiveSidebarElement();
+    if (bestCandidate && bestCandidate.closest('.sidebar')) {
+      bestCandidate = targetSidebar || bestCandidate;
     } else if (!bestCandidate) {
-      bestCandidate = activeNav;
+      bestCandidate = targetSidebar;
     }
   }
 

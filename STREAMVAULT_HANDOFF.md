@@ -223,16 +223,67 @@
 
 ---
 
+### J. Major Release v2.6: Symmetrical 2x2 Quadrant Settings, Bedside 180px QR Code, Protected Profiles & Netflix Home Density (Verified Live)
+1. **Symmetrical 2x2 Quadrant Settings Screen**:
+   - Redesigned from asymmetric 2-column layout into 4 uniform, equal-weight quadrants (`grid-template-columns: 1fr 1fr; gap: 14px;`):
+     - Quadrant 1 (Top-Left): IPTV Provider & Playlists (`Playlist Name`, `Server URL`, `Username`, `Password`, `Save & Connect`).
+     - Quadrant 2 (Top-Right): Playback & Hardware Engine (`HW+ ExoPlayer Media3`, `English 5.1ch Surround`, `4K UHD > Clean HQ* > 1080p`, `11-Byte Fast Probe`).
+     - Quadrant 3 (Bottom-Left): Parental Controls & PIN (Current/New/Confirm 4-digit PIN auto-advance inputs + Adult Vault toggle).
+     - Quadrant 4 (Bottom-Right): Privacy & Maintenance (`Clear Search History` + `Clean Factory Reset` + TMDB data decoupling protection).
+   - 100% zero-scroll on 1080p with matching borders, uniform padding (`16px 18px`), and aligned action rows.
+2. **Bedside High-Contrast 180px QR Code**:
+   - Expanded Cloud TV Link hero card to balanced 330px height matching Profile Customization card.
+   - Replaced tiny 76px QR thumbnail with prominent 180px high-contrast QR code (`size=300x300` rendered at 164x164 inside white quiet zone card) easily scannable from bed (8-12 feet away on 55" TV).
+   - Side-by-side format: QR code on left, bold 6-digit pairing code (`SV-XXXX`) and clear 3-step instructions on right.
+3. **Protected Profile Management & Dynamic Top Name Bug Fix**:
+   - Fixed bug where active profile name on top "Who's Watching?" tile stayed stale after saving new display name: `saveActiveProfile()` now dynamically updates both `.profile-name-text` and `.profile-avatar-initials` in the DOM immediately.
+   - Primary profile (`prof_1`) is protected (cannot be deleted, retains account owner status).
+   - Secondary profiles feature a red `Delete Profile` button opening a TV-friendly confirmation dialog.
+   - Backend endpoints implemented: `POST /api/profiles/create` and `POST /api/profiles/delete` with active profile failover.
+4. **Netflix / Apple TV Standard Poster Scaling**:
+   - Upgraded Home discovery rows (`.row-section .poster-card` and `.row-section .poster-img-wrap`) to ~195px wide (`187px x 276px`), displaying ~6.5 punchy cards per row with an edge-peek affordance inviting horizontal scrolling.
+   - Category browse tabs (Movies, Series, Search) retain the verified 5-column cinematic grid (10 full posters visible without clipping).
+5. **New TV Credential Provisioning & Friend TV Distribution**:
+   - **New TV Flow**: Zero typing on TV remote — TV displays 6-digit code and QR code. Scanning with phone links TV via Cloudflare Workers + D1 and automatically pushes IPTV credentials, watchlist, ratings, and resume history to the TV in seconds.
+   - **Friend TV Distribution**: How to share the standalone APK or connect via companion documented in Section 6.
+6. **Universal Remote Navigation & 2D Settings Grid (Verified Live)**:
+   - **Universal Sidebar Active Tab Return (`ArrowLeft`)**: Replaced broken `#sidebarNav` selector with universal `getActiveSidebarElement()`. Pressing Left from ANY content area (Home carousel, Search/Movies/Series 5-col grids, Live TV channel cards, Settings quadrants, Profile hero cards) consistently focuses the active tab on the sidebar (e.g. Home tab, Series tab, Settings icon, or Profile pill), eliminating accidental fallthroughs to the user profile pill.
+   - **Settings Screen 2D Grid Routing**: Removed linear `advanceToNextInput` arrow hijacking from inputs. Replaced with an explicit 2x2 quadrant spatial map connecting IPTV Provider (Q1), Playback Engine (Q2), Parental Controls (Q3), and Privacy Maintenance (Q4). Up/Down/Left/Right navigate strictly in their intended 2D direction with interactive Audio Priority and Dedup Quality selectors in Q2.
+
+7. **Zero-Scroll User Profile Screen & Bedside QR**:
+   - Shortened instruction text to 2 crisp bullets and large single-line pairing code SV-7482.
+   - Maintained high-contrast ~155px QR code on white card for effortless bedside phone scanning.
+   - Balanced card height (285px) completely eliminating vertical scroll on 1080p Android TV.
+8. **Settings Screen Zero-Scroll Layout**:
+   - 4-quadrant layout measures ~430px tall, completely fitting within 1080p viewport without any vertical scrolling.
+9. **Factory Reset Confirmation Modal & Progress Toast**:
+   - Replaced browser alert() with an Android TV modal overlay with warning icon, default focus on Cancel, animated wiping spinner, and floating HUD toast (showToast()).
+10. **Subtle Violet Poster Focus Border & Zero Edge Clipping**:
+    - Applied uniform 1.5px violet focus border (#A78BFA / var(--theme-border)) on all posters (Movies, Series, Continue Watching) preserving soft ambient glow.
+    - Added 14px horizontal padding to .results-grid and .poster-strip so border is never clipped at left/right viewport edges.
+11. **Smooth Live TV Horizontal Pill Navigation**:
+    - Prevented DOM destruction/rebuilding of tab buttons on tab change in fetchLiveChannels(rebuildTabs).
+    - Remote focus moves smoothly pill-to-pill (News -> Kids -> Pakistan, etc.) without dropping to sidebar.
+12. **Strict Adult Content Isolation**:
+    - Enforced server-side filtering across server.js: adult items strictly excluded from Home carousels, Continue Watching, Watchlist, general search, autocomplete, and general Live TV channels even when unlocked. Only visible inside dedicated 18+ Vault tab.
+13. **Streaming Brand Color Themes**:
+    - 4 profile-customizable color themes: StreamVault Purple (#8B5CF6), Netflix Red (#E50914), Disney+ Blue (#0063E5), Prime Video Cyan (#00A8E1). Dynamically updates UI accents, badges, buttons, and focus rings.
+
+---
+
 ## 5. Live TV Verification on TCL 55P635
 - **Latest GitHub Commit**: [`6efd7a1`](https://github.com/waheedkhan10001/streamvault-tv/commit/6efd7a1c7a9aebb0afcce31efcd76062da9d137a) on branch `main` (20 files, +9,799 insertions).
 - Built and signed release APK: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\StreamVault-TV.apk` (15.27 MB).
 - Installed live over Wi-Fi ADB to TCL 55P635 TV at `192.168.100.42:5555`.
 - Host PC companion running on `192.168.100.66:8765` over Wi-Fi SSID `EME-CORE-HAI`.
 - Live screenshot verification:
-  - `tv_movies_5col.png`: Verified 5-column cinematic grid displaying 10 complete posters ($5 \times 2$) with zero vertical clipping below the filter bar.
-  - `tv_profile_linked.png`: Verified dedicated User Profiles & Cloud Sync screen linked live to Cloudflare Account (`WKHAN.10001@GMAIL.COM`) with active code `SV-4FKQ`.
-  - `tv_settings_screen.png`: Verified clean, dedicated Settings & System screen with IPTV credentials, HW+ ExoPlayer decoder stats, Parental PIN, and Clear History.
-  - `tv_home_5col.png`: Verified Home screen with decoupled bottom Profile pill and Settings gear icon.
+   - `tv_settings_quad4_to_sidebar.png`: Verified Settings Left navigation cleanly focuses active Settings gear icon in sidebar.
+   - `tv_settings_right_return.png`: Verified Right arrow from sidebar returns smoothly into Settings Quadrant 1 (`Playlist Name`).
+   - `tv_settings_quad3_to_4.png`: Verified 2D navigation smoothly crosses from Quadrant 3 (Parental Controls) to Quadrant 4 (Privacy & Maintenance).
+   - `tv_settings_verified.png`: Verified symmetrical 2x2 quadrant Settings layout with 4 uniform boxes.
+   - `tv_profile_verified.png`: Verified balanced 330px hero cards with 180px bedside QR code and protected profile deletion.
+   - `tv_home_scaled.png`: Verified ~195px Netflix-standard Home carousel posters with edge-peek horizontal scroll.
+   - `tv_movies_5col.png`: Verified 5-column cinematic grid displaying 10 complete posters ($5 \times 2$) with zero vertical clipping below the filter bar.
   - `tv_search_hist.png`: Verified Search History popup displaying recent searches with TV remote soft keyboard active.
 
 ---

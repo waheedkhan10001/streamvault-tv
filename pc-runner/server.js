@@ -1079,12 +1079,12 @@ function queryCatalogServerSide(f = {}, limit = 100, offset = 0) {
     const item = state.mediaItems[i];
     const isAdult = Boolean(item.isAdult || isAdultItem(item));
 
-    // Adult Content Access Rules
+    // Adult Content Access Rules: Strictly isolated to 18+ Vault tab
     if (isAdultLocked && isAdult) continue; // 100% hidden when locked
     if (isAdultVaultTab) {
       if (!isAdult) continue; // 18+ Vault tab ONLY shows adult content
-    } else if (!rawQuery && isAdult) {
-      continue; // Never show adult content in mainstream browse tabs (Movies, Series, Home)
+    } else if (isAdult) {
+      continue; // NEVER leak adult content into general browse tabs or general search!
     }
 
     if (f.mediaTypeFilter && item.mediaType !== f.mediaTypeFilter) continue;
@@ -1288,12 +1288,13 @@ function queryCatalogServerSide(f = {}, limit = 100, offset = 0) {
 
 function buildHomePayload() {
   const isAdultLocked = !state.parentalControl || state.parentalControl.isLocked || !state.parentalControl.showAdult;
+  // Strict Isolation: Continue Watching and Watchlist must NEVER contain adult content, even if unlocked!
   const continueWatching = state.mediaItems
-    .filter((m) => m.resumePositionMs > 15000 && !m.isWatched && (!isAdultLocked || (!m.isAdult && !isAdultItem(m))))
+    .filter((m) => m.resumePositionMs > 15000 && !m.isWatched && !m.isAdult && !isAdultItem(m))
     .sort((a, b) => (b.lastWatchedTimestamp || 0) - (a.lastWatchedTimestamp || 0))
     .slice(0, 30);
   const watchlist = state.mediaItems
-    .filter((m) => m.inWatchlist && (!isAdultLocked || (!m.isAdult && !isAdultItem(m))))
+    .filter((m) => m.inWatchlist && !m.isAdult && !isAdultItem(m))
     .slice(0, 25);
 
   const trendingTop10 = queryCatalogServerSide(
@@ -1512,7 +1513,7 @@ const server = http.createServer(async (req, res) => {
         if (prefix.length >= 2) {
           const seen = new Set();
           for (const m of state.mediaItems) {
-            if (isAdultLocked && isAdultItem(m)) continue;
+            if (m.isAdult || isAdultItem(m)) continue; // Never suggest adult titles in search autocomplete
             if (m.cleanTitle && m.cleanTitle.toLowerCase().includes(prefix)) seen.add(m.cleanTitle);
             for (const c of m.cast || []) if (c.toLowerCase().includes(prefix)) seen.add(c);
             if (m.director && m.director.toLowerCase().includes(prefix)) seen.add(m.director);
@@ -1931,8 +1932,12 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
     const isAdultLocked = !state.parentalControl || state.parentalControl.isLocked || !state.parentalControl.showAdult;
 
     const filterChannelByTab = (c) => {
-      if (isAdultLocked && isAdultChannel(c)) return false;
-      if (tab === 'ADULT') return isAdultChannel(c);
+      const isAdult = isAdultChannel(c);
+      if (isAdult) {
+        // Adult channels ONLY appear in dedicated ADULT tab and ONLY when unlocked
+        return tab === 'ADULT' && !isAdultLocked;
+      }
+      if (tab === 'ADULT') return false;
       if (tab === 'FAVORITES') return favSet.has(String(c.streamId));
       if (tab === 'ALL') return true;
       const cat = (c.categoryName || '').toUpperCase();
@@ -2318,12 +2323,13 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
     req.on('data', (c) => (body += c));
     req.on('end', () => {
       try {
-        const { profileId, name, avatarColor, isKids } = JSON.parse(body || '{}');
+        const { profileId, name, avatarColor, isKids, theme } = JSON.parse(body || '{}');
         const p = (state.profiles || []).find(item => item.id === profileId);
         if (p) {
           if (name) p.name = name.trim();
           if (avatarColor) p.avatarColor = avatarColor;
           if (typeof isKids === 'boolean') p.isKids = isKids;
+          if (theme) p.theme = theme;
           if (p.id === state.activeProfileId && name) {
             if (!state.credentials) state.credentials = {};
             state.credentials.displayName = name.trim();
@@ -2332,6 +2338,63 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ success: true, profile: p }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/profiles/create') {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      try {
+        const { name, avatarColor, isKids } = JSON.parse(body || '{}');
+        if (!state.profiles) state.profiles = [];
+        const nextIdx = state.profiles.length + 1;
+        const newProf = {
+          id: 'prof_' + Date.now(),
+          name: (name || `Profile ${nextIdx}`).trim(),
+          avatarColor: avatarColor || '#2563EB',
+          isKids: Boolean(isKids),
+          isActive: false
+        };
+        state.profiles.push(newProf);
+        scheduleSaveState();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, profile: newProf, profiles: state.profiles }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/profiles/delete') {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      try {
+        const { profileId } = JSON.parse(body || '{}');
+        if (profileId === 'prof_1') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: false, error: 'Cannot delete primary profile' }));
+        }
+        if (!state.profiles || state.profiles.length <= 1) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: false, error: 'Must have at least one profile' }));
+        }
+        state.profiles = state.profiles.filter(p => p.id !== profileId);
+        if (state.activeProfileId === profileId) {
+          state.activeProfileId = 'prof_1';
+          state.profiles.forEach(p => { p.isActive = (p.id === 'prof_1'); });
+        }
+        scheduleSaveState();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, activeProfileId: state.activeProfileId, profiles: state.profiles }));
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({ error: err.message }));
