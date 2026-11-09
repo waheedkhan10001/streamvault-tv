@@ -269,6 +269,23 @@
 13. **Streaming Brand Color Themes**:
     - 4 profile-customizable color themes: StreamVault Purple (#8B5CF6), Netflix Red (#E50914), Disney+ Blue (#0063E5), Prime Video Cyan (#00A8E1). Dynamically updates UI accents, badges, buttons, and focus rings.
 
+
+### K. Major Release v2.7: Industry-Grade Standalone Architecture (Bundled Assets & Cloudflare Universal Auth Sync)
+1. **100% Standalone APK (Zero PC Dependency)**:
+   - Eliminated the local PC companion requirement for the TV to function. The complete modern TV UI is bundled directly inside the APK assets at pp/src/main/assets/tv-ui.html.
+   - MainActivity.kt now boots directly from ile:///android_asset/tv-ui.html with automatic fallback routing if a developer server is unreachable.
+   - Smart universal window.fetch interceptor automatically routes cloud authentication, pairing, and multi-device sync calls directly to Cloudflare Edge.
+2. **Universal Cloud Account & Authentication Engine (Live on Edge)**:
+   - Production Cloudflare Worker deployed live at https://streamvault-sync.streamvault-app.workers.dev.
+   - Added standard email & password authentication (/api/auth/signup, /api/auth/login) with salted SHA-256 password hashing via Web Crypto API.
+   - Dedicated sync endpoints (/api/sync/push, /api/sync/pull, /api/account/update-credentials) sync watchlist, playback timestamps, ratings, and IPTV credentials across devices.
+3. **In-App Cloud Account Modal**:
+   - Added interactive Sign In / Sign Up dialog on the TV screen with email and password inputs, complementing the 6-digit TV QR linking (SV-XXXX).
+4. **Decoupled Content Basket**:
+   - IPTV credentials (adiflix.online:8080) are treated as an interchangeable stream source. All watch history, continue watching, and ratings are permanently anchored to the user's Cloudflare D1 account.
+5. **Cross-Device Sync (Android TV & Phone)**:
+   - Movies paused on the TV push playback timestamps to Cloudflare D1 and can be resumed at the exact same second on Android phone (or mobile browser at streamvault-app.workers.dev/link).
+
 ---
 
 ## 5. Live TV Verification on TCL 55P635
