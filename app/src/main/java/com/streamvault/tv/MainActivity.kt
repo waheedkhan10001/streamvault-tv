@@ -89,6 +89,7 @@ class MainActivity : Activity() {
     private var isPlayingVideo = false
     private var currentDedupKey: String = ""
     private var currentExpectedDurationMs: Long = 0L
+    private val localAssetUrl = "file:///android_asset/tv-ui.html"
     private val devServerUrl = "http://192.168.100.66:8765/tv"
 
     private var toneGen: ToneGenerator? = null
@@ -164,6 +165,36 @@ class MainActivity : Activity() {
                 activity.launchVoiceSearch()
             }
         }
+
+        @JavascriptInterface
+        fun isNative(): Boolean = true
+
+        @JavascriptInterface
+        fun getAppVersion(): String = "2.6.0-standalone"
+
+        @JavascriptInterface
+        fun setServerMode(mode: String, url: String) {
+            val sp = activity.getSharedPreferences("streamvault_prefs", Context.MODE_PRIVATE)
+            sp.edit().putString("ui_load_mode", mode).putString("dev_server_url", url).apply()
+        }
+
+        @JavascriptInterface
+        fun reloadUi(url: String = "") {
+            activity.runOnUiThread {
+                if (url.isNotEmpty()) {
+                    activity.webView.loadUrl(url)
+                } else {
+                    val sp = activity.getSharedPreferences("streamvault_prefs", Context.MODE_PRIVATE)
+                    val loadMode = sp.getString("ui_load_mode", "standalone")
+                    val target = if (loadMode == "dev") {
+                        sp.getString("dev_server_url", activity.devServerUrl) ?: activity.devServerUrl
+                    } else {
+                        activity.localAssetUrl
+                    }
+                    activity.webView.loadUrl(target)
+                }
+            }
+        }
     }
 
     private val VOICE_SEARCH_REQUEST_CODE = 1001
@@ -237,11 +268,13 @@ class MainActivity : Activity() {
                 mediaPlaybackRequiresUserGesture = false
                 allowFileAccess = true
                 allowContentAccess = true
+                allowFileAccessFromFileURLs = true
+                allowUniversalAccessFromFileURLs = true
                 loadsImagesAutomatically = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 useWideViewPort = true
                 loadWithOverviewMode = true
-                cacheMode = WebSettings.LOAD_NO_CACHE
+                cacheMode = WebSettings.LOAD_DEFAULT
             }
 
             addJavascriptInterface(WebAppInterface(this@MainActivity), "AndroidApp")
@@ -260,6 +293,13 @@ class MainActivity : Activity() {
                     error: WebResourceError?
                 ) {
                     Log.e("StreamVaultWeb", "Web error: ${error?.description}")
+                    // If dev server fails or is unreachable (e.g. PC closed), seamlessly load local standalone asset!
+                    if (request?.isForMainFrame == true && view?.url?.startsWith("file:") != true) {
+                        Log.w("StreamVaultWeb", "Dev server unreachable. Falling back to standalone asset mode.")
+                        view?.post {
+                            view.loadUrl(localAssetUrl)
+                        }
+                    }
                     super.onReceivedError(view, request, error)
                 }
             }
@@ -274,7 +314,16 @@ class MainActivity : Activity() {
         )
 
         setContentView(rootLayout)
-        webView.loadUrl(devServerUrl)
+
+        val sp = getSharedPreferences("streamvault_prefs", Context.MODE_PRIVATE)
+        val loadMode = sp.getString("ui_load_mode", "standalone")
+        val targetUrl = if (loadMode == "dev") {
+            sp.getString("dev_server_url", devServerUrl) ?: devServerUrl
+        } else {
+            localAssetUrl
+        }
+        Log.i("StreamVault", "Booting StreamVault in $loadMode mode: $targetUrl")
+        webView.loadUrl(targetUrl)
     }
 
     private var clickPcmData: ByteArray? = null

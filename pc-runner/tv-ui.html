@@ -996,7 +996,81 @@
   </div>
 </div>
 
+<!-- Universal Cloud Account Sign In / Sign Up Modal -->
+<div id="cloudAuthModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#141026;border:1.5px solid #281F4B;border-radius:18px;max-width:440px;width:90%;padding:26px;box-shadow:0 24px 60px rgba(0,0,0,0.95);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <div style="width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--theme-accent, #7C3AED),#4C1D95);display:flex;align-items:center;justify-content:center;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5"><path d="M5 3l14 9-14 9V3z"/></svg>
+      </div>
+      <div style="font-size:16px;font-weight:900;letter-spacing:1px;color:#FFFFFF;">STREAMVAULT CLOUD</div>
+    </div>
+    <div id="cloudAuthTitle" style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Sign In to Account</div>
+    <div id="cloudAuthDesc" style="font-size:12.5px;color:#9CA3AF;line-height:1.4;margin-bottom:18px;">
+      Access your synchronized profiles, watchlist, ratings, and IPTV credentials across all your devices.
+    </div>
+
+    <form onsubmit="handleCloudAuthSubmit(event)">
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Email Address</label>
+        <input id="cloudAuthEmail" type="email" class="tv-focusable" placeholder="name@domain.com" style="width:100%;background:#0F0B20;border:1.5px solid #2E2356;border-radius:8px;padding:10px 12px;font-size:13.5px;color:#FFFFFF;outline:none;" required />
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Password</label>
+        <input id="cloudAuthPassword" type="password" class="tv-focusable" placeholder="••••••••" style="width:100%;background:#0F0B20;border:1.5px solid #2E2356;border-radius:8px;padding:10px 12px;font-size:13.5px;color:#FFFFFF;outline:none;" required />
+      </div>
+
+      <div id="cloudAuthNameRow" style="display:none;margin-bottom:12px;">
+        <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Display Name</label>
+        <input id="cloudAuthName" type="text" class="tv-focusable" placeholder="Waleed Khan" style="width:100%;background:#0F0B20;border:1.5px solid #2E2356;border-radius:8px;padding:10px 12px;font-size:13.5px;color:#FFFFFF;outline:none;" />
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="button" tabindex="0" class="btn tv-focusable" style="flex:1;padding:11px 14px;" onclick="closeCloudAuthModal()">Cancel</button>
+        <button type="submit" id="cloudAuthSubmitBtn" tabindex="0" class="btn btn-primary tv-focusable" style="flex:1.4;padding:11px 14px;font-weight:800;">Sign In</button>
+      </div>
+
+      <div style="text-align:center;margin-top:14px;">
+        <a href="#" id="cloudAuthToggleLink" onclick="toggleCloudAuthMode(event)" style="color:#A78BFA;font-size:12px;text-decoration:none;font-weight:700;">
+          Don't have an account? Sign Up
+        </a>
+      </div>
+      <div id="cloudAuthStatusMsg" style="margin-top:12px;font-size:12px;text-align:center;font-weight:700;"></div>
+    </form>
+  </div>
+</div>
+
 <script>
+// Smart Universal Network Routing for Cloud, PC, and Standalone Mobile/TV
+const CLOUD_SYNC_BASE = 'https://streamvault-sync.streamvault-app.workers.dev';
+const COMPANION_PC_FALLBACK = 'http://192.168.100.66:8765';
+
+const _rawFetch = window.fetch.bind(window);
+window.fetch = function(input, init) {
+  if (typeof input === 'string' && input.startsWith('/api/')) {
+    // 1. Cloud Authentication, TV Code Pairing & Multi-Device Sync
+    if (input.startsWith('/api/auth/') || input.startsWith('/api/sync/') || input.startsWith('/api/account/') || input.startsWith('/api/cloud/')) {
+      const target = input.replace('/api/cloud/request-code', '/api/auth/request-code')
+                          .replace('/api/cloud/status', '/api/auth/poll-code');
+      return _rawFetch(CLOUD_SYNC_BASE + target, init);
+    }
+
+    // 2. Catalog, Live TV, and Stream Routing
+    let base = localStorage.getItem('sv_server_base_url') || '';
+    if (!base) {
+      if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+        base = window.location.origin;
+      } else {
+        base = COMPANION_PC_FALLBACK;
+      }
+    }
+    const fullUrl = base.replace(/\/$/, '') + input;
+    return _rawFetch(fullUrl, init);
+  }
+  return _rawFetch(input, init);
+};
+
 let appStatus = null;
 let homeData = null;
 let currentTab = 'HOME';
@@ -2225,6 +2299,11 @@ async function loadProfile(vp) {
   let profilesData = { profiles: [], activeProfileId: 'prof_1' };
   let cloudStatus = { isLinked: false, activeCode: null, cloudProvider: 'Cloudflare Workers + D1' };
 
+  const localAccount = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
+  if (localAccount && localAccount.email) {
+    cloudStatus.isLinked = true;
+    cloudStatus.accountEmail = localAccount.email;
+  }
   try {
     const [pRes, cRes] = await Promise.all([
       fetch('/api/profiles').catch(() => null),
@@ -2403,7 +2482,11 @@ async function loadProfile(vp) {
           </div>
 
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
-            <button tabindex="0" id="btnSignOutAccount" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:5px 12px;font-size:10.5px;" onclick="openSignOutModal()">Sign Out</button>
+            ${cloudStatus.isLinked ? `
+              <button tabindex="0" id="btnSignOutAccount" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:5px 12px;font-size:10.5px;" onclick="openSignOutModal()">Sign Out</button>
+            ` : `
+              <button tabindex="0" id="btnOpenCloudSignIn" class="btn tv-focusable" style="background:var(--theme-accent, #7C3AED);border-color:var(--theme-border, #A78BFA);color:#fff;padding:5px 14px;font-size:11px;font-weight:800;" onclick="openCloudAuthModal('login')">Sign In with Email</button>
+            `}
             <div style="display:flex;gap:8px;align-items:center;">
               <button tabindex="0" id="btnReqNewTvCode" class="btn tv-focusable" style="padding:5px 12px;font-size:10.5px;" onclick="requestNewTvCode()">New Code</button>
               <button tabindex="0" id="btnSyncNow" class="btn btn-primary tv-focusable" style="padding:5px 14px;font-size:11px;background:#059669;border-color:#10B981;" onclick="triggerCloudSync()">Sync Now</button>
@@ -3154,6 +3237,147 @@ async function confirmFactoryReset() {
     showToast(`Error: ${err.message}`);
   }
 }
+
+
+let isCloudAuthSignUp = false;
+
+function openCloudAuthModal(mode = 'login') {
+  isCloudAuthSignUp = (mode === 'signup');
+  const m = document.getElementById('cloudAuthModal');
+  if (!m) return;
+  m.style.display = 'flex';
+  updateCloudAuthUi();
+  setTimeout(() => {
+    document.getElementById('cloudAuthEmail')?.focus();
+  }, 40);
+}
+
+function closeCloudAuthModal() {
+  const m = document.getElementById('cloudAuthModal');
+  if (m) m.style.display = 'none';
+}
+
+function toggleCloudAuthMode(e) {
+  if (e) e.preventDefault();
+  isCloudAuthSignUp = !isCloudAuthSignUp;
+  updateCloudAuthUi();
+}
+
+function updateCloudAuthUi() {
+  const title = document.getElementById('cloudAuthTitle');
+  const desc = document.getElementById('cloudAuthDesc');
+  const submitBtn = document.getElementById('cloudAuthSubmitBtn');
+  const toggleLink = document.getElementById('cloudAuthToggleLink');
+  const nameRow = document.getElementById('cloudAuthNameRow');
+  const statusMsg = document.getElementById('cloudAuthStatusMsg');
+  if (statusMsg) statusMsg.innerText = '';
+
+  if (isCloudAuthSignUp) {
+    if (title) title.innerText = 'Create StreamVault Account';
+    if (desc) desc.innerText = 'Create your account to sync your IPTV, continue watching, and profiles across all your TVs and phones.';
+    if (submitBtn) submitBtn.innerText = 'Create Account';
+    if (toggleLink) toggleLink.innerText = 'Already have an account? Sign In';
+    if (nameRow) nameRow.style.display = 'block';
+  } else {
+    if (title) title.innerText = 'Sign In to Account';
+    if (desc) desc.innerText = 'Access your synchronized profiles, watchlist, ratings, and IPTV credentials across all your devices.';
+    if (submitBtn) submitBtn.innerText = 'Sign In';
+    if (toggleLink) toggleLink.innerText = "Don't have an account? Sign Up";
+    if (nameRow) nameRow.style.display = 'none';
+  }
+}
+
+async function handleCloudAuthSubmit(e) {
+  if (e) e.preventDefault();
+  const btn = document.getElementById('cloudAuthSubmitBtn');
+  const statusMsg = document.getElementById('cloudAuthStatusMsg');
+  const email = document.getElementById('cloudAuthEmail')?.value?.trim();
+  const password = document.getElementById('cloudAuthPassword')?.value;
+  const displayName = document.getElementById('cloudAuthName')?.value?.trim() || 'Waleed Khan';
+
+  if (!email || !password) return;
+  if (btn) btn.disabled = true;
+  if (statusMsg) {
+    statusMsg.style.color = '#C4B5FD';
+    statusMsg.innerText = isCloudAuthSignUp ? 'Creating your account...' : 'Signing in...';
+  }
+
+  const endpoint = isCloudAuthSignUp ? '/api/auth/signup' : '/api/auth/login';
+  const payload = { email, password };
+  if (isCloudAuthSignUp) {
+    payload.displayName = displayName;
+    if (appStatus?.credentials) {
+      payload.iptvServer = appStatus.credentials.serverUrl;
+      payload.iptvUser = appStatus.credentials.username;
+      payload.iptvPass = appStatus.credentials.password;
+      payload.playlistName = appStatus.credentials.playlistName;
+    }
+  }
+
+  try {
+    const res = await fetch(CLOUD_SYNC_BASE + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.success && data.account) {
+      localStorage.setItem('streamvault_account', JSON.stringify(data.account));
+      if (data.account.iptvServerUrl && appStatus?.credentials) {
+        appStatus.credentials.serverUrl = data.account.iptvServerUrl;
+        appStatus.credentials.username = data.account.iptvUsername;
+        appStatus.credentials.password = data.account.iptvPassword;
+        appStatus.credentials.playlistName = data.account.playlistName;
+      }
+      closeCloudAuthModal();
+      showToast('✓ Welcome, ' + (data.account.displayName || data.account.email) + '! Cloud sync active.');
+      await loadProfile(document.getElementById('viewContainer'));
+    } else {
+      if (statusMsg) {
+        statusMsg.style.color = '#EF4444';
+        statusMsg.innerText = data.error || 'Authentication failed. Please verify credentials.';
+      }
+    }
+  } catch (err) {
+    if (statusMsg) {
+      statusMsg.style.color = '#EF4444';
+      statusMsg.innerText = err.message || 'Connection error';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function openSignOutModal() {
+  localStorage.removeItem('streamvault_account');
+  showToast('✓ Signed out of Cloud Account');
+  loadProfile(document.getElementById('viewContainer'));
+}
+
+async function triggerCloudSync() {
+  const localAcc = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
+  if (!localAcc || !localAcc.email) {
+    openCloudAuthModal('login');
+    return;
+  }
+  showToast('Syncing with Cloudflare D1...');
+  try {
+    await fetch(CLOUD_SYNC_BASE + '/api/sync/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountId: localAcc.accountId,
+        profileId: currentActiveProfile?.id || 'prof_1',
+        dataType: 'progress',
+        payload: { lastSync: Date.now() }
+      })
+    });
+    showToast('✓ Cloud Sync Up to Date');
+  } catch (err) {
+    showToast('Sync error: ' + err.message);
+  }
+}
+
 
 // 6. DETAIL MODAL WITH BACKGROUND PREVIEW + 5-STAR RATING + SMART RECOMMENDATIONS
 let currentMltMode = 'everything';
