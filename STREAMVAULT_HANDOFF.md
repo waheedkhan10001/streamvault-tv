@@ -12,7 +12,7 @@
 ---
 
 ## 2. Real IPTV Account & Database State
-- **IPTV Server**: `http://aadiflix.online:8080` (User: `waleed84838`, Pass: `waleed84839`)
+- **IPTV Server**: `<private-provider-url>` (User/Pass stored privately; never commit real credentials)
 - **Database File**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\pc-runner\data\streamvault_pc_db.json`
 - **Catalog Scale**:
   - **60,853 clean VOD titles** (family-safe: adult, dancer clips, and stage drama clips automatically filtered).
@@ -116,7 +116,7 @@
    - Lowered minimum resume threshold from 30s to 15s.
    - Increased capacity to 30 titles sorted by `lastWatchedTimestamp DESC` (most recently watched first).
 4. **IPTV Provider Stream Quality Audit**:
-   - Audited provider streams for *Heart of the Beast* directly from `aadiflix.online:8080`.
+   - Audited provider streams for *Heart of the Beast* directly from private IPTV provider endpoint.
    - Confirmed both streams (`448510` and `449791`) come with the hardcoded "Dragon Money" betting sponsor watermark from the source provider release.
    - Added deduplication quality promotion (4K > 1080p > HD > SD) ensuring highest quality stream is always `primaryStreamId`.
 5. **Search History & Settings Clear (YouTube TV Model)**:
