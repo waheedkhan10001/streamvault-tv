@@ -173,30 +173,6 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun getAppVersion(): String = "2.6.0-standalone"
-
-        @JavascriptInterface
-        fun setServerMode(mode: String, url: String) {
-            val sp = activity.getSharedPreferences("streamvault_prefs", Context.MODE_PRIVATE)
-            sp.edit().putString("ui_load_mode", mode).putString("dev_server_url", url).apply()
-        }
-
-        @JavascriptInterface
-        fun reloadUi(url: String = "") {
-            activity.runOnUiThread {
-                if (url.isNotEmpty()) {
-                    activity.webView.loadUrl(url)
-                } else {
-                    val sp = activity.getSharedPreferences("streamvault_prefs", Context.MODE_PRIVATE)
-                    val loadMode = sp.getString("ui_load_mode", "standalone")
-                    val target = if (loadMode == "dev") {
-                        sp.getString("dev_server_url", activity.devServerUrl) ?: activity.devServerUrl
-                    } else {
-                        activity.localAssetUrl
-                    }
-                    activity.webView.loadUrl(target)
-                }
-            }
-        }
     }
 
     private val VOICE_SEARCH_REQUEST_CODE = 1001
@@ -246,7 +222,8 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         try {
-            WebView.setWebContentsDebuggingEnabled(true)
+            val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            WebView.setWebContentsDebuggingEnabled(isDebuggable)
         } catch (_: Exception) {}
 
         initAcousticClick()
@@ -284,8 +261,8 @@ class MainActivity : Activity() {
                 mediaPlaybackRequiresUserGesture = false
                 allowFileAccess = true
                 allowContentAccess = true
-                allowFileAccessFromFileURLs = true
-                allowUniversalAccessFromFileURLs = true
+                allowFileAccessFromFileURLs = false
+                allowUniversalAccessFromFileURLs = false
                 loadsImagesAutomatically = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 useWideViewPort = true

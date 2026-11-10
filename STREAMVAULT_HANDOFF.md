@@ -12,7 +12,7 @@
 ---
 
 ## 2. Real IPTV Account & Database State
-- **IPTV Server**: `http://aadiflix.online:8080` (User: `waleed84838`, Pass: `waleed84839`)
+- **IPTV Server**: `[CONFIGURED_IN_APP]` (User: `[REDACTED]`, Pass: `[REDACTED]`)
 - **Database File**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\pc-runner\data\streamvault_pc_db.json`
 - **Catalog Scale**:
   - **60,853 clean VOD titles** (family-safe: adult, dancer clips, and stage drama clips automatically filtered).
@@ -116,7 +116,7 @@
    - Lowered minimum resume threshold from 30s to 15s.
    - Increased capacity to 30 titles sorted by `lastWatchedTimestamp DESC` (most recently watched first).
 4. **IPTV Provider Stream Quality Audit**:
-   - Audited provider streams for *Heart of the Beast* directly from `aadiflix.online:8080`.
+   - Audited provider streams for *Heart of the Beast* directly from provider stream server.
    - Confirmed both streams (`448510` and `449791`) come with the hardcoded "Dragon Money" betting sponsor watermark from the source provider release.
    - Added deduplication quality promotion (4K > 1080p > HD > SD) ensuring highest quality stream is always `primaryStreamId`.
 5. **Search History & Settings Clear (YouTube TV Model)**:
@@ -208,9 +208,9 @@
    - Profile Customization: Editable Display Name, 6 avatar color theme chips, and 1-click Kids Mode filter.
 4. **Cloudflare Workers + D1 Cloud Sync Architecture (Live on Edge)**:
    - **Production Edge URL**: `https://streamvault-sync.streamvault-app.workers.dev`
-   - **Cloudflare Account**: `wkhan.10001@gmail.com` (`0bab3b894a68adb77fdd14596a3f4364`)
+   - **Cloudflare Account**: Configured via Cloudflare CLI / Worker Secrets
    - **Subdomain**: `streamvault-app.workers.dev`
-   - **D1 Database**: `streamvault-db` (`d1d96b37-9099-4455-8428-954c322cfa37`) in region APAC (Hong Kong)
+   - **D1 Database**: `streamvault-db` (D1 binding configured in `wrangler.toml`)
    - **Tables**: `accounts`, `tv_codes`, `profiles`, `user_sync_data`
    - **Mobile Link Web App**: `https://streamvault-sync.streamvault-app.workers.dev/link`
    - **Live TV Pairing**: Server relays live 6-digit codes (e.g. `SV-4FKQ`) from Cloudflare edge with QR code directly rendered on TV screen.
@@ -282,7 +282,7 @@
 3. **In-App Cloud Account Modal**:
    - Added interactive Sign In / Sign Up dialog on the TV screen with email and password inputs, complementing the 6-digit TV QR linking (SV-XXXX).
 4. **Decoupled Content Basket**:
-   - IPTV credentials (adiflix.online:8080) are treated as an interchangeable stream source. All watch history, continue watching, and ratings are permanently anchored to the user's Cloudflare D1 account.
+   - IPTV credentials are treated as an interchangeable stream source. All watch history, continue watching, and ratings are permanently anchored to the user's Cloudflare D1 account.
 5. **Cross-Device Sync (Android TV & Phone)**:
    - Movies paused on the TV push playback timestamps to Cloudflare D1 and can be resumed at the exact same second on Android phone (or mobile browser at streamvault-app.workers.dev/link).
 

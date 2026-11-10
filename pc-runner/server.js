@@ -26,14 +26,14 @@ const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const DB_FILE = path.join(DATA_DIR, 'streamvault_pc_db.json');
-const DEFAULT_TMDB_KEY = '8265bd1679663a7ea12ac168da84d2e8';
+const DEFAULT_TMDB_KEY = process.env.TMDB_API_KEY || '';
 
 let state = {
   credentials: {
-    playlistName: 'Aadiflix TV',
-    serverUrl: 'http://aadiflix.online:8080',
-    username: 'waleed84838',
-    password: 'waleed84839',
+    playlistName: 'StreamVault IPTV',
+    serverUrl: '',
+    username: '',
+    password: '',
     tmdbApiKey: DEFAULT_TMDB_KEY,
     preferredLanguages: ['English', 'Hindi', 'Urdu', 'Punjabi', 'Multi-Audio'],
     hiddenLanguages: ['German'],
@@ -1479,9 +1479,14 @@ const server = http.createServer(async (req, res) => {
   // Lightweight status endpoint (<4KB) so 2-second polling never lags!
   if (req.method === 'GET' && pathname === '/api/state') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    const safeParental = {
+      isLocked: state.parentalControl ? state.parentalControl.isLocked : true,
+      showAdult: state.parentalControl ? state.parentalControl.showAdult : false,
+      hasCustomPin: ((state.parentalControl && state.parentalControl.pin) || '0000') !== '0000'
+    };
     return res.end(JSON.stringify({
       credentials: state.credentials,
-      parentalControl: state.parentalControl,
+      parentalControl: safeParental,
       syncStatus: state.syncStatus,
       remoteSearchQuery: state.remoteSearchQuery,
       pinnedSmartRows: state.pinnedSmartRows,

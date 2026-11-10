@@ -48,8 +48,8 @@ data class XtreamCredentials(
         }
 
     companion object {
-        // Public community read key fallback; user can also paste their own free TMDB key via QR Setup
-        const val DEFAULT_TMDB_KEY = "8265bd1679663a7ea12ac168da84d2e8"
+        // TMDB requests are proxied via Worker or configured via TMDB_API_KEY; no hardcoded keys in APK
+        const val DEFAULT_TMDB_KEY = ""
     }
 }
 

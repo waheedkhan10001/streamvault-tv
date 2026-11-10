@@ -82,7 +82,7 @@ export default {
           displayName,
           iptvServerUrl: iptvServer,
           iptvUsername: iptvUser,
-          iptvPassword: iptvPass,
+          hasIptvPassword: !!iptvPass,
           playlistName
         };
 
@@ -156,7 +156,7 @@ export default {
           displayName: (profiles && profiles[0] && profiles[0].display_name) || row.email.split('@')[0],
           iptvServerUrl: row.iptv_server_url || '',
           iptvUsername: row.iptv_username || '',
-          iptvPassword: row.iptv_password || '',
+          hasIptvPassword: !!row.iptv_password,
           playlistName: row.playlist_name || 'StreamVault IPTV'
         };
 
@@ -266,7 +266,7 @@ export default {
               displayName: (profiles && profiles[0] && profiles[0].display_name) || account.email.split('@')[0],
               iptvServerUrl: account.iptv_server_url || '',
               iptvUsername: account.iptv_username || '',
-              iptvPassword: account.iptv_password || '',
+              hasIptvPassword: !!account.iptv_password,
               playlistName: account.playlist_name || 'StreamVault IPTV'
             },
             profiles: profiles || [],

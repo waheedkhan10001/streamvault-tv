@@ -107,7 +107,7 @@ class PhoneCompanionServer(
                         playlistName = params["playlistName"]?.ifBlank { "My IPTV" } ?: current.playlistName,
                         serverUrl = params["serverUrl"] ?: current.serverUrl,
                         username = params["username"] ?: current.username,
-                        password = params["password"] ?: current.password,
+                        password = params["password"]?.takeIf { it.isNotBlank() } ?: current.password,
                         tmdbApiKey = params["tmdbApiKey"]?.ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY }
                             ?: current.tmdbApiKey
                     )
@@ -223,9 +223,9 @@ class PhoneCompanionServer(
                         <label>Username</label>
                         <input type="text" name="username" value="${creds.username}" placeholder="Your username" required />
                         <label>Password</label>
-                        <input type="password" name="password" value="${creds.password}" placeholder="Your password" required />
-                        <label>TMDB API Key (Pre-filled free key, or paste your own)</label>
-                        <input type="text" name="tmdbApiKey" value="${creds.tmdbApiKey}" />
+                        <input type="password" name="password" value="" placeholder="${if (creds.password.isNotBlank()) "•••••••• (Saved)" else "Your password"}" />
+                        <label>TMDB API Key (Optional custom key)</label>
+                        <input type="text" name="tmdbApiKey" value="${creds.tmdbApiKey}" placeholder="Optional" />
                         <button type="submit">💾 Save & Sync TV Catalog</button>
                     </form>
                 </div>
