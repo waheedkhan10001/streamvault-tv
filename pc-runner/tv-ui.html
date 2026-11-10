@@ -1199,17 +1199,17 @@
       <form onsubmit="handleCloudAuthSubmit(event)">
         <div id="cloudAuthNameRow" style="display:none;margin-bottom:12px;">
           <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Display Name</label>
-          <input id="cloudAuthName" type="text" class="tv-focusable search-field" placeholder="Account Owner" style="width:100%;font-size:13.5px;padding:8px 12px;" />
+          <input id="cloudAuthName" type="text" class="tv-focusable search-field" placeholder="Account Owner" style="width:100%;font-size:13.5px;padding:8px 12px;" readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
 
         <div style="margin-bottom:12px;">
           <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Email Address</label>
-          <input id="cloudAuthEmail" type="email" class="tv-focusable search-field" placeholder="name@domain.com" style="width:100%;font-size:13.5px;padding:8px 12px;" required />
+          <input id="cloudAuthEmail" type="email" class="tv-focusable search-field" placeholder="name@domain.com" style="width:100%;font-size:13.5px;padding:8px 12px;" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
 
         <div style="margin-bottom:12px;">
           <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Password</label>
-          <input id="cloudAuthPassword" type="password" class="tv-focusable search-field" placeholder="••••••••" style="width:100%;font-size:13.5px;padding:8px 12px;" required />
+          <input id="cloudAuthPassword" type="password" class="tv-focusable search-field" placeholder="••••••••" style="width:100%;font-size:13.5px;padding:8px 12px;" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
 
         <div style="display:flex;gap:10px;margin-top:16px;">
@@ -1236,7 +1236,7 @@
       <form onsubmit="handleVerifyCodeSubmit(event)">
         <div style="margin-bottom:14px;">
           <input id="cloudVerifyCodeInput" type="text" maxlength="6" class="tv-focusable search-field" placeholder="••••••"
-                 style="width:100%;font-size:22px;letter-spacing:10px;text-align:center;font-weight:900;padding:10px 12px;color:#FFFFFF;" required />
+                 style="width:100%;font-size:22px;letter-spacing:10px;text-align:center;font-weight:900;padding:10px 12px;color:#FFFFFF;" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
 
         <div style="display:flex;gap:10px;margin-top:16px;">
@@ -1272,24 +1272,24 @@
       <input type="hidden" id="playlistModalEditId" value="" />
       <div style="margin-bottom:10px;">
         <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Playlist Name</label>
-        <input id="inpPlaylistName" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="e.g. Primary IPTV" value="Primary IPTV" required />
+        <input id="inpPlaylistName" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="e.g. Primary IPTV" value="Primary IPTV" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
       </div>
       <div style="margin-bottom:10px;">
         <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Server URL</label>
-        <input id="inpPlaylistServer" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="http://example.com:8080" required />
+        <input id="inpPlaylistServer" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="http://example.com:8080" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
         <div>
           <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Username</label>
-          <input id="inpPlaylistUser" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="Username" required />
+          <input id="inpPlaylistUser" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="Username" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
         <div>
           <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Password</label>
-          <input id="inpPlaylistPass" type="password" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="••••••••" required />
+          <input id="inpPlaylistPass" type="password" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="••••••••" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
       </div>
       <div style="display:flex;gap:10px;">
-        <button type="button" tabindex="0" class="btn tv-focusable" style="flex:1;padding:9px 12px;" onclick="closePlaylistModal()">Cancel</button>
+        <button type="button" tabindex="0" id="btnCancelPlaylist" class="btn tv-focusable" style="flex:1;padding:9px 12px;" onclick="closePlaylistModal()">Cancel</button>
         <button type="submit" id="btnSavePlaylist" tabindex="0" class="btn btn-primary tv-focusable" style="flex:1.4;padding:9px 12px;font-weight:800;">Save &amp; Connect</button>
       </div>
       <div id="playlistModalStatusMsg" style="margin-top:10px;font-size:11px;text-align:center;font-weight:700;"></div>
@@ -1398,6 +1398,10 @@ window.fetch = function(input, init) {
 let appStatus = null;
 let homeData = null;
 let currentTab = 'HOME';
+try {
+  Object.defineProperty(window, 'currentTab', { get: () => currentTab, set: (v) => { currentTab = v; }, configurable: true });
+  window.getCurrentTab = () => currentTab;
+} catch (_) {}
 let selectedDetailItem = null;
 let enteredPin = '';
 let currentSubOffsetSec = 0.0;
@@ -1927,6 +1931,7 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     previousTab = currentTab;
   }
   currentTab = tabId;
+  lastContentFocusTarget = null;
 
   if (customFilter) {
     filterState = {
@@ -3043,7 +3048,7 @@ async function loadProfile(vp) {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
             <span id="profSaveStatus" style="font-size:10px;font-weight:700;color:#10B981;"></span>
             <div style="display:flex;gap:6px;">
-              ${!activeProf.isPrimary ? `<button tabindex="0" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:3px 10px;font-size:10.5px;" onclick="promptDeleteCurrentProfile()">Delete</button>` : ''}
+              ${!activeProf.isPrimary ? `<button tabindex="0" id="btnDeleteProfile" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:3px 10px;font-size:10.5px;" onclick="promptDeleteCurrentProfile()">Delete</button>` : ''}
               <button tabindex="0" id="btnSaveProfile" class="btn btn-primary tv-focusable" style="padding:4px 14px;font-size:11px;" onclick="saveActiveProfileChanges()">Save Profile</button>
             </div>
           </div>
@@ -3285,7 +3290,7 @@ async function loadSettings(vp) {
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Enriched Local Database</div>
                 <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Room SQLite cache on TV</div>
               </div>
-              <button tabindex="0" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Enrich Now</button>
+              <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Enrich Now</button>
             </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);">
@@ -3495,24 +3500,6 @@ function advanceToNextInput(currentInput) {
     if (btn) { btn.focus(); playNavSound(); return true; }
   }
 
-  // Account Settings sequence
-  if (currentInput.id === 'setDisplayName') {
-    const next = document.getElementById('setPlaylistName');
-    if (next) { next.removeAttribute('readonly'); next.focus(); playNavSound(); return true; }
-  } else if (currentInput.id === 'setPlaylistName') {
-    const next = document.getElementById('setServerUrl');
-    if (next) { next.removeAttribute('readonly'); next.focus(); playNavSound(); return true; }
-  } else if (currentInput.id === 'setServerUrl') {
-    const next = document.getElementById('setUsername');
-    if (next) { next.removeAttribute('readonly'); next.focus(); playNavSound(); return true; }
-  } else if (currentInput.id === 'setUsername') {
-    const next = document.getElementById('setPassword');
-    if (next) { next.removeAttribute('readonly'); next.focus(); playNavSound(); return true; }
-  } else if (currentInput.id === 'setPassword') {
-    const btn = document.getElementById('btnSaveAccount');
-    if (btn) { btn.focus(); playNavSound(); return true; }
-  }
-
   // Fallback: search for next input/button inside container
   const container = currentInput.closest('.settings-card, .modal-card, form, #settings') || document;
   const list = Array.from(container.querySelectorAll('input:not([type="hidden"]), select, textarea, button, .tv-focusable'));
@@ -3536,21 +3523,6 @@ function moveToPreviousInput(currentInput) {
     if (prev) { prev.removeAttribute('readonly'); prev.focus(); playNavSound(); return true; }
   } else if (currentInput.id === 'setNewPin') {
     const prev = document.getElementById('setCurPin');
-    if (prev) { prev.removeAttribute('readonly'); prev.focus(); playNavSound(); return true; }
-  }
-
-  // Account Settings sequence
-  if (currentInput.id === 'setPassword') {
-    const prev = document.getElementById('setUsername');
-    if (prev) { prev.removeAttribute('readonly'); prev.focus(); playNavSound(); return true; }
-  } else if (currentInput.id === 'setUsername') {
-    const prev = document.getElementById('setServerUrl');
-    if (prev) { prev.removeAttribute('readonly'); prev.focus(); playNavSound(); return true; }
-  } else if (currentInput.id === 'setServerUrl') {
-    const prev = document.getElementById('setPlaylistName');
-    if (prev) { prev.removeAttribute('readonly'); prev.focus(); playNavSound(); return true; }
-  } else if (currentInput.id === 'setPlaylistName') {
-    const prev = document.getElementById('setDisplayName');
     if (prev) { prev.removeAttribute('readonly'); prev.focus(); playNavSound(); return true; }
   }
   return false;
@@ -3578,10 +3550,7 @@ function onInputKeyDown(el, event) {
 
   if (isEnter) {
     event.preventDefault();
-    if (el.id === 'setPassword') {
-      const btn = document.getElementById('btnSaveAccount');
-      if (btn) btn.focus();
-    } else if (el.id === 'setConfirmPin') {
+    if (el.id === 'setConfirmPin') {
       const btn = document.getElementById('btnUpdatePin');
       if (btn) btn.focus();
     } else {
@@ -5827,6 +5796,10 @@ window.handleAppBackKey = function() {
     closeParentalPinModal();
     return true;
   }
+  if (document.getElementById('voiceSearchModal') && document.getElementById('voiceSearchModal').style.display === 'flex') {
+    closeVoiceSearchModal();
+    return true;
+  }
   if (document.getElementById('playerOverlay') && document.getElementById('playerOverlay').style.display === 'flex') {
     exitPlayer();
     return true;
@@ -5850,36 +5823,20 @@ window.handleAppBackKey = function() {
   // 3. If in main viewport (content, search bar, rows) -> move focus to active tab in sidebar
   const mainVp = document.getElementById('mainViewport');
   if (document.activeElement && mainVp && mainVp.contains(document.activeElement)) {
-    if (currentTab === 'SETTINGS') {
-      const settingsBtn = document.querySelector('.settings-icon-btn');
-      if (settingsBtn) {
-        settingsBtn.focus();
-        playNavSound();
-        return true;
-      }
-    }
-    const activeTab = document.querySelector('.nav-btn.active') || document.querySelector('#navList .nav-btn');
-    if (activeTab) {
-      activeTab.focus();
+    const activeSidebar = getActiveSidebarElement();
+    if (activeSidebar) {
+      activeSidebar.focus();
       playNavSound();
       return true;
     }
   }
 
-  // 4. If focus is on sidebar, but not on HOME tab: navigate to previous tab or HOME
-  if (currentTab !== 'HOME') {
-    if (currentTab === 'SETTINGS') {
-      const targetTab = (previousTab && previousTab !== 'SETTINGS') ? previousTab : 'HOME';
-      navigateToTab(targetTab);
-      const targetBtn = document.querySelector(`.nav-btn[data-tab="${targetTab}"]`) || document.querySelector('#navList .nav-btn');
-      if (targetBtn) {
-        targetBtn.focus();
-        playNavSound();
-      }
-      return true;
+  // 4. If focus is on sidebar, but not on HOME tab button: navigate to HOME and focus homeBtn
+  const homeBtn = document.querySelector('.nav-btn[data-tab="HOME"]') || document.querySelector('#navList .nav-btn');
+  if (currentTab !== 'HOME' || document.activeElement !== homeBtn) {
+    if (currentTab !== 'HOME') {
+      navigateToTab('HOME');
     }
-    navigateToTab('HOME');
-    const homeBtn = document.querySelector('.nav-btn[data-tab="HOME"]') || document.querySelector('#navList .nav-btn');
     if (homeBtn) {
       homeBtn.focus();
       playNavSound();
@@ -5980,8 +5937,13 @@ function fastNavigate(current, key) {
       return true;
     }
     if (current.id === 'btnSavePlaylist') {
+      if (key === 'ArrowUp') { document.getElementById('inpPlaylistPass')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowLeft') { (document.getElementById('btnCancelPlaylist') || plModal.querySelector('button[type="button"]'))?.focus(); playNavSound(); return true; }
+      return true;
+    }
+    if (current.id === 'btnCancelPlaylist' || current.closest('button[type="button"]')) {
       if (key === 'ArrowUp') { document.getElementById('inpPlaylistUser')?.focus(); playNavSound(); return true; }
-      if (key === 'ArrowLeft') { plModal.querySelector('button[type="button"]')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowRight') { document.getElementById('btnSavePlaylist')?.focus(); playNavSound(); return true; }
       return true;
     }
     return true;
@@ -6563,268 +6525,23 @@ function fastNavigate(current, key) {
     return true;
   }
 
-  // Profile Switcher & Screen Navigation
-  if (current.classList && current.classList.contains('profile-card-item')) {
-    const cards = Array.from(document.querySelectorAll('.profile-card-item'));
-    const idx = cards.indexOf(current);
-    if (key === 'ArrowRight') {
-      if (idx >= 0 && idx < cards.length - 1) {
-        cards[idx + 1].focus(); playNavSound(); return true;
-      }
-    } else if (key === 'ArrowLeft') {
-      if (idx > 0) {
-        cards[idx - 1].focus(); playNavSound(); return true;
-      } else {
-        const userPill = getActiveSidebarElement();
-        if (userPill) { userPill.focus(); playNavSound(); return true; }
-      }
-    } else if (key === 'ArrowDown') {
-      const inp = document.getElementById('profNameInput');
-      if (inp) { inp.focus(); playNavSound(); return true; }
+  if (current.closest('#deleteProfileModal')) {
+    const cancelBtn = document.getElementById('btnCancelDeleteProfile');
+    const confirmBtn = document.getElementById('btnConfirmDeleteProfile');
+    const pinInput = document.getElementById('deleteProfilePinInput');
+    if (current === pinInput) {
+      if (key === 'ArrowDown') { cancelBtn?.focus(); playNavSound(); return true; }
+    } else if (current === cancelBtn) {
+      if (key === 'ArrowRight') { confirmBtn?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowUp') { pinInput?.focus(); playNavSound(); return true; }
+    } else if (current === confirmBtn) {
+      if (key === 'ArrowLeft') { cancelBtn?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowUp') { pinInput?.focus(); playNavSound(); return true; }
     }
     return true;
   }
 
-  if (current.id === 'profNameInput') {
-    if (key === 'ArrowUp') {
-      const activeCard = document.querySelector('.profile-card-item.is-active-profile') || document.querySelector('.profile-card-item');
-      if (activeCard) { activeCard.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowLeft') {
-      const userPill = getActiveSidebarElement();
-      if (userPill) { userPill.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowRight') {
-      const qrBtn = document.getElementById('btnReqNewTvCode') || document.getElementById('btnSyncNow');
-      if (qrBtn) { qrBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowDown') {
-      const firstChip = document.querySelector('.avatar-color-chip');
-      if (firstChip) { firstChip.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.classList && current.classList.contains('avatar-color-chip')) {
-    const chips = Array.from(document.querySelectorAll('.avatar-color-chip'));
-    const idx = chips.indexOf(current);
-    if (key === 'ArrowRight') {
-      if (idx >= 0 && idx < chips.length - 1) {
-        chips[idx + 1].focus(); playNavSound(); return true;
-      } else {
-        const firstTheme = document.querySelector('.profile-theme-chip');
-        if (firstTheme) { firstTheme.focus(); playNavSound(); return true; }
-      }
-    } else if (key === 'ArrowLeft') {
-      if (idx > 0) {
-        chips[idx - 1].focus(); playNavSound(); return true;
-      } else {
-        const userPill = getActiveSidebarElement();
-        if (userPill) { userPill.focus(); playNavSound(); return true; }
-      }
-    } else if (key === 'ArrowUp') {
-      const inp = document.getElementById('profNameInput');
-      if (inp) { inp.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowDown') {
-      const kidsBtn = document.getElementById('btnToggleKidsMode');
-      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.classList && current.classList.contains('profile-theme-chip')) {
-    const themes = Array.from(document.querySelectorAll('.profile-theme-chip'));
-    const idx = themes.indexOf(current);
-    if (key === 'ArrowRight') {
-      if (idx >= 0 && idx < themes.length - 1) {
-        themes[idx + 1].focus(); playNavSound(); return true;
-      } else {
-        const rightBtn = document.getElementById('btnReqNewTvCode') || document.getElementById('btnSyncNow');
-        if (rightBtn) { rightBtn.focus(); playNavSound(); return true; }
-      }
-    } else if (key === 'ArrowLeft') {
-      if (idx > 0) {
-        themes[idx - 1].focus(); playNavSound(); return true;
-      } else {
-        const chips = Array.from(document.querySelectorAll('.avatar-color-chip'));
-        if (chips.length > 0) { chips[chips.length - 1].focus(); playNavSound(); return true; }
-      }
-    } else if (key === 'ArrowUp') {
-      const inp = document.getElementById('profNameInput');
-      if (inp) { inp.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowDown') {
-      const kidsBtn = document.getElementById('btnToggleKidsMode');
-      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.id === 'btnToggleKidsMode') {
-    if (key === 'ArrowLeft') {
-      const s = getActiveSidebarElement();
-      if (s) { s.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowUp') {
-      const firstChip = document.querySelector('.avatar-color-chip');
-      if (firstChip) { firstChip.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowDown') {
-      const saveBtn = document.getElementById('btnSaveProfile');
-      if (saveBtn) { saveBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowRight') {
-      const rightBtn = document.getElementById('btnReqNewTvCode') || document.getElementById('btnSyncNow');
-      if (rightBtn) { rightBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.id === 'btnSaveProfile') {
-    if (key === 'ArrowLeft') {
-      const delBtn = document.getElementById('btnDeleteProfile');
-      if (delBtn) { delBtn.focus(); playNavSound(); return true; }
-      const s = getActiveSidebarElement();
-      if (s) { s.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowUp') {
-      const kidsBtn = document.getElementById('btnToggleKidsMode');
-      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowRight') {
-      const rightBtn = document.getElementById('btnOpenCloudSignIn') || document.getElementById('btnSignOutAccount') || document.getElementById('btnReqNewTvCode') || document.getElementById('btnSyncNow');
-      if (rightBtn) { rightBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.id === 'btnDeleteProfile') {
-    if (key === 'ArrowLeft') {
-      const s = getActiveSidebarElement();
-      if (s) { s.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowRight') {
-      const saveBtn = document.getElementById('btnSaveProfile');
-      if (saveBtn) { saveBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowUp') {
-      const kidsBtn = document.getElementById('btnToggleKidsMode');
-      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.id === 'btnSignOutAccount' || current.id === 'btnOpenCloudSignIn') {
-    if (key === 'ArrowLeft') {
-      const saveBtn = document.getElementById('btnSaveProfile');
-      if (saveBtn) { saveBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowRight') {
-      const newCodeBtn = document.getElementById('btnReqNewTvCode');
-      if (newCodeBtn) { newCodeBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowUp') {
-      const kidsBtn = document.getElementById('btnToggleKidsMode');
-      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.id === 'btnReqNewTvCode') {
-    if (key === 'ArrowLeft') {
-      const leftBtn = document.getElementById('btnOpenCloudSignIn') || document.getElementById('btnSignOutAccount');
-      if (leftBtn) { leftBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowRight') {
-      const syncBtn = document.getElementById('btnSyncNow');
-      if (syncBtn) { syncBtn.focus(); playNavSound(); return true; }
-    } else if (key === 'ArrowUp') {
-      const kidsBtn = document.getElementById('btnToggleKidsMode');
-      if (kidsBtn) { kidsBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  if (current.id === 'btnSyncNow') {
-    if (key === 'ArrowLeft') {
-      const newCodeBtn = document.getElementById('btnReqNewTvCode');
-      if (newCodeBtn) { newCodeBtn.focus(); playNavSound(); return true; }
-    }
-    return true;
-  }
-
-  // Settings Screen Full 2x2 Quadrant Navigation
-  if (currentTab === 'SETTINGS') {
-    // Quadrant 1 (Top-Left: IPTV Provider & Playlists)
-    if (current.id === 'setPlaylistName') {
-      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('setServerUrl'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { return true; }
-    } else if (current.id === 'setServerUrl') {
-      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('setPlaylistName'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('setUsername'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'setUsername') {
-      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('setPassword'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('setServerUrl'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'setPassword') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('setUsername'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('setServerUrl'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'btnSaveAccount') {
-      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('setPassword'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('setCurPin'); if (el) { el.focus(); playNavSound(); return true; } }
-    }
-
-    // Quadrant 2 (Top-Right: Playback & Hardware Engine)
-    else if (current.id === 'btnAudioPriority') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('setPlaylistName'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { return true; }
-      else if (key === 'ArrowUp') { return true; }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnDedupQuality'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'btnDedupQuality') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('setPassword'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { return true; }
-      else if (key === 'ArrowUp') { const el = document.getElementById('btnAudioPriority'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
-    }
-
-    // Quadrant 3 (Bottom-Left: Parental Controls & PIN)
-    else if (current.id === 'setCurPin') {
-      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('setNewPin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'setNewPin') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('setCurPin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('setConfirmPin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'setConfirmPin') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('setNewPin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('btnUpdatePin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'btnUpdatePin') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('setConfirmPin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('btnSaveAccount'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'btnToggleParentalLock') {
-      if (key === 'ArrowLeft') { const s = getActiveSidebarElement(); if (s) { s.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { const el = document.getElementById('btnFactoryReset'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowUp') { const el = document.getElementById('setCurPin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { return true; }
-    }
-
-    // Quadrant 4 (Bottom-Right: Privacy & System Maintenance)
-    else if (current.id === 'btnClearHistory') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('btnUpdatePin'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { return true; }
-      else if (key === 'ArrowUp') { const el = document.getElementById('btnDedupQuality'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { const el = document.getElementById('btnFactoryReset'); if (el) { el.focus(); playNavSound(); return true; } }
-    } else if (current.id === 'btnFactoryReset') {
-      if (key === 'ArrowLeft') { const el = document.getElementById('btnToggleParentalLock'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowRight') { return true; }
-      else if (key === 'ArrowUp') { const el = document.getElementById('btnClearHistory'); if (el) { el.focus(); playNavSound(); return true; } }
-      else if (key === 'ArrowDown') { return true; }
-    }
-  }
-
-  if (current.classList.contains('filter-pill-btn')) {
+if (current.classList.contains('filter-pill-btn')) {
     if (key === 'ArrowRight') {
       const allPills = Array.from(document.querySelectorAll('.filter-pill-row .filter-pill-btn'));
       const idx = allPills.indexOf(current);
@@ -7032,10 +6749,30 @@ function fastNavigate(current, key) {
 
 
   // 4. Sidebar Bottom Controls (User Profile Pill & Settings Icon)
-  if (current.classList.contains('user-profile-pill')) {
+  if (current.classList.contains('user-profile-pill') || current.id === 'sidebarUserProfilePill') {
     if (key === 'ArrowDown') {
-      return true; // Strictly stop at bottom of sidebar. Do not scroll right!
+      const settingsBtn = document.getElementById('sidebarSettingsBtn') || document.querySelector('.settings-icon-btn');
+      if (settingsBtn) {
+        settingsBtn.focus();
+        playNavSound();
+        return true;
+      }
+      return true;
     } else if (key === 'ArrowRight') {
+      if (currentTab === 'PROFILE') {
+        if (lastContentFocusTarget && document.body.contains(lastContentFocusTarget) && lastContentFocusTarget.offsetParent !== null && document.getElementById('mainViewport')?.contains(lastContentFocusTarget)) {
+          lastContentFocusTarget.focus();
+          lastContentFocusTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          playNavSound();
+          return true;
+        }
+        const target = document.querySelector('#mainViewport .profile-card-item, #mainViewport .tv-focusable, #mainViewport input, #mainViewport button');
+        if (target) {
+          target.focus();
+          playNavSound();
+          return true;
+        }
+      }
       const settingsBtn = document.getElementById('sidebarSettingsBtn') || document.querySelector('.settings-icon-btn');
       if (settingsBtn) {
         settingsBtn.focus();
@@ -7050,11 +6787,12 @@ function fastNavigate(current, key) {
         return true;
       }
     }
+    return true;
   }
 
-  if (current.classList.contains('settings-icon-btn')) {
+  if (current.classList.contains('settings-icon-btn') || current.id === 'sidebarSettingsBtn') {
     if (key === 'ArrowDown') {
-      return true; // Strictly stop at bottom of sidebar. Do not scroll right!
+      return true; // Strictly stop at bottom of sidebar
     } else if (key === 'ArrowLeft') {
       const userPill = document.getElementById('sidebarUserProfilePill') || document.querySelector('.user-profile-pill');
       if (userPill) {
@@ -7063,13 +6801,25 @@ function fastNavigate(current, key) {
         return true;
       }
     } else if (key === 'ArrowRight') {
-      const target = document.querySelector('#mainViewport .tv-focusable');
+      if (lastContentFocusTarget && document.body.contains(lastContentFocusTarget) && lastContentFocusTarget.offsetParent !== null && document.getElementById('mainViewport')?.contains(lastContentFocusTarget)) {
+        lastContentFocusTarget.focus();
+        lastContentFocusTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        playNavSound();
+        return true;
+      }
+      const target = document.querySelector('#mainViewport .tv-focusable, #mainViewport button, #mainViewport input');
       if (target) {
         target.focus();
         playNavSound();
         return true;
       }
     } else if (key === 'ArrowUp') {
+      const userPill = document.getElementById('sidebarUserProfilePill') || document.querySelector('.user-profile-pill');
+      if (userPill) {
+        userPill.focus();
+        playNavSound();
+        return true;
+      }
       const navButtons = document.querySelectorAll('#navList .nav-btn');
       if (navButtons.length > 0) {
         navButtons[navButtons.length - 1].focus();
@@ -7077,6 +6827,7 @@ function fastNavigate(current, key) {
         return true;
       }
     }
+    return true;
   }
 
   // 5. Results Grid in Search / Movies:
@@ -7248,8 +6999,7 @@ window.handleTvKeyEvent = function(k, code) {
   if (isUp || isDown || isLeft || isRight) {
     const cur = document.activeElement;
     if (cur && (cur.tagName === 'INPUT' || cur.tagName === 'TEXTAREA') && !cur.readOnly) {
-      if (isLeft && cur.selectionStart > 0) return false;
-      if (isRight && cur.selectionStart < (cur.value ? cur.value.length : 0)) return false;
+      if (isLeft || isRight) return false;
     }
     const dir = isUp ? 'ArrowUp' : isDown ? 'ArrowDown' : isLeft ? 'ArrowLeft' : 'ArrowRight';
     navigateSpatial(dir);
@@ -7343,6 +7093,12 @@ function setupKeyboardNavigation() {
       }
     }
   });
+
+  window.addEventListener('focusin', (e) => {
+    if (e.target && typeof e.target.scrollIntoView === 'function' && !e.target.closest?.('.sidebar')) {
+      e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  });
 }
 
 function navigateSpatial(key) {
@@ -7380,11 +7136,14 @@ function navigateSpatial(key) {
     container = document.getElementById('clearAllHistoryModal');
   } else if (document.getElementById('parentalPinModal') && document.getElementById('parentalPinModal').style.display === 'flex') {
     container = document.getElementById('parentalPinModal');
+  } else if (document.getElementById('voiceSearchModal') && document.getElementById('voiceSearchModal').style.display === 'flex') {
+    container = document.getElementById('voiceSearchModal');
   }
 
   const focusables = Array.from(container.querySelectorAll('.tv-focusable, input, button'))
     .filter(el => {
-      if (el.disabled || el.style.display === 'none' || el.offsetParent === null) return false;
+      if (el.disabled || el.style.display === 'none' || el.getAttribute('tabindex') === '-1') return false;
+      if (el.offsetParent === null && el.getClientRects().length === 0) return false;
       const rect = el.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     });
@@ -7433,9 +7192,10 @@ function navigateSpatial(key) {
     }
   }
 
-  if (key === 'ArrowLeft' && current && !current.closest('.sidebar')) {
+  if (key === 'ArrowLeft' && current && !current.closest('.sidebar') && container === document) {
     const targetSidebar = getActiveSidebarElement();
-    if (!bestCandidate || bestCandidate.closest('.sidebar') || (bestCandidate.getBoundingClientRect().left < 230)) {
+    const isLeftmostInContent = cRect.left < 260 || !bestCandidate || (bestCandidate.getBoundingClientRect().left >= cRect.left - 15);
+    if (isLeftmostInContent || bestCandidate.closest('.sidebar') || (bestCandidate.getBoundingClientRect().left < 230)) {
       bestCandidate = targetSidebar || bestCandidate;
     }
   }
