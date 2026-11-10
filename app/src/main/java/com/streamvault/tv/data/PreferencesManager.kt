@@ -19,6 +19,9 @@ class PreferencesManager(context: Context) {
     // Strict 1-Connection Lock: true whenever ExoPlayer is actively streaming
     val isPlaybackActive = AtomicBoolean(false)
 
+    // Session-only 18+ Vault Unlock (Never persisted to disk, localStorage or cloud!)
+    private val adultVaultUnlockedSession = AtomicBoolean(false)
+
     private val _credentialsFlow = MutableStateFlow(loadCredentials())
     val credentialsFlow: StateFlow<XtreamCredentials> = _credentialsFlow
 
@@ -133,26 +136,42 @@ class PreferencesManager(context: Context) {
         return elapsedHours >= 24
     }
 
-    fun getRecentSearches(): List<String> {
-        val raw = prefs.getString("recent_searches", "") ?: ""
+    fun getActiveProfileId(): String {
+        return prefs.getString("active_profile_id", "") ?: ""
+    }
+
+    fun setActiveProfileId(profileId: String) {
+        prefs.edit().putString("active_profile_id", profileId.trim()).apply()
+    }
+
+    fun getRecentSearches(profileId: String = ""): List<String> {
+        val key = if (profileId.isNotBlank()) "recent_searches_$profileId" else "recent_searches"
+        val raw = prefs.getString(key, "") ?: ""
         return raw.split("||").filter { it.isNotBlank() }.take(8)
     }
 
-    fun addRecentSearch(query: String) {
+    fun addRecentSearch(query: String, profileId: String = "") {
+        val pid = profileId.ifBlank { getActiveProfileId() }
         val clean = query.trim()
         if (clean.length < 2) return
-        val updated = (listOf(clean) + getRecentSearches().filterNot { it.equals(clean, ignoreCase = true) }).take(8)
-        prefs.edit().putString("recent_searches", updated.joinToString("||")).commit()
+        val key = if (pid.isNotBlank()) "recent_searches_$pid" else "recent_searches"
+        val current = getRecentSearches(pid)
+        val updated = (listOf(clean) + current.filterNot { it.equals(clean, ignoreCase = true) }).take(8)
+        prefs.edit().putString(key, updated.joinToString("||")).commit()
     }
 
-    fun clearRecentSearches() {
-        prefs.edit().remove("recent_searches").commit()
+    fun clearRecentSearches(profileId: String = "") {
+        val pid = profileId.ifBlank { getActiveProfileId() }
+        val key = if (pid.isNotBlank()) "recent_searches_$pid" else "recent_searches"
+        prefs.edit().remove(key).commit()
     }
 
-    fun removeRecentSearch(query: String) {
+    fun removeRecentSearch(query: String, profileId: String = "") {
+        val pid = profileId.ifBlank { getActiveProfileId() }
         val clean = query.trim()
-        val updated = getRecentSearches().filterNot { it.equals(clean, ignoreCase = true) }
-        prefs.edit().putString("recent_searches", updated.joinToString("||")).commit()
+        val key = if (pid.isNotBlank()) "recent_searches_$pid" else "recent_searches"
+        val updated = getRecentSearches(pid).filterNot { it.equals(clean, ignoreCase = true) }
+        prefs.edit().putString(key, updated.joinToString("||")).commit()
     }
 
     // --- Parental Controls (Hashed PIN, attempt-limited, per-device) ---
@@ -209,22 +228,27 @@ class PreferencesManager(context: Context) {
         return prefs.edit().putString("parental_pin_hash", newHash).commit()
     }
 
-    fun isParentalLocked(): Boolean {
-        return prefs.getBoolean("parental_is_locked", true)
+    fun resetParentalPinWithAuth(newPin: String): Boolean {
+        if (newPin.trim().length != 4) return false
+        val newHash = hashPin(newPin.trim())
+        prefs.edit()
+            .putString("parental_pin_hash", newHash)
+            .putInt("pin_failed_attempts", 0)
+            .putLong("pin_lockout_until", 0L)
+            .apply()
+        return true
     }
 
-    fun setParentalLocked(locked: Boolean) {
-        prefs.edit().putBoolean("parental_is_locked", locked).apply()
+    fun isParentalLocked(): Boolean {
+        return !adultVaultUnlockedSession.get()
     }
 
     fun isAdultVaultUnlocked(): Boolean {
-        return !isParentalLocked() && prefs.getBoolean("parental_show_adult", false)
+        return adultVaultUnlockedSession.get()
     }
 
     fun setAdultVaultUnlocked(unlocked: Boolean) {
-        prefs.edit()
-            .putBoolean("parental_is_locked", !unlocked)
-            .putBoolean("parental_show_adult", unlocked)
-            .apply()
+        adultVaultUnlockedSession.set(unlocked)
+        // Session-only! Never persisted to disk.
     }
 }

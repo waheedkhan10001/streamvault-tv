@@ -983,10 +983,15 @@ export default {
         return jsonResponse({ success: true, profiles: rows.results || [] }, 200, corsHeaders);
       }
 
-      // Create Secondary Profile
+      // Create Secondary Profile (Max 5 profiles per account)
       if (method === 'POST' && pathname === '/api/profiles/create') {
         const { displayName, avatarColor = '#8B5CF6', theme = 'StreamVault Purple', isKids = false } = await request.json().catch(() => ({}));
         if (!displayName || !displayName.trim()) return errorResponse('Profile display name required', 400, corsHeaders);
+
+        const countRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM profiles WHERE account_id = ?`).bind(auth.accountId).first();
+        if (countRow && countRow.count >= 5) {
+          return errorResponse('Maximum 5 profiles allowed', 400, corsHeaders);
+        }
 
         const profileId = 'prof_' + crypto.randomUUID().substring(0, 8);
         const now = Date.now();
@@ -1007,6 +1012,65 @@ export default {
             isPrimary: false
           }
         }, 201, corsHeaders);
+      }
+
+      // Update Profile (Name, Theme, Color, Kids Mode)
+      if (method === 'POST' && pathname === '/api/profiles/update') {
+        const { profileId, displayName, avatarColor, theme, isKids } = await request.json().catch(() => ({}));
+        if (!profileId) return errorResponse('Profile ID required', 400, corsHeaders);
+
+        const profile = await env.DB.prepare(
+          `SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE profile_id = ? AND account_id = ?`
+        ).bind(profileId, auth.accountId).first();
+
+        if (!profile) return errorResponse('Profile not found', 404, corsHeaders);
+
+        const now = Date.now();
+        const newName = (displayName && displayName.trim()) || profile.display_name;
+        const newColor = avatarColor || profile.avatar_color;
+        const newTheme = theme || profile.theme;
+        const newKids = typeof isKids === 'boolean' ? (isKids ? 1 : 0) : profile.is_kids;
+
+        await env.DB.prepare(
+          `UPDATE profiles SET display_name = ?, avatar_color = ?, theme = ?, is_kids = ?, updated_at = ? WHERE profile_id = ? AND account_id = ?`
+        ).bind(newName, newColor, newTheme, newKids, now, profileId, auth.accountId).run();
+
+        return jsonResponse({
+          success: true,
+          profile: {
+            profileId,
+            displayName: newName,
+            avatarColor: newColor,
+            theme: newTheme,
+            isKids: newKids === 1,
+            isPrimary: profile.is_primary === 1
+          }
+        }, 200, corsHeaders);
+      }
+
+      // Switch Profile
+      if (method === 'POST' && pathname === '/api/profiles/switch') {
+        const { profileId } = await request.json().catch(() => ({}));
+        if (!profileId) return errorResponse('Profile ID required', 400, corsHeaders);
+
+        const profile = await env.DB.prepare(
+          `SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE profile_id = ? AND account_id = ?`
+        ).bind(profileId, auth.accountId).first();
+
+        if (!profile) return errorResponse('Profile not found', 404, corsHeaders);
+
+        return jsonResponse({
+          success: true,
+          activeProfileId: profileId,
+          profile: {
+            profileId: profile.profile_id,
+            displayName: profile.display_name,
+            avatarColor: profile.avatar_color,
+            theme: profile.theme,
+            isKids: profile.is_kids === 1,
+            isPrimary: profile.is_primary === 1
+          }
+        }, 200, corsHeaders);
       }
 
       // Delete Secondary Profile (Guards primary profile!)

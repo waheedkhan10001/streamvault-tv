@@ -19,7 +19,7 @@ class StreamVaultDatabase(context: Context) :
 
     companion object {
         private const val DB_NAME = "streamvault_tv.db"
-        private const val DB_VERSION = 2
+        private const val DB_VERSION = 3
 
         @Volatile
         private var INSTANCE: StreamVaultDatabase? = null
@@ -29,11 +29,87 @@ class StreamVaultDatabase(context: Context) :
                 INSTANCE ?: StreamVaultDatabase(context.applicationContext).also { INSTANCE = it }
             }
         }
+
+        fun checkIsAdult(cleanTitle: String, rawTitle: String, categoryName: String, genresText: String): Boolean {
+            val text = "$cleanTitle $rawTitle $categoryName $genresText".lowercase(Locale.ROOT)
+            val tokens = listOf(
+                "xxx", "18+", "adult", "porn", "erotic", "nsfw", "redhat", "team skeet",
+                "brazzers", "playboy", "hustler", "penthouse", "bangbros", "naughty"
+            )
+            return tokens.any { text.contains(it) }
+        }
     }
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.enableWriteAheadLogging()
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        ensureSchemaUpdated(db)
+    }
+
+    fun ensureSchemaUpdated(db: SQLiteDatabase) {
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_adult INTEGER DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN certification TEXT DEFAULT ''") } catch (_: Exception) {}
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS profiles (
+                profile_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                avatar_color TEXT NOT NULL,
+                is_kids INTEGER DEFAULT 0,
+                theme TEXT DEFAULT 'purple',
+                is_primary INTEGER DEFAULT 0,
+                updated_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS profile_media_state (
+                profile_id TEXT NOT NULL,
+                dedup_key TEXT NOT NULL,
+                in_watchlist INTEGER DEFAULT 0,
+                is_watched INTEGER DEFAULT 0,
+                resume_position_ms INTEGER DEFAULT 0,
+                duration_ms INTEGER DEFAULT 0,
+                user_rating REAL DEFAULT 0.0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (profile_id, dedup_key)
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_pms_prof ON profile_media_state(profile_id)")
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS profile_episode_state (
+                profile_id TEXT NOT NULL,
+                episode_id TEXT NOT NULL,
+                resume_position_ms INTEGER DEFAULT 0,
+                is_watched INTEGER DEFAULT 0,
+                duration_secs INTEGER DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (profile_id, episode_id)
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_pes_prof ON profile_episode_state(profile_id)")
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS profile_live_favorites (
+                profile_id TEXT NOT NULL,
+                stream_id TEXT NOT NULL,
+                PRIMARY KEY (profile_id, stream_id)
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_plf_prof ON profile_live_favorites(profile_id)")
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -73,7 +149,9 @@ class StreamVaultDatabase(context: Context) :
                 resume_position_ms INTEGER DEFAULT 0,
                 duration_ms INTEGER DEFAULT 0,
                 versions_json TEXT DEFAULT '[]',
-                search_blob TEXT DEFAULT ''
+                search_blob TEXT DEFAULT '',
+                is_adult INTEGER DEFAULT 0,
+                certification TEXT DEFAULT ''
             )
             """.trimIndent()
         )
@@ -84,6 +162,8 @@ class StreamVaultDatabase(context: Context) :
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_added ON media_items(added_timestamp DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_enriched ON media_items(is_enriched, rating DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_lang ON media_items(language)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_adult ON media_items(is_adult)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_cert ON media_items(certification)")
 
         db.execSQL(
             """
@@ -134,12 +214,14 @@ class StreamVaultDatabase(context: Context) :
             """.trimIndent()
         )
 
+        ensureSchemaUpdated(db)
+
         // Seed default helpful Pinned Smart Rows so the user immediately sees their power
         seedDefaultSmartRows(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        onCreate(db)
+        ensureSchemaUpdated(db)
     }
 
     private fun seedDefaultSmartRows(db: SQLiteDatabase) {
@@ -252,6 +334,8 @@ class StreamVaultDatabase(context: Context) :
                     item.versions.forEach { put(it.toJson()) }
                 }.toString()
 
+                val isAdult = item.isAdult || checkIsAdult(item.cleanTitle, item.rawTitle, item.categoryName, finalGenres)
+
                 val searchBlob = buildString {
                     append(item.cleanTitle.lowercase(Locale.ROOT)).append(' ')
                     append(item.rawTitle.lowercase(Locale.ROOT)).append(' ')
@@ -297,6 +381,8 @@ class StreamVaultDatabase(context: Context) :
                     put("duration_ms", durationMs)
                     put("versions_json", versionsJson)
                     put("search_blob", searchBlob)
+                    put("is_adult", if (isAdult) 1 else 0)
+                    put("certification", item.certification)
                 }
 
                 db.insertWithOnConflict("media_items", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -328,7 +414,9 @@ class StreamVaultDatabase(context: Context) :
         language: String,
         hasEmbeddedSubs: Boolean,
         embeddedSubLangs: List<String>,
-        embeddedAudioLangs: List<String>
+        embeddedAudioLangs: List<String>,
+        isAdult: Boolean = false,
+        certification: String = ""
     ) {
         val db = writableDatabase
         val cursor = db.rawQuery(
@@ -354,6 +442,7 @@ class StreamVaultDatabase(context: Context) :
         val finalRating = if (rating > 0.0) rating else oldRating
         val finalPoster = if (posterUrl.isNotBlank()) posterUrl else oldPoster
         val finalLang = if (language.isNotBlank() && oldLang == "English") language else oldLang
+        val finalIsAdult = isAdult || checkIsAdult(cleanTitle, rawTitle, catName, mergedGenres.joinToString("|"))
 
         val searchBlob = buildString {
             append(cleanTitle.lowercase(Locale.ROOT)).append(' ')
@@ -384,6 +473,8 @@ class StreamVaultDatabase(context: Context) :
             if (embeddedAudioLangs.isNotEmpty()) put("embedded_audio_langs", embeddedAudioLangs.distinct().joinToString("|"))
             put("is_enriched", 1)
             put("search_blob", searchBlob)
+            put("is_adult", if (finalIsAdult) 1 else 0)
+            if (certification.isNotBlank()) put("certification", certification.trim().uppercase(Locale.ROOT))
         }
         db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
     }
@@ -438,31 +529,56 @@ class StreamVaultDatabase(context: Context) :
      * - Stream Quality (4K, 1080p, HEVC)
      * - Hide Watched toggle
      * - Clickable Actor / Director / Category filter
+     * - Profile-scoped watchlist/watched/resume
+     * - Kids Mode certification filtering (uncertified strictly excluded)
+     * - 18+ Vault filtering
      */
     fun queryMedia(
         filter: SuperFilterState,
         hiddenLanguages: Set<String> = emptySet(),
-        limit: Int = 180
+        limit: Int = 180,
+        profileId: String = "",
+        isKids: Boolean = false,
+        isAdultVaultUnlocked: Boolean = false,
+        isVaultTab: Boolean = false
     ): List<MediaItem> {
         val db = readableDatabase
         val whereClauses = mutableListOf<String>()
         val args = mutableListOf<String>()
 
+        if (profileId.isNotBlank()) {
+            args.add(profileId)
+        }
+
+        // Adult filter rule:
+        // Excluded from EVERY query unless session is unlocked, not in kids mode, and request comes from Vault tab
+        if (isVaultTab && isAdultVaultUnlocked && !isKids) {
+            whereClauses.add("m.is_adult = 1")
+        } else {
+            whereClauses.add("m.is_adult = 0")
+        }
+
+        // Kids mode rule:
+        // When on: show only titles with age cert <= young child level. Titles with NO certification are hidden!
+        if (isKids) {
+            whereClauses.add("m.certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND m.certification != ''")
+        }
+
         if (filter.mediaTypeFilter != null) {
-            whereClauses.add("media_type = ?")
+            whereClauses.add("m.media_type = ?")
             args.add(filter.mediaTypeFilter.name)
         }
 
         // Global hidden languages
         for (hiddenLang in hiddenLanguages) {
-            whereClauses.add("language != ?")
+            whereClauses.add("m.language != ?")
             args.add(hiddenLang)
         }
 
         // Explicit language filter
         if (filter.selectedLanguages.isNotEmpty()) {
             val placeholders = filter.selectedLanguages.joinToString(",") { "?" }
-            whereClauses.add("language IN ($placeholders)")
+            whereClauses.add("m.language IN ($placeholders)")
             args.addAll(filter.selectedLanguages)
         }
 
@@ -470,7 +586,7 @@ class StreamVaultDatabase(context: Context) :
         if (filter.searchQuery.isNotBlank()) {
             val tokens = filter.searchQuery.trim().lowercase(Locale.ROOT).split(Regex("""\s+"""))
             for (token in tokens) {
-                whereClauses.add("search_blob LIKE ?")
+                whereClauses.add("m.search_blob LIKE ?")
                 args.add("%$token%")
             }
         }
@@ -479,11 +595,11 @@ class StreamVaultDatabase(context: Context) :
         if (filter.includedGenres.isNotEmpty()) {
             if (filter.matchAllIncludedGenres) {
                 for (genre in filter.includedGenres) {
-                    whereClauses.add("('|' || genres_text || '|' LIKE ?)")
+                    whereClauses.add("('|' || m.genres_text || '|' LIKE ?)")
                     args.add("%|$genre|%")
                 }
             } else {
-                val orParts = filter.includedGenres.map { "('|' || genres_text || '|' LIKE ?)" }
+                val orParts = filter.includedGenres.map { "('|' || m.genres_text || '|' LIKE ?)" }
                 whereClauses.add("(" + orParts.joinToString(" OR ") + ")")
                 filter.includedGenres.forEach { args.add("%|$it|%") }
             }
@@ -491,7 +607,7 @@ class StreamVaultDatabase(context: Context) :
 
         // Excluded Genres (NOT)
         for (excluded in filter.excludedGenres) {
-            whereClauses.add("('|' || genres_text || '|' NOT LIKE ?)")
+            whereClauses.add("('|' || m.genres_text || '|' NOT LIKE ?)")
             args.add("%|$excluded|%")
         }
 
@@ -499,102 +615,126 @@ class StreamVaultDatabase(context: Context) :
         when (filter.subtitleFilterMode) {
             SubtitleFilterMode.ANY -> {}
             SubtitleFilterMode.ANY_SUBTITLES -> {
-                whereClauses.add("(has_embedded_subtitles = 1 OR has_online_subtitles = 1 OR tmdb_id > 0)")
+                whereClauses.add("(m.has_embedded_subtitles = 1 OR m.has_online_subtitles = 1 OR m.tmdb_id > 0)")
             }
             SubtitleFilterMode.EMBEDDED_ONLY -> {
-                whereClauses.add("has_embedded_subtitles = 1")
+                whereClauses.add("m.has_embedded_subtitles = 1")
             }
             SubtitleFilterMode.ONLINE_AVAILABLE -> {
-                whereClauses.add("(has_online_subtitles = 1 OR tmdb_id > 0)")
+                whereClauses.add("(m.has_online_subtitles = 1 OR m.tmdb_id > 0)")
             }
             SubtitleFilterMode.SPECIFIC_LANGUAGE -> {
-                whereClauses.add("(embedded_sub_langs LIKE ? OR has_online_subtitles = 1)")
+                whereClauses.add("(m.embedded_sub_langs LIKE ? OR m.has_online_subtitles = 1)")
                 args.add("%${filter.specificSubtitleLanguage}%")
             }
         }
 
         // Decade or Year Range
         if (filter.decade != null) {
-            whereClauses.add("year BETWEEN ? AND ?")
+            whereClauses.add("m.year BETWEEN ? AND ?")
             args.add(filter.decade.toString())
             args.add((filter.decade + 9).toString())
         } else {
             if (filter.minYear != null) {
-                whereClauses.add("year >= ?")
+                whereClauses.add("m.year >= ?")
                 args.add(filter.minYear.toString())
             }
             if (filter.maxYear != null) {
-                whereClauses.add("year <= ?")
+                whereClauses.add("m.year <= ?")
                 args.add(filter.maxYear.toString())
             }
         }
 
         // Minimum Rating
         if (filter.minRating > 0.0) {
-            whereClauses.add("rating >= ?")
+            whereClauses.add("m.rating >= ?")
             args.add(filter.minRating.toString())
         }
 
         // Stream Quality badge
         if (!filter.qualityFilter.isNullOrBlank()) {
-            whereClauses.add("(quality_badges LIKE ? OR versions_json LIKE ?)")
+            whereClauses.add("(m.quality_badges LIKE ? OR m.versions_json LIKE ?)")
             args.add("%${filter.qualityFilter}%")
             args.add("%${filter.qualityFilter}%")
         }
 
         // Hide Watched
         if (filter.hideWatched) {
-            whereClauses.add("is_watched = 0")
+            if (profileId.isNotBlank()) {
+                whereClauses.add("COALESCE(pms.is_watched, m.is_watched) = 0")
+            } else {
+                whereClauses.add("m.is_watched = 0")
+            }
         }
 
         // Server Category
         if (!filter.serverCategoryId.isNullOrBlank()) {
-            whereClauses.add("category_id = ?")
+            whereClauses.add("m.category_id = ?")
             args.add(filter.serverCategoryId)
         }
 
         // Actor Chip Filter
         if (!filter.actorFilter.isNullOrBlank()) {
-            whereClauses.add("cast_text LIKE ?")
+            whereClauses.add("m.cast_text LIKE ?")
             args.add("%${filter.actorFilter}%")
         }
 
         // Director Chip Filter
         if (!filter.directorFilter.isNullOrBlank()) {
-            whereClauses.add("director LIKE ?")
+            whereClauses.add("m.director LIKE ?")
             args.add("%${filter.directorFilter}%")
         }
 
         val whereSql = if (whereClauses.isEmpty()) "" else "WHERE " + whereClauses.joinToString(" AND ")
         val orderSql = when (filter.sortBy) {
-            SortOption.NEWLY_ADDED -> "ORDER BY added_timestamp DESC, year DESC"
-            SortOption.RELEASE_YEAR_DESC -> "ORDER BY year DESC, rating DESC"
-            SortOption.RATING_DESC -> "ORDER BY rating DESC, vote_count DESC"
-            SortOption.TITLE_ASC -> "ORDER BY clean_title COLLATE NOCASE ASC"
+            SortOption.NEWLY_ADDED -> "ORDER BY m.added_timestamp DESC, m.year DESC"
+            SortOption.RELEASE_YEAR_DESC -> "ORDER BY m.year DESC, m.rating DESC"
+            SortOption.RATING_DESC -> "ORDER BY m.rating DESC, m.vote_count DESC"
+            SortOption.TITLE_ASC -> "ORDER BY m.clean_title COLLATE NOCASE ASC"
             SortOption.RANDOM -> "ORDER BY RANDOM()"
         }
 
-        val sql = "SELECT * FROM media_items $whereSql $orderSql LIMIT $limit"
+        val selectSql = if (profileId.isNotBlank()) {
+            """
+            m.*,
+            COALESCE(pms.in_watchlist, 0) AS p_in_watchlist,
+            COALESCE(pms.is_watched, 0) AS p_is_watched,
+            COALESCE(pms.resume_position_ms, 0) AS p_resume_position_ms,
+            COALESCE(pms.duration_ms, 0) AS p_duration_ms,
+            COALESCE(pms.user_rating, 0.0) AS p_user_rating
+            """.trimIndent()
+        } else {
+            "m.*"
+        }
+
+        val fromSql = if (profileId.isNotBlank()) {
+            "media_items m LEFT JOIN profile_media_state pms ON pms.dedup_key = m.dedup_key AND pms.profile_id = ?"
+        } else {
+            "media_items m"
+        }
+
+        val sql = "SELECT $selectSql FROM $fromSql $whereSql $orderSql LIMIT $limit"
         val cursor = db.rawQuery(sql, args.toTypedArray())
         return readMediaList(cursor)
     }
 
     /**
      * Instant 2-letter Autocomplete chips for the TV Search screen.
-     * Returns matching Movie/Series titles, Actors, and Directors so the user
-     * never has to finish typing long words on the TV remote.
+     * Never returns adult titles; in Kids mode restricts to kid certifications.
      */
-    fun getAutocompleteSuggestions(prefix: String, limit: Int = 10): List<String> {
+    fun getAutocompleteSuggestions(prefix: String, isKids: Boolean = false, limit: Int = 10): List<String> {
         val clean = prefix.trim()
         if (clean.length < 2) return emptyList()
         val db = readableDatabase
         val suggestions = LinkedHashSet<String>()
 
+        val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+
         // 1. Matching Titles starting with or containing the prefix
         db.rawQuery(
             """
             SELECT clean_title FROM media_items
-            WHERE clean_title LIKE ? OR clean_title LIKE ?
+            WHERE is_adult = 0 $kidsClause AND (clean_title LIKE ? OR clean_title LIKE ?)
             ORDER BY CASE WHEN clean_title LIKE ? THEN 0 ELSE 1 END, rating DESC
             LIMIT ?
             """.trimIndent(),
@@ -610,7 +750,7 @@ class StreamVaultDatabase(context: Context) :
             db.rawQuery(
                 """
                 SELECT cast_text, director FROM media_items
-                WHERE cast_text LIKE ? OR director LIKE ?
+                WHERE is_adult = 0 $kidsClause AND (cast_text LIKE ? OR director LIKE ?)
                 LIMIT 25
                 """.trimIndent(),
                 arrayOf("%$clean%", "%$clean%")
@@ -633,15 +773,20 @@ class StreamVaultDatabase(context: Context) :
 
     /**
      * Finds "More Like This" recommendations based on shared Genres, Director, and Cast.
+     * Adult titles NEVER appear in More Like This!
      */
-    fun getMoreLikeThis(item: MediaItem, limit: Int = 12): List<MediaItem> {
+    fun getMoreLikeThis(item: MediaItem, isKids: Boolean = false, limit: Int = 12): List<MediaItem> {
         if (item.genres.isEmpty() && item.director.isBlank()) return emptyList()
         val db = readableDatabase
         val primaryGenre = item.genres.firstOrNull() ?: ""
+        val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+
         val cursor = db.rawQuery(
             """
             SELECT * FROM media_items
             WHERE dedup_key != ?
+              AND is_adult = 0
+              $kidsClause
               AND (genres_text LIKE ? OR (director != '' AND director = ?))
             ORDER BY rating DESC, year DESC
             LIMIT ?
@@ -664,7 +809,7 @@ class StreamVaultDatabase(context: Context) :
             "Documentary", "Drama", "Family", "Fantasy", "History",
             "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"
         )
-        db.rawQuery("SELECT DISTINCT genres_text FROM media_items WHERE genres_text != '' LIMIT 1000", null).use { c ->
+        db.rawQuery("SELECT DISTINCT genres_text FROM media_items WHERE genres_text != '' AND is_adult = 0 LIMIT 1000", null).use { c ->
             while (c.moveToNext()) {
                 c.getString(0)?.split("|")?.forEach { g ->
                     if (g.isNotBlank()) genres.add(g.trim())
@@ -677,7 +822,7 @@ class StreamVaultDatabase(context: Context) :
     fun getAllDistinctLanguages(): List<String> {
         val db = readableDatabase
         val langs = linkedSetOf("English", "Hindi", "Urdu", "Multi-Audio", "Arabic", "Korean", "Turkish", "Spanish", "French", "Japanese")
-        db.rawQuery("SELECT DISTINCT language FROM media_items WHERE language != ''", null).use { c ->
+        db.rawQuery("SELECT DISTINCT language FROM media_items WHERE language != '' AND is_adult = 0", null).use { c ->
             while (c.moveToNext()) {
                 c.getString(0)?.takeIf { it.isNotBlank() }?.let { langs.add(it) }
             }
@@ -685,76 +830,232 @@ class StreamVaultDatabase(context: Context) :
         return langs.toList()
     }
 
-    fun getContinueWatchingList(limit: Int = 20): List<MediaItem> {
+    fun isAdultItem(dedupKey: String): Boolean {
         val db = readableDatabase
-        val cursor = db.rawQuery(
-            "SELECT * FROM media_items WHERE resume_position_ms > 15000 AND is_watched = 0 ORDER BY added_timestamp DESC LIMIT ?",
-            arrayOf(limit.toString())
-        )
+        db.rawQuery("SELECT is_adult FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
+            if (c.moveToFirst()) return c.getInt(0) == 1
+        }
+        return false
+    }
+
+    fun getContinueWatchingList(profileId: String = "", isKids: Boolean = false, limit: Int = 20): List<MediaItem> {
+        val db = readableDatabase
+        // Phase B Rule: Adult content NEVER appears in Continue Watching!
+        val (sql, args) = if (profileId.isNotBlank()) {
+            val kidsClause = if (isKids) "AND m.certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND m.certification != ''" else ""
+            Pair(
+                """
+                SELECT m.*,
+                       pms.in_watchlist AS p_in_watchlist,
+                       pms.is_watched AS p_is_watched,
+                       pms.resume_position_ms AS p_resume_position_ms,
+                       pms.duration_ms AS p_duration_ms,
+                       pms.user_rating AS p_user_rating
+                FROM profile_media_state pms
+                JOIN media_items m ON m.dedup_key = pms.dedup_key
+                WHERE pms.profile_id = ?
+                  AND pms.resume_position_ms > 15000
+                  AND pms.is_watched = 0
+                  AND m.is_adult = 0
+                  $kidsClause
+                ORDER BY pms.updated_at DESC
+                LIMIT ?
+                """.trimIndent(),
+                arrayOf(profileId, limit.toString())
+            )
+        } else {
+            val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+            Pair(
+                "SELECT * FROM media_items WHERE resume_position_ms > 15000 AND is_watched = 0 AND is_adult = 0 $kidsClause ORDER BY added_timestamp DESC LIMIT ?",
+                arrayOf(limit.toString())
+            )
+        }
+        val cursor = db.rawQuery(sql, args)
         return readMediaList(cursor)
     }
 
-    fun getWatchlist(): List<MediaItem> {
+    fun getWatchlist(profileId: String = "", isKids: Boolean = false): List<MediaItem> {
         val db = readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM media_items WHERE in_watchlist = 1 ORDER BY clean_title ASC", null)
+        // Phase B Rule: Adult content NEVER appears in Watchlist
+        val (sql, args) = if (profileId.isNotBlank()) {
+            val kidsClause = if (isKids) "AND m.certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND m.certification != ''" else ""
+            Pair(
+                """
+                SELECT m.*,
+                       pms.in_watchlist AS p_in_watchlist,
+                       pms.is_watched AS p_is_watched,
+                       pms.resume_position_ms AS p_resume_position_ms,
+                       pms.duration_ms AS p_duration_ms,
+                       pms.user_rating AS p_user_rating
+                FROM profile_media_state pms
+                JOIN media_items m ON m.dedup_key = pms.dedup_key
+                WHERE pms.profile_id = ?
+                  AND pms.in_watchlist = 1
+                  AND m.is_adult = 0
+                  $kidsClause
+                ORDER BY m.clean_title ASC
+                """.trimIndent(),
+                arrayOf(profileId)
+            )
+        } else {
+            val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+            Pair(
+                "SELECT * FROM media_items WHERE in_watchlist = 1 AND is_adult = 0 $kidsClause ORDER BY clean_title ASC",
+                emptyArray<String>()
+            )
+        }
+        val cursor = db.rawQuery(sql, args)
         return readMediaList(cursor)
     }
 
-    fun toggleWatchlist(dedupKey: String): Boolean {
+    fun toggleWatchlist(dedupKey: String, profileId: String = ""): Boolean {
+        // Phase B Rule: Adult content can never be added to Watchlist
+        if (isAdultItem(dedupKey)) return false
         val db = writableDatabase
+        val now = System.currentTimeMillis()
         var newState = false
-        db.rawQuery("SELECT in_watchlist FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
-            if (c.moveToFirst()) {
-                newState = c.getInt(0) == 0
+
+        if (profileId.isNotBlank()) {
+            db.rawQuery("SELECT in_watchlist FROM profile_media_state WHERE profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey)).use { c ->
+                newState = if (c.moveToFirst()) c.getInt(0) == 0 else true
             }
+            db.execSQL(
+                """
+                INSERT INTO profile_media_state (profile_id, dedup_key, in_watchlist, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
+                  in_watchlist = excluded.in_watchlist,
+                  updated_at = excluded.updated_at
+                """.trimIndent(),
+                arrayOf(profileId, dedupKey, if (newState) 1 else 0, now)
+            )
+        } else {
+            db.rawQuery("SELECT in_watchlist FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
+                if (c.moveToFirst()) newState = c.getInt(0) == 0
+            }
+            val cv = ContentValues().apply { put("in_watchlist", if (newState) 1 else 0) }
+            db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
         }
-        val cv = ContentValues().apply { put("in_watchlist", if (newState) 1 else 0) }
-        db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
         return newState
     }
 
-    fun toggleWatched(dedupKey: String): Boolean {
+    fun toggleWatched(dedupKey: String, profileId: String = ""): Boolean {
+        // Phase B Rule: Adult content can never be marked watched
+        if (isAdultItem(dedupKey)) return false
         val db = writableDatabase
+        val now = System.currentTimeMillis()
         var newState = false
-        db.rawQuery("SELECT is_watched FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
-            if (c.moveToFirst()) {
-                newState = c.getInt(0) == 0
+
+        if (profileId.isNotBlank()) {
+            db.rawQuery("SELECT is_watched FROM profile_media_state WHERE profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey)).use { c ->
+                newState = if (c.moveToFirst()) c.getInt(0) == 0 else true
             }
+            db.execSQL(
+                """
+                INSERT INTO profile_media_state (profile_id, dedup_key, is_watched, resume_position_ms, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
+                  is_watched = excluded.is_watched,
+                  resume_position_ms = CASE WHEN excluded.is_watched = 1 THEN 0 ELSE profile_media_state.resume_position_ms END,
+                  updated_at = excluded.updated_at
+                """.trimIndent(),
+                arrayOf(profileId, dedupKey, if (newState) 1 else 0, 0L, now)
+            )
+        } else {
+            db.rawQuery("SELECT is_watched FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
+                if (c.moveToFirst()) newState = c.getInt(0) == 0
+            }
+            val cv = ContentValues().apply {
+                put("is_watched", if (newState) 1 else 0)
+                if (newState) put("resume_position_ms", 0L)
+            }
+            db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
         }
-        val cv = ContentValues().apply {
-            put("is_watched", if (newState) 1 else 0)
-            if (newState) put("resume_position_ms", 0L)
-        }
-        db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
         return newState
     }
 
-    fun getItemByDedupKey(dedupKey: String): MediaItem? {
+    fun getItemByDedupKey(dedupKey: String, profileId: String = ""): MediaItem? {
         val db = readableDatabase
-        db.rawQuery("SELECT * FROM media_items WHERE dedup_key = ? LIMIT 1", arrayOf(dedupKey)).use { c ->
+        val sql = if (profileId.isNotBlank()) {
+            """
+            SELECT m.*,
+                   COALESCE(pms.in_watchlist, 0) AS p_in_watchlist,
+                   COALESCE(pms.is_watched, 0) AS p_is_watched,
+                   COALESCE(pms.resume_position_ms, 0) AS p_resume_position_ms,
+                   COALESCE(pms.duration_ms, 0) AS p_duration_ms,
+                   COALESCE(pms.user_rating, 0.0) AS p_user_rating
+            FROM media_items m
+            LEFT JOIN profile_media_state pms ON pms.dedup_key = m.dedup_key AND pms.profile_id = ?
+            WHERE m.dedup_key = ? LIMIT 1
+            """.trimIndent()
+        } else {
+            "SELECT * FROM media_items WHERE dedup_key = ? LIMIT 1"
+        }
+        val args = if (profileId.isNotBlank()) arrayOf(profileId, dedupKey) else arrayOf(dedupKey)
+        db.rawQuery(sql, args).use { c ->
             val list = readMediaList(c)
             return list.firstOrNull()
         }
     }
 
-    fun setUserStarRating(dedupKey: String, starRating: Double) {
+    fun setUserStarRating(dedupKey: String, starRating: Double, profileId: String = "") {
+        if (isAdultItem(dedupKey)) return
         val db = writableDatabase
-        val cv = ContentValues().apply {
-            put("rating", starRating)
+        val now = System.currentTimeMillis()
+        if (profileId.isNotBlank()) {
+            db.execSQL(
+                """
+                INSERT INTO profile_media_state (profile_id, dedup_key, user_rating, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
+                  user_rating = excluded.user_rating,
+                  updated_at = excluded.updated_at
+                """.trimIndent(),
+                arrayOf(profileId, dedupKey, starRating, now)
+            )
         }
+        val cv = ContentValues().apply { put("rating", starRating) }
         db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
     }
 
-    fun savePlaybackProgress(dedupKey: String, positionMs: Long, durationMs: Long) {
+    fun savePlaybackProgress(dedupKey: String, positionMs: Long, durationMs: Long, profileId: String = ""): Boolean {
+        // Phase B Rule: Never record progress, resume position, or watched flag for adult titles
+        if (isAdultItem(dedupKey)) {
+            return false
+        }
         val db = writableDatabase
         val finished = durationMs > 60_000L && positionMs.toDouble() / durationMs.toDouble() >= 0.90
+        val now = System.currentTimeMillis()
+
+        if (profileId.isNotBlank()) {
+            db.execSQL(
+                """
+                INSERT INTO profile_media_state (profile_id, dedup_key, resume_position_ms, duration_ms, is_watched, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
+                  resume_position_ms = excluded.resume_position_ms,
+                  duration_ms = excluded.duration_ms,
+                  is_watched = CASE WHEN excluded.is_watched = 1 THEN 1 ELSE profile_media_state.is_watched END,
+                  updated_at = excluded.updated_at
+                """.trimIndent(),
+                arrayOf(
+                    profileId,
+                    dedupKey,
+                    if (finished) 0L else positionMs,
+                    durationMs,
+                    if (finished) 1 else 0,
+                    now
+                )
+            )
+        }
+
         val cv = ContentValues().apply {
             put("resume_position_ms", if (finished) 0L else positionMs)
             put("duration_ms", durationMs)
-            // F11: Never auto-clear is_watched! Only set it to 1 when completed.
             if (finished) put("is_watched", 1)
         }
         db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
+        return true
     }
 
     fun recordDiscoveredStreamTracks(
@@ -845,9 +1146,33 @@ class StreamVaultDatabase(context: Context) :
         return list
     }
 
-    fun saveEpisodeProgress(episodeId: String, positionMs: Long, durationMs: Long) {
+    fun saveEpisodeProgress(episodeId: String, positionMs: Long, durationMs: Long, profileId: String = "") {
         val db = writableDatabase
         val finished = durationMs > 60_000L && positionMs.toDouble() / durationMs.toDouble() >= 0.90
+        val now = System.currentTimeMillis()
+
+        if (profileId.isNotBlank()) {
+            db.execSQL(
+                """
+                INSERT INTO profile_episode_state (profile_id, episode_id, resume_position_ms, duration_secs, is_watched, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, episode_id) DO UPDATE SET
+                  resume_position_ms = excluded.resume_position_ms,
+                  duration_secs = excluded.duration_secs,
+                  is_watched = CASE WHEN excluded.is_watched = 1 THEN 1 ELSE profile_episode_state.is_watched END,
+                  updated_at = excluded.updated_at
+                """.trimIndent(),
+                arrayOf(
+                    profileId,
+                    episodeId,
+                    if (finished) 0L else positionMs,
+                    (durationMs / 1000).toInt(),
+                    if (finished) 1 else 0,
+                    now
+                )
+            )
+        }
+
         val cv = ContentValues().apply {
             put("resume_position_ms", if (finished) 0L else positionMs)
             if (finished) put("is_watched", 1)
@@ -886,23 +1211,69 @@ class StreamVaultDatabase(context: Context) :
         }
     }
 
-    fun getLiveChannels(categoryName: String? = null, searchQuery: String = ""): List<LiveChannel> {
+    fun getLiveChannels(
+        categoryName: String? = null,
+        searchQuery: String = "",
+        profileId: String = "",
+        isKids: Boolean = false
+    ): List<LiveChannel> {
         val db = readableDatabase
         val clauses = mutableListOf<String>()
         val args = mutableListOf<String>()
+
+        if (profileId.isNotBlank()) {
+            args.add(profileId)
+        }
+
         if (categoryName == "★ Favorites") {
-            clauses.add("is_favorite = 1")
+            if (profileId.isNotBlank()) {
+                clauses.add("plf.stream_id IS NOT NULL")
+            } else {
+                clauses.add("lc.is_favorite = 1")
+            }
         } else if (!categoryName.isNullOrBlank() && categoryName != "All Channels") {
-            clauses.add("category_name = ?")
+            clauses.add("lc.category_name = ?")
             args.add(categoryName)
         }
+
         if (searchQuery.isNotBlank()) {
-            clauses.add("name LIKE ?")
+            clauses.add("lc.name LIKE ?")
             args.add("%$searchQuery%")
         }
+
+        // Kids mode: hide adult/mature live channels!
+        if (isKids) {
+            clauses.add("lc.category_name NOT LIKE '%xxx%'")
+            clauses.add("lc.category_name NOT LIKE '%18+%'")
+            clauses.add("lc.category_name NOT LIKE '%adult%'")
+            clauses.add("lc.category_name NOT LIKE '%porn%'")
+            clauses.add("lc.name NOT LIKE '%xxx%'")
+            clauses.add("lc.name NOT LIKE '%18+%'")
+            clauses.add("lc.name NOT LIKE '%adult%'")
+        }
+
         val where = if (clauses.isEmpty()) "" else "WHERE " + clauses.joinToString(" AND ")
+        val sql = if (profileId.isNotBlank()) {
+            """
+            SELECT lc.*, CASE WHEN plf.stream_id IS NOT NULL THEN 1 ELSE 0 END AS p_is_fav
+            FROM live_channels lc
+            LEFT JOIN profile_live_favorites plf ON plf.stream_id = lc.stream_id AND plf.profile_id = ?
+            $where
+            ORDER BY p_is_fav DESC, lc.name ASC
+            LIMIT 500
+            """.trimIndent()
+        } else {
+            """
+            SELECT lc.*, lc.is_favorite AS p_is_fav
+            FROM live_channels lc
+            $where
+            ORDER BY lc.is_favorite DESC, lc.name ASC
+            LIMIT 500
+            """.trimIndent()
+        }
+
         val list = mutableListOf<LiveChannel>()
-        db.rawQuery("SELECT * FROM live_channels $where ORDER BY is_favorite DESC, name ASC LIMIT 500", args.toTypedArray()).use { c ->
+        db.rawQuery(sql, args.toTypedArray()).use { c ->
             while (c.moveToNext()) {
                 list.add(
                     LiveChannel(
@@ -915,7 +1286,7 @@ class StreamVaultDatabase(context: Context) :
                         currentProgramTitle = c.getString(c.getColumnIndexOrThrow("current_program")) ?: "",
                         currentProgramTime = c.getString(c.getColumnIndexOrThrow("current_program_time")) ?: "",
                         nextProgramTitle = c.getString(c.getColumnIndexOrThrow("next_program")) ?: "",
-                        isFavorite = c.getInt(c.getColumnIndexOrThrow("is_favorite")) == 1
+                        isFavorite = c.getInt(c.getColumnIndexOrThrow("p_is_fav")) == 1
                     )
                 )
             }
@@ -934,15 +1305,192 @@ class StreamVaultDatabase(context: Context) :
         return cats
     }
 
-    fun toggleFavoriteChannel(streamId: String): Boolean {
+    fun toggleFavoriteChannel(streamId: String, profileId: String = ""): Boolean {
         val db = writableDatabase
         var fav = false
-        db.rawQuery("SELECT is_favorite FROM live_channels WHERE stream_id = ?", arrayOf(streamId)).use { c ->
-            if (c.moveToFirst()) fav = c.getInt(0) == 0
+        if (profileId.isNotBlank()) {
+            val exists = db.rawQuery("SELECT 1 FROM profile_live_favorites WHERE profile_id = ? AND stream_id = ?", arrayOf(profileId, streamId)).use { it.moveToFirst() }
+            if (exists) {
+                db.delete("profile_live_favorites", "profile_id = ? AND stream_id = ?", arrayOf(profileId, streamId))
+                fav = false
+            } else {
+                val cv = ContentValues().apply {
+                    put("profile_id", profileId)
+                    put("stream_id", streamId)
+                }
+                db.insertWithOnConflict("profile_live_favorites", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+                fav = true
+            }
+        } else {
+            db.rawQuery("SELECT is_favorite FROM live_channels WHERE stream_id = ?", arrayOf(streamId)).use { c ->
+                if (c.moveToFirst()) fav = c.getInt(0) == 0
+            }
+            val cv = ContentValues().apply { put("is_favorite", if (fav) 1 else 0) }
+            db.update("live_channels", cv, "stream_id = ?", arrayOf(streamId))
         }
-        val cv = ContentValues().apply { put("is_favorite", if (fav) 1 else 0) }
-        db.update("live_channels", cv, "stream_id = ?", arrayOf(streamId))
         return fav
+    }
+
+    // --- Profiles Management (Limit 5, Scoped Personal Data) ---
+    fun getProfiles(defaultName: String = "User"): List<UserProfile> {
+        val db = readableDatabase
+        val list = mutableListOf<UserProfile>()
+        db.rawQuery(
+            "SELECT profile_id, name, avatar_color, is_kids, theme, is_primary, updated_at FROM profiles ORDER BY is_primary DESC, updated_at ASC",
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                list.add(
+                    UserProfile(
+                        id = c.getString(0),
+                        name = c.getString(1),
+                        avatarColor = c.getString(2) ?: "#8B5CF6",
+                        isKids = c.getInt(3) == 1,
+                        theme = c.getString(4) ?: "purple",
+                        isPrimary = c.getInt(5) == 1,
+                        updatedAt = c.getLong(6)
+                    )
+                )
+            }
+        }
+        if (list.isEmpty()) {
+            val seeded = ensureDefaultProfile(defaultName)
+            return listOf(seeded)
+        }
+        return list
+    }
+
+    fun ensureDefaultProfile(defaultName: String = "User"): UserProfile {
+        val db = writableDatabase
+        val existing = getProfileById("prof_primary")
+        if (existing != null) return existing
+        val now = System.currentTimeMillis()
+        val prof = UserProfile(
+            id = "prof_primary",
+            name = defaultName.ifBlank { "User" },
+            avatarColor = "#7C3AED",
+            isKids = false,
+            theme = "purple",
+            isPrimary = true,
+            updatedAt = now
+        )
+        val cv = ContentValues().apply {
+            put("profile_id", prof.id)
+            put("name", prof.name)
+            put("avatar_color", prof.avatarColor)
+            put("is_kids", if (prof.isKids) 1 else 0)
+            put("theme", prof.theme)
+            put("is_primary", 1)
+            put("updated_at", now)
+        }
+        db.insertWithOnConflict("profiles", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        return prof
+    }
+
+    fun getPrimaryProfile(): UserProfile {
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT profile_id, name, avatar_color, is_kids, theme, is_primary, updated_at FROM profiles WHERE is_primary = 1 LIMIT 1",
+            null
+        ).use { c ->
+            if (c.moveToFirst()) {
+                return UserProfile(
+                    id = c.getString(0),
+                    name = c.getString(1),
+                    avatarColor = c.getString(2) ?: "#8B5CF6",
+                    isKids = c.getInt(3) == 1,
+                    theme = c.getString(4) ?: "purple",
+                    isPrimary = true,
+                    updatedAt = c.getLong(6)
+                )
+            }
+        }
+        return ensureDefaultProfile()
+    }
+
+    fun getProfileById(profileId: String): UserProfile? {
+        if (profileId.isBlank()) return null
+        val db = readableDatabase
+        db.rawQuery(
+            "SELECT profile_id, name, avatar_color, is_kids, theme, is_primary, updated_at FROM profiles WHERE profile_id = ?",
+            arrayOf(profileId)
+        ).use { c ->
+            if (c.moveToFirst()) {
+                return UserProfile(
+                    id = c.getString(0),
+                    name = c.getString(1),
+                    avatarColor = c.getString(2) ?: "#8B5CF6",
+                    isKids = c.getInt(3) == 1,
+                    theme = c.getString(4) ?: "purple",
+                    isPrimary = c.getInt(5) == 1,
+                    updatedAt = c.getLong(6)
+                )
+            }
+        }
+        return null
+    }
+
+    fun createProfile(name: String, avatarColor: String, theme: String, isKids: Boolean): UserProfile? {
+        val db = writableDatabase
+        var count = 0
+        db.rawQuery("SELECT COUNT(*) FROM profiles", null).use { c ->
+            if (c.moveToFirst()) count = c.getInt(0)
+        }
+        if (count >= 5) {
+            return null // Strict Limit: Max 5 profiles per account
+        }
+        val id = "prof_" + java.util.UUID.randomUUID().toString().take(8)
+        val now = System.currentTimeMillis()
+        val prof = UserProfile(
+            id = id,
+            name = name.trim().ifBlank { "Profile ${count + 1}" },
+            avatarColor = avatarColor.ifBlank { "#8B5CF6" },
+            isKids = isKids,
+            theme = theme.ifBlank { "purple" },
+            isPrimary = false,
+            updatedAt = now
+        )
+        val cv = ContentValues().apply {
+            put("profile_id", prof.id)
+            put("name", prof.name)
+            put("avatar_color", prof.avatarColor)
+            put("is_kids", if (prof.isKids) 1 else 0)
+            put("theme", prof.theme)
+            put("is_primary", 0)
+            put("updated_at", now)
+        }
+        db.insert("profiles", null, cv)
+        return prof
+    }
+
+    fun updateProfile(id: String, name: String, avatarColor: String, theme: String, isKids: Boolean): Boolean {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            if (name.isNotBlank()) put("name", name.trim())
+            if (avatarColor.isNotBlank()) put("avatar_color", avatarColor.trim())
+            if (theme.isNotBlank()) put("theme", theme.trim())
+            put("is_kids", if (isKids) 1 else 0)
+            put("updated_at", System.currentTimeMillis())
+        }
+        return db.update("profiles", cv, "profile_id = ?", arrayOf(id)) > 0
+    }
+
+    fun deleteProfile(id: String): Boolean {
+        val db = writableDatabase
+        val prof = getProfileById(id) ?: return false
+        if (prof.isPrimary) return false // Primary profile cannot be deleted
+
+        db.beginTransaction()
+        try {
+            db.delete("profiles", "profile_id = ?", arrayOf(id))
+            db.delete("profile_media_state", "profile_id = ?", arrayOf(id))
+            db.delete("profile_episode_state", "profile_id = ?", arrayOf(id))
+            db.delete("profile_live_favorites", "profile_id = ?", arrayOf(id))
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
     }
 
     // Pinned Smart Rows
@@ -987,6 +1535,10 @@ class StreamVaultDatabase(context: Context) :
             db.delete("series_episodes", null, null)
             db.delete("live_channels", null, null)
             db.delete("pinned_smart_rows", null, null)
+            db.delete("profile_media_state", null, null)
+            db.delete("profile_episode_state", null, null)
+            db.delete("profile_live_favorites", null, null)
+            db.delete("profiles", null, null)
             seedDefaultSmartRows(db)
             db.setTransactionSuccessful()
         } finally {
@@ -1090,6 +1642,15 @@ class StreamVaultDatabase(context: Context) :
                 val embAudStr = c.getString(c.getColumnIndexOrThrow("embedded_audio_langs")) ?: ""
                 val versionsJson = c.getString(c.getColumnIndexOrThrow("versions_json")) ?: "[]"
 
+                val isAdult = c.getColumnIndex("is_adult").let { if (it >= 0) c.getInt(it) == 1 else false }
+                val cert = c.getColumnIndex("certification").let { if (it >= 0) c.getString(it) ?: "" else "" }
+
+                val inWatchlist = c.getColumnIndex("p_in_watchlist").let { if (it >= 0) c.getInt(it) == 1 else c.getInt(c.getColumnIndexOrThrow("in_watchlist")) == 1 }
+                val isWatched = c.getColumnIndex("p_is_watched").let { if (it >= 0) c.getInt(it) == 1 else c.getInt(c.getColumnIndexOrThrow("is_watched")) == 1 }
+                val resumePos = c.getColumnIndex("p_resume_position_ms").let { if (it >= 0) c.getLong(it) else c.getLong(c.getColumnIndexOrThrow("resume_position_ms")) }
+                val durationMs = c.getColumnIndex("p_duration_ms").let { if (it >= 0) c.getLong(it) else c.getLong(c.getColumnIndexOrThrow("duration_ms")) }
+                val userRating = c.getColumnIndex("p_user_rating").let { if (it >= 0) c.getDouble(it) else 0.0 }
+
                 val versions = mutableListOf<StreamVersion>()
                 runCatching {
                     val arr = JSONArray(versionsJson)
@@ -1130,10 +1691,13 @@ class StreamVaultDatabase(context: Context) :
                         addedTimestamp = c.getLong(c.getColumnIndexOrThrow("added_timestamp")),
                         isEnriched = c.getInt(c.getColumnIndexOrThrow("is_enriched")) == 1,
                         isNewlyAdded = c.getInt(c.getColumnIndexOrThrow("is_newly_added")) == 1,
-                        inWatchlist = c.getInt(c.getColumnIndexOrThrow("in_watchlist")) == 1,
-                        isWatched = c.getInt(c.getColumnIndexOrThrow("is_watched")) == 1,
-                        resumePositionMs = c.getLong(c.getColumnIndexOrThrow("resume_position_ms")),
-                        durationMs = c.getLong(c.getColumnIndexOrThrow("duration_ms")),
+                        inWatchlist = inWatchlist,
+                        isWatched = isWatched,
+                        resumePositionMs = resumePos,
+                        durationMs = durationMs,
+                        isAdult = isAdult,
+                        certification = cert,
+                        userRating = userRating,
                         versions = versions
                     )
                 )

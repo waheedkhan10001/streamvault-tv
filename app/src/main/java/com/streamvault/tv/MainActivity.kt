@@ -1367,7 +1367,8 @@ class MainActivity : Activity() {
             val pos = exoPlayer?.currentPosition ?: 0L
             val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
             if (pos > 5000L && currentDedupKey.isNotEmpty()) {
-                db.savePlaybackProgress(currentDedupKey, pos, dur)
+                val activeProfId = prefs.getActiveProfileId()
+                db.savePlaybackProgress(currentDedupKey, pos, dur, activeProfId)
                 val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress('$currentDedupKey', $pos, $dur); }"
                 webView.evaluateJavascript(js, null)
             }
@@ -1385,11 +1386,15 @@ class MainActivity : Activity() {
             val pos = exoPlayer?.currentPosition ?: 0L
             val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
             if (pos > 5000L && currentDedupKey.isNotEmpty()) {
-                db.savePlaybackProgress(currentDedupKey, pos, dur)
+                val activeProfId = prefs.getActiveProfileId()
+                db.savePlaybackProgress(currentDedupKey, pos, dur, activeProfId)
                 val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress('$currentDedupKey', $pos, $dur); }"
                 webView.evaluateJavascript(js, null)
             }
         }
+        prefs.setAdultVaultUnlocked(false)
+        val lockJs = "if(window.lockParentalControls){ window.lockParentalControls(); }"
+        webView.evaluateJavascript(lockJs, null)
     }
 
     override fun onDestroy() {

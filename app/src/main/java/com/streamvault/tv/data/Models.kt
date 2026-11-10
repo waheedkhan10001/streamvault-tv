@@ -50,6 +50,39 @@ data class XtreamCredentials(
     companion object {
         // TMDB requests are proxied via Worker or configured via TMDB_API_KEY; no hardcoded keys in APK
         const val DEFAULT_TMDB_KEY = ""
+        val KIDS_CERTIFICATIONS = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
+    }
+}
+
+data class UserProfile(
+    val id: String,
+    val name: String,
+    val avatarColor: String = "#8B5CF6",
+    val isKids: Boolean = false,
+    val theme: String = "purple",
+    val isPrimary: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    fun toJson(): JSONObject = JSONObject().apply {
+        put("id", id)
+        put("name", name)
+        put("avatarColor", avatarColor)
+        put("isKids", isKids)
+        put("theme", theme)
+        put("isPrimary", isPrimary)
+        put("updatedAt", updatedAt)
+    }
+
+    companion object {
+        fun fromJson(obj: JSONObject): UserProfile = UserProfile(
+            id = obj.optString("id", obj.optString("profile_id", "prof_1")),
+            name = obj.optString("name", obj.optString("display_name", "User")),
+            avatarColor = obj.optString("avatarColor", obj.optString("avatar_color", "#8B5CF6")),
+            isKids = obj.optBoolean("isKids", obj.optInt("is_kids", 0) == 1),
+            theme = obj.optString("theme", "purple"),
+            isPrimary = obj.optBoolean("isPrimary", obj.optInt("is_primary", 0) == 1),
+            updatedAt = obj.optLong("updatedAt", obj.optLong("updated_at", System.currentTimeMillis()))
+        )
     }
 }
 
@@ -124,6 +157,9 @@ data class MediaItem(
     val isWatched: Boolean = false,
     val resumePositionMs: Long = 0L,
     val durationMs: Long = 0L,
+    val isAdult: Boolean = false,
+    val certification: String = "",
+    val userRating: Double = 0.0,
     val versions: List<StreamVersion> = emptyList()
 ) {
     val progressFraction: Float

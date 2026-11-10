@@ -975,7 +975,8 @@
 <!-- Parental Control PIN Dialog -->
 <div id="parentalPinModal" class="pin-modal-backdrop" style="display:none;">
   <div class="pin-modal">
-    <div style="font-size:18px;font-weight:900;margin-bottom:6px;">Parental Control</div>
+    <div id="parentalPinTitle" style="font-size:18px;font-weight:900;margin-bottom:4px;">Parental Control</div>
+    <div id="parentalPinSubtitle" style="font-size:11px;color:#9CA3AF;margin-bottom:8px;">Enter 4-digit Master PIN</div>
     
     <div class="pin-dots" id="pinDots">
       <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
@@ -994,6 +995,64 @@
       <button class="pin-btn tv-focusable" onclick="clearPin()">C</button>
       <button class="pin-btn tv-focusable" onclick="pressPinDigit('0')">0</button>
       <button class="pin-btn tv-focusable" onclick="closeParentalPinModal()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Profile Dialog -->
+<div id="addProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#120E24;border:1.5px solid var(--theme-border, #A78BFA);border-radius:16px;max-width:440px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
+    <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Add New Profile</div>
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Create a separate profile with its own watchlist and recommendations</div>
+    
+    <div style="margin-bottom:12px;text-align:left;">
+      <label style="display:block;font-size:10px;font-weight:700;color:#D1D5DB;margin-bottom:4px;">Profile Name</label>
+      <input id="newProfileNameInput" class="search-field tv-focusable"
+             readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
+             onkeydown="onInputKeyDown(this, event)"
+             placeholder="e.g. Alex" style="width:100%;font-size:13px;padding:6px 10px;box-sizing:border-box;" />
+    </div>
+
+    <div style="margin-bottom:12px;text-align:left;">
+      <label style="display:block;font-size:10px;font-weight:700;color:#D1D5DB;margin-bottom:6px;">Avatar Color</label>
+      <div style="display:flex;gap:8px;" id="addProfileColorGroup">
+        <div tabindex="0" class="tv-focusable add-prof-color-chip" onclick="selectNewProfileColor('#7C3AED')" onfocus="playNavSound()" data-color="#7C3AED" style="width:28px;height:28px;border-radius:50%;background:#7C3AED;cursor:pointer;border:2.5px solid #FFFFFF;"></div>
+        <div tabindex="0" class="tv-focusable add-prof-color-chip" onclick="selectNewProfileColor('#EF4444')" onfocus="playNavSound()" data-color="#EF4444" style="width:28px;height:28px;border-radius:50%;background:#EF4444;cursor:pointer;border:1.5px solid rgba(255,255,255,0.2);"></div>
+        <div tabindex="0" class="tv-focusable add-prof-color-chip" onclick="selectNewProfileColor('#10B981')" onfocus="playNavSound()" data-color="#10B981" style="width:28px;height:28px;border-radius:50%;background:#10B981;cursor:pointer;border:1.5px solid rgba(255,255,255,0.2);"></div>
+        <div tabindex="0" class="tv-focusable add-prof-color-chip" onclick="selectNewProfileColor('#3B82F6')" onfocus="playNavSound()" data-color="#3B82F6" style="width:28px;height:28px;border-radius:50%;background:#3B82F6;cursor:pointer;border:1.5px solid rgba(255,255,255,0.2);"></div>
+        <div tabindex="0" class="tv-focusable add-prof-color-chip" onclick="selectNewProfileColor('#F59E0B')" onfocus="playNavSound()" data-color="#F59E0B" style="width:28px;height:28px;border-radius:50%;background:#F59E0B;cursor:pointer;border:1.5px solid rgba(255,255,255,0.2);"></div>
+        <div tabindex="0" class="tv-focusable add-prof-color-chip" onclick="selectNewProfileColor('#EC4899')" onfocus="playNavSound()" data-color="#EC4899" style="width:28px;height:28px;border-radius:50%;background:#EC4899;cursor:pointer;border:1.5px solid rgba(255,255,255,0.2);"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;margin-bottom:12px;border-top:1px solid rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.06);text-align:left;">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Kids Profile</div>
+        <div style="font-size:9.5px;color:#9CA3AF;">Restricts to young-child certifications (G, PG, TV-Y, TV-G, TV-PG)</div>
+      </div>
+      <button tabindex="0" id="btnAddProfileKidsToggle" class="btn tv-focusable" style="padding:4px 10px;font-size:10px;background:#262A38;border-color:#374151;color:#9CA3AF;" onclick="toggleNewProfileKids()">Disabled</button>
+    </div>
+
+    <div id="newProfileError" style="font-size:11px;color:#EF4444;height:14px;margin-bottom:8px;font-weight:700;"></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button tabindex="0" id="btnCancelAddProfile" class="btn tv-focusable" style="padding:6px 16px;font-size:11px;" onclick="closeAddProfileModal()">Cancel</button>
+      <button tabindex="0" id="btnConfirmAddProfile" class="btn btn-primary tv-focusable" style="padding:6px 18px;font-size:11px;" onclick="confirmCreateProfile()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Profile Confirmation Dialog -->
+<div id="deleteProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#120E24;border:1.5px solid #EF4444;border-radius:16px;max-width:400px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
+    <div style="width:40px;height:40px;border-radius:50%;background:rgba(239,68,68,0.15);border:1.5px solid #EF4444;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;color:#F87171;font-size:18px;">🗑️</div>
+    <div style="font-size:18px;font-weight:900;color:#F87171;margin-bottom:6px;">Delete Profile</div>
+    <div style="font-size:12px;color:#D1D5DB;line-height:1.4;margin-bottom:18px;">
+      Delete profile <span id="deleteProfileNameSpan" style="color:#FFFFFF;font-weight:800;"></span>? All watch progress, watchlist, and ratings for this profile will be permanently removed.
+    </div>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button tabindex="0" id="btnCancelDeleteProfile" class="btn tv-focusable" style="padding:6px 16px;font-size:11px;" onclick="closeDeleteProfileModal()">Cancel</button>
+      <button tabindex="0" id="btnConfirmDeleteProfile" class="btn tv-focusable" style="background:#DC2626;border-color:#EF4444;color:#fff;padding:6px 18px;font-size:11px;font-weight:800;" onclick="confirmDeleteProfile()">Delete</button>
     </div>
   </div>
 </div>
@@ -1705,10 +1764,19 @@ function showProfilePicker(profiles, onSelect) {
 
 async function activateProfileAndEnterApp(profile) {
   currentActiveProfile = { ...profile };
+  window.currentActiveProfile = currentActiveProfile;
+  try {
+    await fetch('/api/profiles/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: profile.id })
+    });
+  } catch (_) {}
   sessionStorage.setItem('sv_session_profile_active', 'true');
   localStorage.setItem('sv_last_profile_id', profile.id);
   if (profile.theme) applyProfileTheme(profile.theme);
   updateUserProfileUI();
+  renderSidebar();
   if (appStatus && appStatus.totalCatalogCount) {
     const catCount = document.getElementById('sidebarCatalogCount');
     if (catCount) catCount.innerText = `${appStatus.totalCatalogCount.toLocaleString()} Titles`;
@@ -1799,7 +1867,8 @@ function renderSidebar(lockedToPlaylist = false) {
   if (!container) return;
   const isLocked = lockedToPlaylist || isAppLockedForPlaylist();
   const items = [...NAV_ITEMS];
-  const isAdultUnlocked = appStatus?.parentalControl && !appStatus.parentalControl.isLocked && appStatus.parentalControl.showAdult;
+  const isKids = Boolean(currentActiveProfile && currentActiveProfile.isKids);
+  const isAdultUnlocked = !isKids && appStatus?.parentalControl && !appStatus.parentalControl.isLocked && appStatus.parentalControl.showAdult;
   if (isAdultUnlocked) {
     items.push({
       id: 'VAULT_18',
@@ -1939,6 +2008,11 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
       }, 400);
     }
   } else if (tabId === 'VAULT_18') {
+    if (currentActiveProfile && currentActiveProfile.isKids) {
+      showToast('18+ Vault is not available in Kids Mode');
+      navigateToTab('HOME');
+      return;
+    }
     const isAdultUnlocked = appStatus?.parentalControl && !appStatus.parentalControl.isLocked && appStatus.parentalControl.showAdult;
     if (!isAdultUnlocked) {
       openParentalPinModal();
@@ -2833,6 +2907,7 @@ async function loadWatchlist(vp) {
 
 // 4.5. USER PROFILES & PERSONAL PREFERENCES (Isolated from Account & IPTV credentials)
 let currentActiveProfile = getDefaultProfile();
+window.currentActiveProfile = currentActiveProfile;
 
 function applyProfileTheme(themeKey) {
   document.body.classList.remove('theme-netflix', 'theme-disney', 'theme-prime');
@@ -2888,13 +2963,13 @@ async function loadProfile(vp) {
 
       <!-- Who's Watching? Switcher Row -->
       <div style="margin-bottom:8px;">
-        <div style="font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Select Profile</div>
-        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:10px;">
+        <div style="font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Select Profile (${profiles.length}/5)</div>
+        <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:10px;">
           ${profiles.map(p => `
             <div tabindex="0" class="profile-card-item tv-focusable ${p.id === activeProf.id ? 'is-active-profile' : ''}"
                  onclick="switchUserProfile('${p.id}')" onfocus="playNavSound()"
                  style="background:#120E24;border:${p.id === activeProf.id ? '2px solid var(--theme-accent, #8B5CF6)' : '1.5px solid #251C42'};border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:10px;cursor:pointer;box-sizing:border-box;min-height:42px;box-shadow:${p.id === activeProf.id ? '0 0 14px var(--theme-glow, rgba(139,92,246,0.35))' : 'none'};">
-              <div class="profile-avatar-initials" style="width:28px;height:28px;border-radius:50%;background:var(--theme-accent, #7C3AED);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900;flex-shrink:0;">
+              <div class="profile-avatar-initials" style="width:28px;height:28px;border-radius:50%;background:${escapeHtml(p.avatarColor || 'var(--theme-accent, #7C3AED)')};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900;flex-shrink:0;">
                 ${escapeHtml((p.name || 'U').slice(0, 2).toUpperCase())}
               </div>
               <div style="min-width:0;flex:1;">
@@ -2906,11 +2981,13 @@ async function loadProfile(vp) {
             </div>
           `).join('')}
 
+          ${profiles.length < 5 ? `
           <div tabindex="0" class="profile-card-item tv-focusable" onclick="promptAddNewProfile()" onfocus="playNavSound()"
                style="background:rgba(255,255,255,0.03);border:1.5px dashed #374151;border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:10px;cursor:pointer;box-sizing:border-box;min-height:42px;">
             <div style="width:28px;height:28px;border-radius:50%;background:#1F2937;display:flex;align-items:center;justify-content:center;color:#9CA3AF;font-size:16px;font-weight:800;flex-shrink:0;">+</div>
             <div style="font-size:12px;font-weight:700;color:#9CA3AF;">Add Profile</div>
           </div>
+          ` : ''}
         </div>
       </div>
 
@@ -4080,25 +4157,36 @@ function updateParentalStatusInSettings() {
   btn.style.color = isAdultVaultUnlocked ? '#10B981' : '#F59E0B';
 }
 
-function switchUserProfile(profileId) {
-  playNavSound();
-  localStorage.setItem('streamvault_active_profile_id', profileId);
-  showToast('Switched profile');
-  const vp = document.getElementById('mainViewport');
-  if (vp && currentTab === 'PROFILE') {
-    loadProfile(vp);
+let lastVerifiedPin = '';
+
+function updateKidsModeToggleBtn(enabled) {
+  const btn = document.getElementById('btnToggleKidsMode');
+  if (btn) {
+    btn.innerText = enabled ? 'Enabled' : 'Disabled';
+    btn.style.background = enabled ? '#059669' : '#262A38';
+    btn.style.borderColor = enabled ? '#10B981' : '#374151';
+    btn.style.color = enabled ? '#FFFFFF' : '#9CA3AF';
   }
 }
 
 function toggleProfileKidsMode() {
   playNavSound();
-  currentActiveProfile.isKids = !currentActiveProfile.isKids;
-  const btn = document.getElementById('btnToggleKidsMode');
-  if (btn) {
-    btn.innerText = currentActiveProfile.isKids ? 'Enabled' : 'Disabled';
-    btn.style.background = currentActiveProfile.isKids ? '#059669' : '#262A38';
-    btn.style.borderColor = currentActiveProfile.isKids ? '#10B981' : '#374151';
-    btn.style.color = currentActiveProfile.isKids ? '#FFFFFF' : '#9CA3AF';
+  if (currentActiveProfile.isKids) {
+    // Currently ON -> Turning OFF requires Master PIN!
+    openParentalPinModal({
+      action: 'disable_kids',
+      onComplete: (pin) => {
+        currentActiveProfile.isKids = false;
+        lastVerifiedPin = pin;
+        updateKidsModeToggleBtn(false);
+        showToast('Kids Mode disabled. Click Save Profile to apply.');
+      }
+    });
+  } else {
+    // Currently OFF -> Turning ON does NOT require PIN!
+    currentActiveProfile.isKids = true;
+    updateKidsModeToggleBtn(true);
+    showToast('Kids Mode enabled');
   }
 }
 
@@ -4106,6 +4194,34 @@ async function saveActiveProfileChanges() {
   playNavSound();
   const nameInp = document.getElementById('profNameInput');
   if (nameInp) currentActiveProfile.name = nameInp.value.trim() || currentActiveProfile.name;
+  
+  try {
+    const res = await fetch('/api/profiles/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: currentActiveProfile.id,
+        name: currentActiveProfile.name,
+        avatarColor: currentActiveProfile.avatarColor || '#8B5CF6',
+        theme: currentActiveProfile.theme || 'purple',
+        isKids: Boolean(currentActiveProfile.isKids),
+        pin: lastVerifiedPin
+      })
+    });
+    const d = await res.json();
+    if (!d.ok && !d.success) {
+      showToast(d.error || 'Failed to update profile');
+      return;
+    }
+    if (d.profile) {
+      currentActiveProfile = { ...currentActiveProfile, ...d.profile };
+    }
+  } catch (e) {
+    showToast('Error updating profile');
+    return;
+  }
+  
+  lastVerifiedPin = '';
   localStorage.setItem('streamvault_active_theme', currentActiveProfile.theme || 'purple');
 
   const statusLbl = document.getElementById('profSaveStatus');
@@ -4114,17 +4230,160 @@ async function saveActiveProfileChanges() {
     setTimeout(() => { if (statusLbl) statusLbl.innerText = ''; }, 3000);
   }
 
-  // Update profile header pill
-  const pillName = document.querySelector('.user-profile-name');
-  if (pillName) pillName.innerText = currentActiveProfile.name;
-  const avatarInit = document.getElementById('userProfileAvatarInitial');
-  if (avatarInit) avatarInit.innerText = (currentActiveProfile.name[0] || 'U').toUpperCase();
+  // Update profile header pill & sidebar
+  updateUserProfileUI();
+  renderSidebar();
   showToast('✓ Profile updated');
+  
+  pushProfileUpdateToWorker(currentActiveProfile);
+}
+
+async function switchUserProfile(profileId) {
+  playNavSound();
+  try {
+    const res = await fetch('/api/profiles/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: profileId })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.profile) {
+        currentActiveProfile = { ...data.profile };
+        window.currentActiveProfile = currentActiveProfile;
+      }
+    }
+  } catch (_) {}
+  
+  localStorage.setItem('sv_last_profile_id', profileId);
+  sessionStorage.setItem('sv_session_profile_active', 'true');
+  
+  // Phase B Rule: Re-lock 18+ Vault on profile switch!
+  if (appStatus && appStatus.parentalControl) {
+    appStatus.parentalControl.isLocked = true;
+    appStatus.parentalControl.showAdult = false;
+  }
+  
+  if (currentActiveProfile && currentActiveProfile.theme) {
+    applyProfileTheme(currentActiveProfile.theme);
+  }
+  updateUserProfileUI();
+  renderSidebar();
+  showToast(`Switched to ${currentActiveProfile?.name || 'profile'}`);
+  
+  const vp = document.getElementById('mainViewport');
+  if (vp && currentTab === 'PROFILE') {
+    await loadProfile(vp);
+  } else {
+    await navigateToTab(currentTab === 'VAULT_18' ? 'HOME' : currentTab);
+  }
+}
+
+let newProfileAvatarColor = '#7C3AED';
+let newProfileIsKids = false;
+
+function selectNewProfileColor(color) {
+  playNavSound();
+  newProfileAvatarColor = color;
+  document.querySelectorAll('.add-prof-color-chip').forEach(c => {
+    if (c.getAttribute('data-color') === color) {
+      c.style.border = '2.5px solid #FFFFFF';
+    } else {
+      c.style.border = '1.5px solid rgba(255,255,255,0.2)';
+    }
+  });
+}
+
+function toggleNewProfileKids() {
+  playNavSound();
+  newProfileIsKids = !newProfileIsKids;
+  const btn = document.getElementById('btnAddProfileKidsToggle');
+  if (btn) {
+    btn.innerText = newProfileIsKids ? 'Enabled' : 'Disabled';
+    btn.style.background = newProfileIsKids ? '#059669' : '#262A38';
+    btn.style.borderColor = newProfileIsKids ? '#10B981' : '#374151';
+    btn.style.color = newProfileIsKids ? '#FFFFFF' : '#9CA3AF';
+  }
 }
 
 function promptAddNewProfile() {
   playNavSound();
-  showToast('Profile added (Primary family profile)');
+  newProfileAvatarColor = '#7C3AED';
+  newProfileIsKids = false;
+  const modal = document.getElementById('addProfileModal');
+  if (!modal) return;
+  const nameInp = document.getElementById('newProfileNameInput');
+  if (nameInp) nameInp.value = '';
+  const err = document.getElementById('newProfileError');
+  if (err) err.innerText = '';
+  const kidsBtn = document.getElementById('btnAddProfileKidsToggle');
+  if (kidsBtn) {
+    kidsBtn.innerText = 'Disabled';
+    kidsBtn.style.background = '#262A38';
+    kidsBtn.style.borderColor = '#374151';
+    kidsBtn.style.color = '#9CA3AF';
+  }
+  selectNewProfileColor('#7C3AED');
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    if (nameInp) { nameInp.removeAttribute('readonly'); nameInp.focus(); }
+  }, 50);
+}
+
+function closeAddProfileModal() {
+  const modal = document.getElementById('addProfileModal');
+  if (modal) modal.style.display = 'none';
+  const firstProf = document.querySelector('.profile-card-item');
+  if (firstProf) firstProf.focus();
+}
+
+async function confirmCreateProfile() {
+  playNavSound();
+  const nameInp = document.getElementById('newProfileNameInput');
+  const name = nameInp ? nameInp.value.trim() : '';
+  const err = document.getElementById('newProfileError');
+  if (!name) {
+    if (err) err.innerText = 'Please enter a profile name';
+    return;
+  }
+  
+  try {
+    const res = await fetch('/api/profiles/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        avatarColor: newProfileAvatarColor,
+        theme: 'purple',
+        isKids: newProfileIsKids
+      })
+    });
+    const d = await res.json();
+    if (!d.ok && !d.success) {
+      if (err) err.innerText = d.error || 'Failed to create profile';
+      return;
+    }
+    
+    closeAddProfileModal();
+    showToast(`✓ Profile "${name}" created`);
+    
+    // Mirror to cloud worker in background if authed
+    const token = getStoredAuthToken();
+    if (token) {
+      fetch(CLOUD_SYNC_BASE + '/api/profiles/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ displayName: name, avatarColor: newProfileAvatarColor, theme: 'purple', isKids: newProfileIsKids })
+      }).catch(() => null);
+    }
+    
+    const vp = document.getElementById('mainViewport');
+    if (vp && currentTab === 'PROFILE') {
+      await loadProfile(vp);
+    }
+  } catch (e) {
+    if (err) err.innerText = 'Connection error';
+  }
 }
 
 function promptDeleteCurrentProfile() {
@@ -4133,7 +4392,80 @@ function promptDeleteCurrentProfile() {
     showToast('Primary profile cannot be deleted');
     return;
   }
-  showToast('Profile deleted');
+  const modal = document.getElementById('deleteProfileModal');
+  if (!modal) return;
+  const nameSpan = document.getElementById('deleteProfileNameSpan');
+  if (nameSpan) nameSpan.innerText = `"${currentActiveProfile.name}"`;
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    const cancelBtn = document.getElementById('btnCancelDeleteProfile');
+    if (cancelBtn) cancelBtn.focus();
+  }, 50);
+}
+
+function closeDeleteProfileModal() {
+  const modal = document.getElementById('deleteProfileModal');
+  if (modal) modal.style.display = 'none';
+  const saveBtn = document.getElementById('btnSaveProfile');
+  if (saveBtn) saveBtn.focus();
+}
+
+async function confirmDeleteProfile() {
+  playNavSound();
+  const idToDelete = currentActiveProfile.id;
+  try {
+    const res = await fetch('/api/profiles/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: idToDelete })
+    });
+    const d = await res.json();
+    if (!d.ok && !d.success) {
+      showToast(d.error || 'Failed to delete profile');
+      return;
+    }
+    
+    closeDeleteProfileModal();
+    showToast('✓ Profile deleted');
+    
+    // Mirror to worker
+    const token = getStoredAuthToken();
+    if (token) {
+      fetch(CLOUD_SYNC_BASE + '/api/profiles/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ profileId: idToDelete })
+      }).catch(() => null);
+    }
+    
+    const vp = document.getElementById('mainViewport');
+    if (vp && currentTab === 'PROFILE') {
+      await loadProfile(vp);
+    }
+  } catch (e) {
+    showToast('Error deleting profile');
+  }
+}
+
+async function pushProfileUpdateToWorker(profile) {
+  const token = getStoredAuthToken();
+  if (!token) return;
+  try {
+    await fetch(CLOUD_SYNC_BASE + '/api/profiles/update', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({
+        profileId: profile.id,
+        displayName: profile.name,
+        avatarColor: profile.avatarColor,
+        theme: profile.theme,
+        isKids: profile.isKids
+      })
+    }).catch(() => null);
+  } catch (_) {}
 }
 
 // 6. DETAIL MODAL WITH BACKGROUND PREVIEW + 5-STAR RATING + SMART RECOMMENDATIONS
@@ -5021,13 +5353,14 @@ async function fetchSearchHistory() {
 }
 
 async function saveSearchQuery(q) {
+  if (currentTab === 'VAULT_18') return; // Strictly never record adult search queries!
   const query = (q || '').trim();
   if (!query || query.length < 2) return;
   try {
     await fetch('/api/search-history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({ query, isVault: currentTab === 'VAULT_18' })
     });
     cachedSearchHistory = [query, ...cachedSearchHistory.filter(h => h.toLowerCase() !== query.toLowerCase())].slice(0, 20);
   } catch (e) {}
@@ -5345,10 +5678,21 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-function openParentalPinModal() {
+let parentalPinContext = { action: 'unlock', onComplete: null };
+
+function openParentalPinModal(context = { action: 'unlock' }) {
+  parentalPinContext = context;
   playNavSound();
   enteredPin = '';
   updatePinDots();
+  const title = document.getElementById('parentalPinTitle');
+  if (title) {
+    title.innerText = context.action === 'disable_kids' ? 'Master PIN Required' : 'Parental Control';
+  }
+  const sub = document.getElementById('parentalPinSubtitle');
+  if (sub) {
+    sub.innerText = context.action === 'disable_kids' ? 'Enter Master PIN to disable Kids Mode' : 'Enter 4-digit Master PIN to unlock 18+ Vault';
+  }
   document.getElementById('pinErrorMessage').innerText = '';
   const m = document.getElementById('parentalPinModal');
   if (m) {
@@ -5362,8 +5706,13 @@ function openParentalPinModal() {
 
 function closeParentalPinModal() {
   document.getElementById('parentalPinModal').style.display = 'none';
-  const lockBtn = document.getElementById('btnToggleParentalLock');
-  if (lockBtn && currentTab === 'SETTINGS') lockBtn.focus();
+  if (parentalPinContext && parentalPinContext.action === 'disable_kids') {
+    const kidsBtn = document.getElementById('btnToggleKidsMode');
+    if (kidsBtn) kidsBtn.focus();
+  } else {
+    const lockBtn = document.getElementById('btnToggleParentalLock');
+    if (lockBtn && (currentTab === 'SETTINGS' || currentTab === 'PROFILE')) lockBtn.focus();
+  }
 }
 
 function pressPinDigit(d) {
@@ -5392,23 +5741,32 @@ function updatePinDots() {
 
 async function verifyParentalPin() {
   try {
+    const isDisableKids = parentalPinContext && parentalPinContext.action === 'disable_kids';
+    const actionParam = isDisableKids ? 'verify' : 'unlock';
     const res = await fetch('/api/parental-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unlock', pin: enteredPin })
+      body: JSON.stringify({ action: actionParam, pin: enteredPin })
     });
     const d = await res.json();
-    if (d.success) {
-      if (appStatus && appStatus.parentalControl) {
-        appStatus.parentalControl.isLocked = false;
-        appStatus.parentalControl.showAdult = true;
-      }
+    if (d.success || d.ok) {
+      const pinUsed = enteredPin;
       closeParentalPinModal();
-      renderSidebar();
-      if (currentTab === 'SETTINGS') {
-        updateParentalStatusInSettings();
+      if (isDisableKids) {
+        if (typeof parentalPinContext.onComplete === 'function') {
+          parentalPinContext.onComplete(pinUsed);
+        }
       } else {
-        navigateToTab(currentTab);
+        if (appStatus && appStatus.parentalControl) {
+          appStatus.parentalControl.isLocked = false;
+          appStatus.parentalControl.showAdult = true;
+        }
+        renderSidebar();
+        if (currentTab === 'SETTINGS' || currentTab === 'PROFILE') {
+          updateParentalStatusInSettings();
+        } else {
+          navigateToTab(currentTab);
+        }
       }
     } else {
       document.getElementById('pinErrorMessage').innerText = d.error || 'Incorrect PIN';
@@ -5437,6 +5795,14 @@ window.handleAppBackKey = function() {
     } else {
       closeCloudAuthModal();
     }
+    return true;
+  }
+  if (document.getElementById('addProfileModal') && document.getElementById('addProfileModal').style.display === 'flex') {
+    closeAddProfileModal();
+    return true;
+  }
+  if (document.getElementById('deleteProfileModal') && document.getElementById('deleteProfileModal').style.display === 'flex') {
+    closeDeleteProfileModal();
     return true;
   }
   if (document.getElementById('deleteHistoryModal') && document.getElementById('deleteHistoryModal').style.display === 'flex') {
@@ -7002,6 +7368,8 @@ function navigateSpatial(key) {
     container = document.getElementById('userProfileModal');
   } else if (document.getElementById('detailOverlay') && document.getElementById('detailOverlay').style.display !== 'none') {
     container = document.getElementById('detailOverlay');
+  } else if (document.getElementById('addProfileModal') && document.getElementById('addProfileModal').style.display === 'flex') {
+    container = document.getElementById('addProfileModal');
   } else if (document.getElementById('deleteProfileModal') && document.getElementById('deleteProfileModal').style.display === 'flex') {
     container = document.getElementById('deleteProfileModal');
   } else if (document.getElementById('signOutModal') && document.getElementById('signOutModal').style.display === 'flex') {

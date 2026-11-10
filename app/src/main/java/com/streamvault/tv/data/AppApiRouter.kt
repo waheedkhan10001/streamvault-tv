@@ -96,6 +96,13 @@ class AppApiRouter(
                 method == "PUT" && path.startsWith("/api/playlists") -> handleUpdatePlaylist(bodyStr)
                 method == "DELETE" && path.startsWith("/api/playlists") -> handleDeletePlaylist(path)
 
+                // 16. Profiles Management (Native Room/SQLite + Scoped Data)
+                method == "GET" && path == "/api/profiles" -> handleGetProfiles()
+                method == "POST" && path == "/api/profiles/create" -> handleCreateProfile(bodyStr)
+                method == "POST" && path == "/api/profiles/update" -> handleUpdateProfile(bodyStr)
+                method == "POST" && path == "/api/profiles/delete" -> handleDeleteProfile(bodyStr)
+                method == "POST" && path == "/api/profiles/switch" -> handleSwitchProfile(bodyStr)
+
                 else -> """{"error":"Endpoint not found","path":"$path"}"""
             }
         } catch (e: Exception) {
@@ -103,10 +110,22 @@ class AppApiRouter(
         }
     }
 
+    private fun getActiveUserProfile(): UserProfile {
+        val activeId = prefs.getActiveProfileId()
+        val profiles = db.getProfiles(prefs.getAccountDisplayName())
+        val found = if (activeId.isNotBlank()) profiles.find { it.id == activeId } else null
+        if (found != null) return found
+        val primary = profiles.find { it.isPrimary } ?: profiles.first()
+        prefs.setActiveProfileId(primary.id)
+        return primary
+    }
+
     private fun handleGetState(): String {
         val creds = prefs.loadCredentials()
         val (enriched, total) = db.getEnrichmentCounts()
         val syncState = syncEngine.syncState.value
+        val activeProf = getActiveUserProfile()
+        val allProfiles = db.getProfiles(prefs.getAccountDisplayName())
 
         val credsObj = JSONObject().apply {
             put("playlistName", creds.playlistName)
@@ -141,6 +160,11 @@ class AppApiRouter(
             })
         }
 
+        val profArr = JSONArray()
+        for (p in allProfiles) {
+            profArr.put(p.toJson())
+        }
+
         return JSONObject().apply {
             put("credentials", credsObj)
             put("parentalControl", parentalObj)
@@ -150,50 +174,77 @@ class AppApiRouter(
             put("totalCatalogCount", total)
             put("totalLiveCount", db.getLiveChannels().size)
             put("localIpUrl", "http://127.0.0.1:8765/phone")
+            put("activeProfile", activeProf.toJson())
+            put("profiles", profArr)
         }.toString()
     }
 
     private fun handleGetHome(): String {
-        val continueWatching = db.getContinueWatchingList(30)
+        val activeProf = getActiveUserProfile()
+        val continueWatching = db.getContinueWatchingList(profileId = activeProf.id, isKids = activeProf.isKids, limit = 30)
         val allMovies = db.queryMedia(
-            SuperFilterState(minRating = 6.0, sortBy = SortOption.RELEASE_YEAR_DESC),
-            limit = 60
+            filter = SuperFilterState(minRating = 6.0, sortBy = SortOption.RELEASE_YEAR_DESC),
+            limit = 60,
+            profileId = activeProf.id,
+            isKids = activeProf.isKids,
+            isAdultVaultUnlocked = false,
+            isVaultTab = false
         )
 
         val trending = db.queryMedia(
-            SuperFilterState(minRating = 6.8, sortBy = SortOption.RATING_DESC),
-            limit = 10
+            filter = SuperFilterState(minRating = 6.8, sortBy = SortOption.RATING_DESC),
+            limit = 10,
+            profileId = activeProf.id,
+            isKids = activeProf.isKids,
+            isAdultVaultUnlocked = false,
+            isVaultTab = false
         )
 
         val hollywood = db.queryMedia(
-            SuperFilterState(
+            filter = SuperFilterState(
                 selectedLanguages = setOf("English", "Multi-Audio"),
                 minRating = 6.0,
                 sortBy = SortOption.RELEASE_YEAR_DESC
             ),
-            limit = 28
+            limit = 28,
+            profileId = activeProf.id,
+            isKids = activeProf.isKids,
+            isAdultVaultUnlocked = false,
+            isVaultTab = false
         )
 
         val regional = db.queryMedia(
-            SuperFilterState(
+            filter = SuperFilterState(
                 selectedLanguages = setOf("Hindi", "Urdu", "Punjabi", "Tamil", "Telugu", "Multi-Audio"),
                 sortBy = SortOption.RELEASE_YEAR_DESC
             ),
-            limit = 28
+            limit = 28,
+            profileId = activeProf.id,
+            isKids = activeProf.isKids,
+            isAdultVaultUnlocked = false,
+            isVaultTab = false
         )
 
         val actionThrillers = db.queryMedia(
-            SuperFilterState(
+            filter = SuperFilterState(
                 includedGenres = setOf("Action", "Thriller"),
                 minRating = 6.5,
                 sortBy = SortOption.RATING_DESC
             ),
-            limit = 24
+            limit = 24,
+            profileId = activeProf.id,
+            isKids = activeProf.isKids,
+            isAdultVaultUnlocked = false,
+            isVaultTab = false
         )
 
         val criticallyAcclaimed = db.queryMedia(
-            SuperFilterState(minRating = 8.0, sortBy = SortOption.RATING_DESC),
-            limit = 24
+            filter = SuperFilterState(minRating = 8.0, sortBy = SortOption.RATING_DESC),
+            limit = 24,
+            profileId = activeProf.id,
+            isKids = activeProf.isKids,
+            isAdultVaultUnlocked = false,
+            isVaultTab = false
         )
 
         val heroItem = hollywood.firstOrNull { it.backdropUrl.isNotBlank() && it.plot.isNotBlank() }
@@ -293,7 +344,17 @@ class AppApiRouter(
             sortBy = sortOption
         )
 
-        val items = db.queryMedia(filter, limit = limit)
+        val activeProf = getActiveUserProfile()
+        val isVaultTab = parsed.optBoolean("adultOnly", false) || queryParams["tab"] == "VAULT_18"
+
+        val items = db.queryMedia(
+            filter = filter,
+            limit = limit,
+            profileId = activeProf.id,
+            isKids = activeProf.isKids,
+            isAdultVaultUnlocked = prefs.isAdultVaultUnlocked(),
+            isVaultTab = isVaultTab
+        )
         return JSONObject().apply {
             put("ok", true)
             put("items", mediaListToJsonArray(items))
@@ -302,7 +363,8 @@ class AppApiRouter(
     }
 
     private fun handleGetWatchlist(): String {
-        val items = db.getWatchlist()
+        val activeProf = getActiveUserProfile()
+        val items = db.getWatchlist(profileId = activeProf.id, isKids = activeProf.isKids)
         return JSONObject().apply {
             put("ok", true)
             put("items", mediaListToJsonArray(items))
@@ -310,9 +372,10 @@ class AppApiRouter(
     }
 
     private fun handleToggleWatchlist(bodyStr: String): String {
+        val activeProf = getActiveUserProfile()
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val dedupKey = obj.optString("dedupKey", obj.optString("id", ""))
-        val inWatchlist = db.toggleWatchlist(dedupKey)
+        val inWatchlist = db.toggleWatchlist(dedupKey = dedupKey, profileId = activeProf.id)
         return JSONObject().apply {
             put("ok", true)
             put("inWatchlist", inWatchlist)
@@ -320,9 +383,10 @@ class AppApiRouter(
     }
 
     private fun handleToggleWatched(bodyStr: String): String {
+        val activeProf = getActiveUserProfile()
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val dedupKey = obj.optString("dedupKey", obj.optString("id", ""))
-        val isWatched = db.toggleWatched(dedupKey)
+        val isWatched = db.toggleWatched(dedupKey = dedupKey, profileId = activeProf.id)
         return JSONObject().apply {
             put("ok", true)
             put("isWatched", isWatched)
@@ -330,30 +394,36 @@ class AppApiRouter(
     }
 
     private fun handleSaveProgress(bodyStr: String): String {
+        val activeProf = getActiveUserProfile()
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val dedupKey = obj.optString("dedupKey")
         val positionMs = obj.optLong("positionMs", obj.optLong("position", 0L))
         val durationMs = obj.optLong("durationMs", obj.optLong("duration", 0L))
         if (dedupKey.isNotBlank()) {
-            db.savePlaybackProgress(dedupKey, positionMs, durationMs)
+            val ok = db.savePlaybackProgress(dedupKey = dedupKey, positionMs = positionMs, durationMs = durationMs, profileId = activeProf.id)
+            if (!ok) {
+                return """{"ok":false,"error":"Progress recording rejected for adult content"}"""
+            }
         }
         return """{"ok":true}"""
     }
 
     private fun handleSaveRate(bodyStr: String): String {
+        val activeProf = getActiveUserProfile()
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val dedupKey = obj.optString("dedupKey")
         val rating = obj.optDouble("rating", obj.optDouble("stars", 0.0))
         if (dedupKey.isNotBlank() && rating > 0.0) {
-            db.setUserStarRating(dedupKey, rating)
+            db.setUserStarRating(dedupKey = dedupKey, starRating = rating, profileId = activeProf.id)
         }
         return """{"ok":true}"""
     }
 
     private fun handleGetDetail(queryParams: Map<String, String>): String {
+        val activeProf = getActiveUserProfile()
         val dedupKey = queryParams["dedupKey"] ?: queryParams["id"] ?: ""
-        val item = db.getItemByDedupKey(dedupKey) ?: return """{"ok":false,"error":"Item not found"}"""
-        val mlt = db.getMoreLikeThis(item, 12)
+        val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
+        val mlt = db.getMoreLikeThis(item, isKids = activeProf.isKids, limit = 12)
         val episodes = if (item.mediaType == MediaType.SERIES) {
             db.getSeriesEpisodes(item.primaryStreamId)
         } else emptyList()
@@ -380,9 +450,10 @@ class AppApiRouter(
     }
 
     private fun handleGetLive(queryParams: Map<String, String>): String {
+        val activeProf = getActiveUserProfile()
         val cat = queryParams["category"]
         val search = queryParams["search"] ?: ""
-        val channels = db.getLiveChannels(categoryName = cat, searchQuery = search)
+        val channels = db.getLiveChannels(categoryName = cat, searchQuery = search, profileId = activeProf.id, isKids = activeProf.isKids)
         val categories = db.getLiveCategories()
 
         val chArr = JSONArray()
@@ -405,9 +476,10 @@ class AppApiRouter(
     }
 
     private fun handleToggleLiveFavorite(bodyStr: String): String {
+        val activeProf = getActiveUserProfile()
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val streamId = obj.optString("streamId")
-        val isFav = db.toggleFavoriteChannel(streamId)
+        val isFav = db.toggleFavoriteChannel(streamId = streamId, profileId = activeProf.id)
         return JSONObject().apply {
             put("ok", true)
             put("isFavorite", isFav)
@@ -415,7 +487,8 @@ class AppApiRouter(
     }
 
     private fun handleGetSearchHistory(): String {
-        val history = prefs.getRecentSearches()
+        val activeProf = getActiveUserProfile()
+        val history = prefs.getRecentSearches(activeProf.id)
         return JSONObject().apply {
             put("ok", true)
             put("history", JSONArray(history))
@@ -423,25 +496,30 @@ class AppApiRouter(
     }
 
     private fun handleAddSearchHistory(bodyStr: String): String {
+        val activeProf = getActiveUserProfile()
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val query = obj.optString("query")
-        if (query.isNotBlank()) {
-            prefs.addRecentSearch(query)
+        val isVault = obj.optBoolean("isVault", false)
+        // Phase B Rule: Never record search-history entry for adult titles
+        if (query.isNotBlank() && !isVault && !StreamVaultDatabase.checkIsAdult(query, "", "", "")) {
+            prefs.addRecentSearch(query = query, profileId = activeProf.id)
         }
         return """{"ok":true}"""
     }
 
     private fun handleDeleteSearchHistory(bodyStr: String): String {
+        val activeProf = getActiveUserProfile()
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val query = obj.optString("query")
         if (query.isNotBlank()) {
-            prefs.removeRecentSearch(query)
+            prefs.removeRecentSearch(query = query, profileId = activeProf.id)
         }
         return """{"ok":true}"""
     }
 
     private fun handleClearSearchHistory(): String {
-        prefs.clearRecentSearches()
+        val activeProf = getActiveUserProfile()
+        prefs.clearRecentSearches(activeProf.id)
         return """{"ok":true}"""
     }
 
@@ -450,12 +528,13 @@ class AppApiRouter(
         val action = obj.optString("action", "status")
         val pin = obj.optString("pin")
         val newPin = obj.optString("newPin")
+        val password = obj.optString("password", "")
 
         return when (action) {
             "status" -> {
                 JSONObject().apply {
                     put("success", true)
-                    put("isLocked", prefs.isParentalLocked())
+                    put("isLocked", !prefs.isAdultVaultUnlocked())
                     put("showAdult", prefs.isAdultVaultUnlocked())
                     put("hasCustomPin", prefs.hasCustomParentalPin())
                 }.toString()
@@ -478,11 +557,23 @@ class AppApiRouter(
                         put("showAdult", true)
                     }.toString()
                 } else {
-                    """{"success":false,"error":"Incorrect 4-digit PIN"}"""
+                    """{"success":false,"error":"Incorrect Master PIN"}"""
+                }
+            }
+            "verify" -> {
+                val ok = prefs.verifyParentalPin(pin)
+                if (ok) {
+                    """{"success":true,"ok":true}"""
+                } else {
+                    """{"success":false,"error":"Incorrect Master PIN"}"""
                 }
             }
             "set_pin" -> {
-                val ok = prefs.setParentalPin(pin, newPin)
+                val ok = if (password.isNotBlank() && password == prefs.loadCredentials().password) {
+                    prefs.resetParentalPinWithAuth(newPin)
+                } else {
+                    prefs.setParentalPin(pin, newPin)
+                }
                 if (ok) {
                     """{"success":true,"message":"PIN updated"}"""
                 } else {
@@ -491,6 +582,127 @@ class AppApiRouter(
             }
             else -> """{"success":false,"error":"Unknown action"}"""
         }
+    }
+
+    private fun handleGetProfiles(): String {
+        val profiles = db.getProfiles(prefs.getAccountDisplayName())
+        val activeId = prefs.getActiveProfileId().ifBlank { profiles.first().id }
+        val arr = JSONArray()
+        for (p in profiles) {
+            arr.put(JSONObject().apply {
+                put("id", p.id)
+                put("name", p.name)
+                put("avatarColor", p.avatarColor)
+                put("isKids", p.isKids)
+                put("theme", p.theme)
+                put("isPrimary", p.isPrimary)
+                put("updatedAt", p.updatedAt)
+            })
+        }
+        return JSONObject().apply {
+            put("success", true)
+            put("ok", true)
+            put("activeProfileId", activeId)
+            put("profiles", arr)
+        }.toString()
+    }
+
+    private fun handleCreateProfile(bodyStr: String): String {
+        val json = JSONObject(bodyStr.ifBlank { "{}" })
+        val name = json.optString("name", json.optString("displayName", "")).trim()
+        val avatarColor = json.optString("avatarColor", "#8B5CF6")
+        val theme = json.optString("theme", "purple")
+        val isKids = json.optBoolean("isKids", false)
+
+        if (name.isBlank()) {
+            return """{"ok":false,"error":"Profile name required"}"""
+        }
+
+        val prof = db.createProfile(name, avatarColor, theme, isKids)
+            ?: return """{"ok":false,"error":"Maximum 5 profiles allowed"}"""
+
+        return JSONObject().apply {
+            put("success", true)
+            put("ok", true)
+            put("profile", prof.toJson())
+        }.toString()
+    }
+
+    private fun handleUpdateProfile(bodyStr: String): String {
+        val json = JSONObject(bodyStr.ifBlank { "{}" })
+        val id = json.optString("id", json.optString("profileId", ""))
+        val name = json.optString("name", json.optString("displayName", "")).trim()
+        val avatarColor = json.optString("avatarColor", "")
+        val theme = json.optString("theme", "")
+        val targetIsKids = json.optBoolean("isKids", false)
+        val pin = json.optString("pin", "")
+
+        val existing = db.getProfileById(id) ?: return """{"ok":false,"error":"Profile not found"}"""
+
+        // Phase B Rule: Turning Kids Mode OFF requires Master PIN!
+        if (existing.isKids && !targetIsKids) {
+            if (!prefs.verifyParentalPin(pin)) {
+                return """{"ok":false,"error":"Master PIN required to disable Kids Mode"}"""
+            }
+        }
+
+        val ok = db.updateProfile(
+            id = id,
+            name = if (name.isNotBlank()) name else existing.name,
+            avatarColor = if (avatarColor.isNotBlank()) avatarColor else existing.avatarColor,
+            theme = if (theme.isNotBlank()) theme else existing.theme,
+            isKids = targetIsKids
+        )
+
+        return if (ok) {
+            val updated = db.getProfileById(id) ?: existing
+            JSONObject().apply {
+                put("success", true)
+                put("ok", true)
+                put("profile", updated.toJson())
+            }.toString()
+        } else {
+            """{"ok":false,"error":"Failed to update profile"}"""
+        }
+    }
+
+    private fun handleDeleteProfile(bodyStr: String): String {
+        val json = JSONObject(bodyStr.ifBlank { "{}" })
+        val id = json.optString("id", json.optString("profileId", ""))
+        if (id.isBlank()) return """{"ok":false,"error":"Profile ID required"}"""
+
+        val prof = db.getProfileById(id) ?: return """{"ok":false,"error":"Profile not found"}"""
+        if (prof.isPrimary) {
+            return """{"ok":false,"error":"Primary profile cannot be deleted"}"""
+        }
+
+        val ok = db.deleteProfile(id)
+        if (ok) {
+            if (prefs.getActiveProfileId() == id) {
+                val primary = db.getPrimaryProfile()
+                prefs.setActiveProfileId(primary.id)
+                prefs.setAdultVaultUnlocked(false)
+            }
+            return """{"success":true,"ok":true}"""
+        }
+        return """{"ok":false,"error":"Could not delete profile"}"""
+    }
+
+    private fun handleSwitchProfile(bodyStr: String): String {
+        val json = JSONObject(bodyStr.ifBlank { "{}" })
+        val id = json.optString("id", json.optString("profileId", ""))
+        val prof = db.getProfileById(id) ?: return """{"ok":false,"error":"Profile not found"}"""
+
+        prefs.setActiveProfileId(prof.id)
+        // Phase B Rule: Re-lock 18+ Vault in memory on profile switch!
+        prefs.setAdultVaultUnlocked(false)
+
+        return JSONObject().apply {
+            put("success", true)
+            put("ok", true)
+            put("activeProfileId", prof.id)
+            put("profile", prof.toJson())
+        }.toString()
     }
 
     private fun handleSaveCredentials(bodyStr: String): String {
@@ -601,7 +813,7 @@ class AppApiRouter(
         }.toString()
     }
 
-    private fun handleDeletePlaylist(path: String): String {
+    private fun handleDeletePlaylist(@Suppress("UNUSED_PARAMETER") path: String): String {
         val current = prefs.loadCredentials()
         prefs.saveCredentials(current.copy(serverUrl = "", username = "", password = ""))
         return JSONObject().apply {
@@ -637,6 +849,9 @@ class AppApiRouter(
             put("isWatched", item.isWatched)
             put("resumePositionMs", item.resumePositionMs)
             put("durationMs", item.durationMs)
+            put("isAdult", item.isAdult)
+            put("certification", item.certification)
+            put("userRating", item.userRating)
             put("versions", JSONArray(item.versions.map { v ->
                 JSONObject().apply {
                     put("streamId", v.streamId)
