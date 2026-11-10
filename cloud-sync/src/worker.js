@@ -208,47 +208,87 @@ async function authenticate(request, env) {
 }
 
 // --------------------------------------------------------------------
-// Resend Email Integration
+// Brevo Transactional Email Integration (Send-Only, No Contact Lists)
 // --------------------------------------------------------------------
 
 async function sendVerificationEmail(email, code, env) {
-  if (!env.RESEND_API_KEY) {
-    console.warn(`[StreamVault Auth] RESEND_API_KEY not configured. Verification code for ${email}: ${code}`);
-    return { sent: false, note: 'RESEND_API_KEY not set in Worker secrets' };
+  const brevoApiKey = env.BREVO_API_KEY;
+  const resendApiKey = env.RESEND_API_KEY;
+
+  const senderEmail = env.BREVO_SENDER_EMAIL || env.EMAIL_FROM_ADDRESS || 'noreply@streamvault.tv';
+  const senderName = env.BREVO_SENDER_NAME || env.EMAIL_FROM_NAME || 'StreamVault TV';
+  const subject = `${code} is your StreamVault TV verification code`;
+
+  const htmlContent = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; background: #090714; color: #FFFFFF; border-radius: 12px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #A78BFA; font-size: 24px; margin: 0 0 8px;">StreamVault TV</h1>
+        <p style="color: #94A3B8; font-size: 14px; margin: 0;">Standalone Cloud Account Verification</p>
+      </div>
+      <div style="background: #15102A; border: 1px solid #2E2356; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
+        <p style="color: #E2E8F0; font-size: 14px; margin-top: 0;">Enter this 6-digit code on your TV or mobile pairing screen:</p>
+        <div style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #8B5CF6; margin: 16px 0;">${code}</div>
+        <p style="color: #64748B; font-size: 12px; margin-bottom: 0;">Valid for 10 minutes. Never share this code.</p>
+      </div>
+      <p style="color: #64748B; font-size: 11px; text-align: center; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
+    </div>
+  `;
+
+  // 1. Primary: Brevo Transactional Email API (send-only, no contact list addition)
+  if (brevoApiKey) {
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': brevoApiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: {
+            name: senderName,
+            email: senderEmail
+          },
+          to: [
+            { email: email }
+          ],
+          subject: subject,
+          htmlContent: htmlContent
+        })
+      });
+      return { sent: res.ok, status: res.status, provider: 'brevo' };
+    } catch (err) {
+      console.error('[Brevo Email Error]', err);
+      return { sent: false, error: err.message, provider: 'brevo' };
+    }
   }
-  try {
-    const fromAddr = env.EMAIL_FROM || 'StreamVault TV <onboarding@resend.dev>';
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        from: fromAddr,
-        to: email,
-        subject: `${code} is your StreamVault TV verification code`,
-        html: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; background: #090714; color: #FFFFFF; border-radius: 12px;">
-            <div style="text-align: center; margin-bottom: 24px;">
-              <h1 style="color: #A78BFA; font-size: 24px; margin: 0 0 8px;">StreamVault TV</h1>
-              <p style="color: #94A3B8; font-size: 14px; margin: 0;">Standalone Cloud Account Verification</p>
-            </div>
-            <div style="background: #15102A; border: 1px solid #2E2356; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
-              <p style="color: #E2E8F0; font-size: 14px; margin-top: 0;">Enter this 6-digit code on your TV or mobile pairing screen:</p>
-              <div style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #8B5CF6; margin: 16px 0;">${code}</div>
-              <p style="color: #64748B; font-size: 12px; margin-bottom: 0;">Valid for 10 minutes. Never share this code.</p>
-            </div>
-            <p style="color: #64748B; font-size: 11px; text-align: center; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
-          </div>
-        `
-      })
-    });
-    return { sent: res.ok, status: res.status };
-  } catch (err) {
-    console.error('[Resend Error]', err);
-    return { sent: false, error: err.message };
+
+  // 2. Fallback: Resend API if legacy secret is configured
+  if (resendApiKey) {
+    try {
+      const fromAddr = env.EMAIL_FROM || `${senderName} <${senderEmail}>`;
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromAddr,
+          to: email,
+          subject: subject,
+          html: htmlContent
+        })
+      });
+      return { sent: res.ok, status: res.status, provider: 'resend' };
+    } catch (err) {
+      console.error('[Resend Email Error]', err);
+      return { sent: false, error: err.message, provider: 'resend' };
+    }
   }
+
+  console.warn(`[StreamVault Auth] Neither BREVO_API_KEY nor RESEND_API_KEY configured. Verification code for ${email}: ${code}`);
+  return { sent: false, note: 'No email service API key configured in Worker secrets' };
 }
 
 // --------------------------------------------------------------------
@@ -339,16 +379,22 @@ export default {
            VALUES (?, ?, ?, 'verify_email', 0, 0, ?, ?)`
         ).bind(codeId, cleanEmail, codeStr, expiresAt, now).run();
 
-        // Send email via Resend
+        // Send email via Brevo transactional email
         const emailResult = await sendVerificationEmail(cleanEmail, codeStr, env);
 
-        return jsonResponse({
+        const isDevMode = env.DEV_MODE === true || env.DEV_MODE === 'true' || env.DEV_MODE === '1';
+
+        const signupResponse = {
           success: true,
           requireVerification: true,
           email: cleanEmail,
-          message: 'Verification code sent to your email',
-          devCode: !env.RESEND_API_KEY ? codeStr : undefined // Helps local setup before RESEND_API_KEY secret is populated
-        }, 201, corsHeaders);
+          message: 'Verification code sent to your email'
+        };
+        if (isDevMode) {
+          signupResponse.devCode = codeStr;
+        }
+
+        return jsonResponse(signupResponse, 201, corsHeaders);
       }
 
       // B. Verify Email Code

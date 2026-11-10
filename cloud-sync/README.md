@@ -15,14 +15,19 @@ Serverless backend for standalone StreamVault TV accounts, multi-playlist sync, 
 
 ## Setting Up Worker Secrets (Step-by-Step)
 
-### Step 1: Resend Free Tier (Email Verification)
-1. Go to [resend.com](https://resend.com) and create a free account (100 emails/day free forever, no credit card required).
-2. Click **API Keys** -> **Create API Key** and copy it (`re_...`).
+### Step 1: Brevo Transactional Email (Send-Only)
+1. Go to [brevo.com](https://brevo.com) and create or log in to your account.
+2. Under **SMTP & API** -> **API Keys**, create a new API Key (`xkeysib-...`).
 3. Set the key in your Cloudflare Worker:
    ```bash
    cd cloud-sync
-   npx wrangler secret put RESEND_API_KEY
-   # Paste your re_... key when prompted
+   npx wrangler secret put BREVO_API_KEY
+   # Paste your Brevo key when prompted
+   ```
+4. Optional custom sender (defaults to `noreply@streamvault.tv` / `StreamVault TV`):
+   ```bash
+   npx wrangler secret put BREVO_SENDER_EMAIL # e.g. verify@yourdomain.com
+   npx wrangler secret put BREVO_SENDER_NAME  # e.g. StreamVault TV
    ```
 
 ### Step 2: AES Encryption Secret & TMDB Proxy
