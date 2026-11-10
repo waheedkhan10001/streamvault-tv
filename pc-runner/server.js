@@ -30,10 +30,10 @@ const DEFAULT_TMDB_KEY = '8265bd1679663a7ea12ac168da84d2e8';
 
 let state = {
   credentials: {
-    playlistName: 'Aadiflix TV',
-    serverUrl: 'http://aadiflix.online:8080',
-    username: 'waleed84838',
-    password: 'waleed84839',
+    playlistName: 'My IPTV',
+    serverUrl: '',
+    username: '',
+    password: '',
     tmdbApiKey: DEFAULT_TMDB_KEY,
     preferredLanguages: ['English', 'Hindi', 'Urdu', 'Punjabi', 'Multi-Audio'],
     hiddenLanguages: ['German'],
@@ -134,7 +134,7 @@ function scheduleSaveState() {
   }, 45000);
 }
 
-// Smart Classification of Category & Title for Real IPTV Providers (e.g., aadiflix.online)
+// Smart Classification of Category & Title for real IPTV provider feeds
 function classifyCategoryAndTitle(rawTitle, categoryName = '', existingTmdbId = 0) {
   const catUpper = String(categoryName || '').toUpperCase();
   let working = String(rawTitle || '').trim();
@@ -1457,8 +1457,8 @@ const server = http.createServer(async (req, res) => {
         } catch (_) {}
 
         state.cloudSyncAccount = {
-          email: email || 'waleed@streamvault.tv',
-          displayName: displayName || 'Waleed Khan',
+          email: email || '',
+          displayName: displayName || 'Account Owner',
           linkedAt: Date.now()
         };
         if (state.activeTvCode && state.activeTvCode.code === (code || '').toUpperCase()) {
@@ -2291,7 +2291,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
     if (req.method === 'GET') {
       if (!state.profiles || !state.profiles.length) {
         state.profiles = [
-          { id: 'prof_1', name: state.credentials?.displayName || 'Waleed Khan', avatarColor: '#7C3AED', isKids: false, isActive: true },
+          { id: 'prof_1', name: state.credentials?.displayName || 'Account Owner', avatarColor: '#7C3AED', isKids: false, isActive: true },
           { id: 'prof_2', name: 'Family', avatarColor: '#059669', isKids: false, isActive: false },
           { id: 'prof_3', name: 'Kids', avatarColor: '#D97706', isKids: true, isActive: false }
         ];
@@ -2466,7 +2466,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
       isLinked: Boolean(state.cloudSyncAccount),
       cloudProvider: 'Cloudflare Workers + D1',
       activeCode: state.activeTvCode || null,
-      accountEmail: state.cloudSyncAccount?.email || 'waleed@streamvault.tv',
+      accountEmail: state.cloudSyncAccount?.email || '',
       lastSyncedAt: state.lastCloudSyncedAt || Date.now()
     }));
   }
@@ -2635,7 +2635,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           const serverChanged = data.serverUrl && data.serverUrl !== state.credentials.serverUrl;
           state.credentials = {
             ...state.credentials,
-            displayName: data.displayName !== undefined ? data.displayName.trim() : (state.credentials.displayName || 'Waleed Khan'),
+            displayName: data.displayName !== undefined ? data.displayName.trim() : (state.credentials.displayName || 'Account Owner'),
             playlistName: data.playlistName || state.credentials.playlistName,
             serverUrl: data.serverUrl !== undefined ? data.serverUrl : state.credentials.serverUrl,
             username: data.username !== undefined ? data.username : state.credentials.username,
@@ -2778,12 +2778,12 @@ function renderWebPairingUi(defaultCode) {
 
       <div class="field">
         <label>Display Name</label>
-        <input id="nameInp" placeholder="Waleed Khan" value="Waleed Khan" required />
+        <input id="nameInp" placeholder="Account Owner" value="Account Owner" required />
       </div>
 
       <div class="field">
         <label>Email (Optional for backup)</label>
-        <input id="emailInp" type="email" placeholder="waleed@streamvault.tv" value="waleed@streamvault.tv" />
+        <input id="emailInp" type="email" placeholder="you@example.com" value="" />
       </div>
 
       <button type="submit" class="btn" id="submitBtn">Link &amp; Sync TV Now</button>
@@ -2837,7 +2837,7 @@ server.listen(PORT, () => {
   console.log(`StreamVault TV PC Runner active at http://localhost:${PORT}/tv`);
   console.log(`Phone Wi-Fi Companion active at http://${getLocalIp()}:${PORT}/phone`);
   // Automatically resume background sync & smart-priority TMDB enrichment on startup!
-  if (state.credentials.serverUrl && state.credentials.username) {
+  if (state.credentials.serverUrl && state.credentials.username && state.credentials.password) {
     runLiveIptvSync(false);
   }
 });

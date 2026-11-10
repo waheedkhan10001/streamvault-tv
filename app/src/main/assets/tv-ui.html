@@ -832,7 +832,7 @@
       <div class="user-avatar-circle" id="sidebarAvatarCircle">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       </div>
-      <span class="user-profile-name" id="sidebarProfileName">Waleed</span>
+      <span class="user-profile-name" id="sidebarProfileName">Owner</span>
     </div>
     <button tabindex="0" id="sidebarSettingsBtn" class="settings-icon-btn tv-focusable" onclick="navigateToTab('SETTINGS')" onfocus="playNavSound()" title="Settings">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1051,14 +1051,14 @@
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
       <div id="userProfileAvatarInitial" style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#4C1D95);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:900;box-shadow:0 4px 14px rgba(124, 58, 237, 0.5);">W</div>
       <div>
-        <div id="userProfileModalName" style="font-size:18px;font-weight:900;color:#FFFFFF;">Waleed Khan</div>
+        <div id="userProfileModalName" style="font-size:18px;font-weight:900;color:#FFFFFF;">Account Owner</div>
         <div style="font-size:11px;color:#10B981;font-weight:700;">● Active Profile &middot; Master</div>
       </div>
     </div>
     <div style="background:#0D0A1A;border:1px solid #1F1738;border-radius:10px;padding:10px 14px;margin-bottom:14px;">
       <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">IPTV Server</div>
-      <div id="userProfileModalIptvServer" style="font-size:13px;font-weight:700;color:#F3F4F6;">aadiflix.online:8080</div>
-      <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">User: <b id="userProfileModalIptvUser">waleed84838</b> &middot; Status: <span style="color:#10B981;font-weight:800;">Connected</span></div>
+      <div id="userProfileModalIptvServer" style="font-size:13px;font-weight:700;color:#F3F4F6;">Not configured</div>
+      <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">User: <b id="userProfileModalIptvUser">Not set</b> &middot; Status: <span id="userProfileModalIptvStatus" style="color:#F59E0B;font-weight:800;">Disconnected</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;">
       <button tabindex="0" id="userModalSettingsBtn" class="btn tv-focusable" style="justify-content:flex-start;padding:10px 14px;" onclick="closeUserProfileModal();navigateToTab('SETTINGS');">
@@ -3388,23 +3388,33 @@ function openFactoryResetModal() {
 
 function updateUserProfileUI() {
   const creds = (appStatus && appStatus.credentials) || {};
-  const name = creds.displayName || 'Waleed Khan';
+  const name = creds.displayName || 'Account Owner';
   const pillName = document.querySelector('.user-profile-name');
   if (pillName) pillName.innerText = name;
-  const initial = (name[0] || 'W').toUpperCase();
+  const initial = (name[0] || 'A').toUpperCase();
   const avatarInit = document.getElementById('userProfileAvatarInitial');
   if (avatarInit) avatarInit.innerText = initial;
   const modalName = document.getElementById('userProfileModalName');
   if (modalName) modalName.innerText = name;
   const modalUser = document.getElementById('userProfileModalIptvUser');
-  if (modalUser) modalUser.innerText = creds.username || 'user';
+  if (modalUser) modalUser.innerText = creds.username || 'Not set';
   const modalServer = document.getElementById('userProfileModalIptvServer');
-  if (modalServer && creds.serverUrl) {
-    try {
-      modalServer.innerText = new URL(creds.serverUrl).host;
-    } catch (_) {
-      modalServer.innerText = creds.serverUrl;
+  if (modalServer) {
+    if (creds.serverUrl) {
+      try {
+        modalServer.innerText = new URL(creds.serverUrl).host;
+      } catch (_) {
+        modalServer.innerText = creds.serverUrl;
+      }
+    } else {
+      modalServer.innerText = 'Not configured';
     }
+  }
+  const modalStatus = document.getElementById('userProfileModalIptvStatus');
+  if (modalStatus) {
+    const isConnected = Boolean(creds.serverUrl && creds.username && creds.password);
+    modalStatus.innerText = isConnected ? 'Connected' : 'Disconnected';
+    modalStatus.style.color = isConnected ? '#10B981' : '#F59E0B';
   }
 }
 
