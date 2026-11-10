@@ -17,7 +17,7 @@
 | 4 | Sensitive provider details were documented in handoff markdown. | `/home/runner/work/streamvault-tv/streamvault-tv/STREAMVAULT_HANDOFF.md` | High | Redact provider URL and credentials from committed documentation. | **Fixed** |
 | 5 | Android build is not reproducible out of the box because there is no Gradle wrapper in repo; in this environment `./gradlew` is missing and plugin resolution failed via system Gradle. | Repository root (build setup) | Medium | Add and commit Gradle wrapper files (`gradlew`, `gradlew.bat`, `gradle/wrapper/*`) from a trusted environment. | Open (owner decision) |
 | 6 | No automated tests are present (`src/test` / `src/androidTest` missing), so regressions are hard to catch automatically. | Entire repository | Medium | Add minimal smoke tests (playlist parsing, credential validation, profile/status UI logic). | Open (owner decision) |
-| 7 | Browser console shows form/usability warnings (password inputs not in forms and missing autocomplete hints). | `tv-ui.html` auth/settings dialogs | Low | Wrap password fields in forms where appropriate and add `autocomplete` attributes. | Open (owner decision) |
+| 7 | Browser console shows form/usability warnings (password inputs not in forms and missing autocomplete hints). | `tv-ui.html` auth/settings dialogs | Low | Wrap password fields in forms where appropriate and add `autocomplete` attributes. | Partially fixed (autocomplete + one PIN form handled; some warning remains) |
 | 8 | Very large monolithic files reduce maintainability (harder debugging/refactoring). | `pc-runner/server.js`, `pc-runner/tv-ui.html`, `app/src/main/assets/tv-ui.html`, `app/src/main/java/com/streamvault/tv/MainActivity.kt` | Low | Split by feature modules/components and keep shared logic reusable. | Open (owner decision) |
 
 ## Functional check notes
@@ -30,4 +30,5 @@
 ## Summary
 - **Total issues found:** 8
 - **Fixed in this PR:** 4
-- **Left for owner decision / bigger work:** 4
+- **Partially fixed in this PR:** 1
+- **Left for owner decision / bigger work:** 3
