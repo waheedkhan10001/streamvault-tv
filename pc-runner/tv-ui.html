@@ -1311,8 +1311,8 @@ window.fetch = function(input, init) {
   const newInit = Object.assign({}, init, { headers });
 
   if (typeof input === 'string' && input.startsWith('/api/')) {
-    // 1. Cloud Authentication, TV Code Pairing & Cloud Playlists Sync
-    if (input.startsWith('/api/auth/') || input.startsWith('/api/sync/') || input.startsWith('/api/account/') || input.startsWith('/api/cloud/') || input.startsWith('/api/playlists')) {
+    // 1. Cloud Authentication, TV Code Pairing, Cloud Catalog & Profile Sync
+    if ((input.startsWith('/api/auth/') || input.startsWith('/api/sync/') || input.startsWith('/api/account/') || input.startsWith('/api/cloud/') || input.startsWith('/api/playlists') || input.startsWith('/api/catalog/') || input.startsWith('/api/tmdb/')) && input !== '/api/catalog/pull-cloud' && input !== '/api/sync/status') {
       // If offline or no cloud token for playlists, let Android native engine handle it locally
       if (input.startsWith('/api/playlists') && !token && window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
         const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
@@ -3245,6 +3245,8 @@ async function loadSettings(vp) {
               <button tabindex="0" id="btnOpenCloudSignIn" class="btn tv-focusable" style="background:var(--theme-accent, #7C3AED);border-color:var(--theme-border, #A78BFA);color:#fff;padding:3px 10px;font-size:10px;font-weight:800;" onclick="openCloudAuthModal('login')">Sign In / Sign Up</button>
             `}
             <div style="display:flex;gap:6px;align-items:center;">
+              <span id="syncStatusLabel" style="font-size:9.5px;color:#9CA3AF;font-weight:700;">Just now</span>
+              <span id="syncPendingLabel" style="font-size:9px;color:#10B981;font-weight:800;background:rgba(16,185,129,0.12);padding:2px 6px;border-radius:4px;">All synced</span>
               <button tabindex="0" id="btnSyncNow" class="btn btn-primary tv-focusable" style="padding:3px 12px;font-size:10px;background:#059669;border-color:#10B981;" onclick="triggerCloudSync()">Sync Cloud</button>
             </div>
           </div>
@@ -3311,6 +3313,7 @@ async function loadSettings(vp) {
     </div>
   `;
 
+  renderSyncStatus();
   setTimeout(() => {
     const firstBtn = document.getElementById('btnFirstRunAddPlaylist') || document.getElementById('btnAddPlaylistBtn') || document.getElementById('btnSyncNow');
     if (firstBtn) { firstBtn.focus(); playNavSound(); }
@@ -3322,9 +3325,32 @@ let cachedPlaylists = [];
 
 async function loadPlaylistsData() {
   try {
+    const sRes = await fetch('/api/state').catch(() => null);
+    if (sRes && sRes.ok) appStatus = await sRes.json();
     const res = await fetch('/api/playlists');
     const data = await res.json();
     cachedPlaylists = data.playlists || [];
+    if (!hasActivePlaylist() && cachedPlaylists.length > 0) {
+      const pl = cachedPlaylists.find(p => p.isEnabled) || cachedPlaylists[0];
+      if (pl && pl.serverUrl && pl.username) {
+        try {
+          const credRes = await fetch('/api/save-credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playlistName: pl.name || 'Primary IPTV',
+              serverUrl: pl.serverUrl,
+              username: pl.username,
+              password: pl.password || ''
+            })
+          });
+          if (credRes.ok) {
+            const freshState = await fetch('/api/state').catch(() => null);
+            if (freshState && freshState.ok) appStatus = await freshState.json();
+          }
+        } catch (_) {}
+      }
+    }
     return cachedPlaylists;
   } catch (err) {
     cachedPlaylists = [];
@@ -4061,27 +4087,253 @@ async function confirmSignOutAccount() {
   showWelcomeScreen();
 }
 
+const ProfileSyncManager = {
+  queueKey: 'sv_pending_profile_sync',
+  lastSyncKey: 'sv_last_profile_sync_ts',
+  timer: null,
+
+  getQueue() {
+    try {
+      return JSON.parse(localStorage.getItem(this.queueKey) || '[]');
+    } catch (_) { return []; }
+  },
+
+  setQueue(q) {
+    try {
+      localStorage.setItem(this.queueKey, JSON.stringify(q));
+    } catch (_) {}
+  },
+
+  getPendingCount() {
+    return this.getQueue().length;
+  },
+
+  getLastSyncTimestamp() {
+    return parseInt(localStorage.getItem(this.lastSyncKey) || '0', 10);
+  },
+
+  setLastSyncTimestamp(ts) {
+    localStorage.setItem(this.lastSyncKey, String(ts));
+  },
+
+  recordChange(dataType, itemKey, payload) {
+    if (payload && payload.isAdult) return;
+    const profileId = (window.currentActiveProfile && window.currentActiveProfile.id) || 'prof_primary';
+    const queue = this.getQueue();
+    const now = Date.now();
+    payload.updatedAt = now;
+
+    const existingIdx = queue.findIndex(x => x.profileId === profileId && x.dataType === dataType && x.itemKey === itemKey);
+    const entry = { profileId, dataType, itemKey, data: payload, updatedAt: now };
+    if (existingIdx >= 0) {
+      queue[existingIdx] = entry;
+    } else {
+      queue.push(entry);
+    }
+    this.setQueue(queue);
+
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.flush();
+    }, 10000);
+    renderSyncStatus();
+  },
+
+  async flush() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const token = getStoredAuthToken();
+    if (!token) return;
+
+    const queue = this.getQueue();
+    if (queue.length === 0) return;
+
+    const groups = {};
+    for (const item of queue) {
+      const k = `${item.profileId}:::${item.dataType}`;
+      if (!groups[k]) groups[k] = { profileId: item.profileId, dataType: item.dataType, items: [] };
+      groups[k].items.push({ itemKey: item.itemKey, data: item.data, updatedAt: item.updatedAt });
+    }
+
+    const successfullySentKeys = [];
+    for (const k of Object.keys(groups)) {
+      const g = groups[k];
+      try {
+        const res = await fetch('/api/sync/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profileId: g.profileId,
+            dataType: g.dataType,
+            items: g.items
+          })
+        });
+        if (res.ok) {
+          for (const it of g.items) {
+            successfullySentKeys.push(`${g.profileId}:::${g.dataType}:::${it.itemKey}`);
+          }
+        }
+      } catch (err) {
+        console.warn('[ProfileSync] Push failed:', err.message);
+      }
+    }
+
+    if (successfullySentKeys.length > 0) {
+      const currentQueue = this.getQueue();
+      const remaining = currentQueue.filter(x => !successfullySentKeys.includes(`${x.profileId}:::${x.dataType}:::${x.itemKey}`));
+      this.setQueue(remaining);
+      this.setLastSyncTimestamp(Date.now());
+      renderSyncStatus();
+    }
+  },
+
+  async pull(profileId) {
+    const token = getStoredAuthToken();
+    if (!token || !profileId) return;
+
+    const lastSync = this.getLastSyncTimestamp();
+    try {
+      const res = await fetch(`/api/sync/pull?profile_id=${encodeURIComponent(profileId)}&updated_since=${lastSync}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = data.items || [];
+      if (items.length === 0) return;
+
+      let cwChanged = false;
+      let wlChanged = false;
+
+      for (const it of items) {
+        const itemData = it.data || {};
+        if (it.dataType === 'progress') {
+          if (it.itemKey && itemData.resumePositionMs !== undefined) {
+            await fetch('/api/progress', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                dedupKey: it.itemKey,
+                positionMs: itemData.resumePositionMs || 0,
+                durationMs: itemData.durationMs || 0,
+                isWatched: itemData.isWatched || false
+              })
+            }).catch(() => {});
+            cwChanged = true;
+          }
+        } else if (it.dataType === 'watchlist') {
+          if (it.itemKey) {
+            await fetch('/api/watchlist/toggle', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                dedupKey: it.itemKey,
+                inWatchlist: itemData.inWatchlist
+              })
+            }).catch(() => {});
+            wlChanged = true;
+          }
+        } else if (it.dataType === 'ratings') {
+          if (it.itemKey && itemData.userRating) {
+            await fetch('/api/rate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                dedupKey: it.itemKey,
+                rating: itemData.userRating
+              })
+            }).catch(() => {});
+          }
+        } else if (it.dataType === 'searches') {
+          if (Array.isArray(itemData.searches)) {
+            for (const s of itemData.searches) {
+              await fetch('/api/search-history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: s })
+              }).catch(() => {});
+            }
+          }
+        } else if (it.dataType === 'settings') {
+          if (itemData.theme) {
+            applyProfileTheme(itemData.theme);
+          }
+        }
+      }
+
+      this.setLastSyncTimestamp(Date.now());
+      if (cwChanged || wlChanged) {
+        if (currentTab === 'HOME') loadHome();
+      }
+      renderSyncStatus();
+    } catch (err) {
+      console.warn('[ProfileSync] Pull failed:', err.message);
+    }
+  }
+};
+window.ProfileSyncManager = ProfileSyncManager;
+window.flushProfileSyncImmediate = () => ProfileSyncManager.flush();
+window.addEventListener('beforeunload', () => { ProfileSyncManager.flush(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    ProfileSyncManager.flush();
+  }
+});
+
+function renderSyncStatus() {
+  const syncLabel = document.getElementById('syncStatusLabel');
+  const pendingLabel = document.getElementById('syncPendingLabel');
+  if (!syncLabel && !pendingLabel) return;
+
+  const lastSync = ProfileSyncManager.getLastSyncTimestamp();
+  const pendingCount = ProfileSyncManager.getPendingCount();
+
+  if (syncLabel) {
+    if (!lastSync) {
+      syncLabel.innerText = 'Never synced';
+    } else {
+      const elapsedSec = Math.floor((Date.now() - lastSync) / 1000);
+      if (elapsedSec < 60) syncLabel.innerText = 'Just now';
+      else if (elapsedSec < 3600) syncLabel.innerText = `${Math.floor(elapsedSec / 60)}m ago`;
+      else syncLabel.innerText = `${Math.floor(elapsedSec / 3600)}h ago`;
+    }
+  }
+
+  if (pendingLabel) {
+    pendingLabel.innerText = pendingCount > 0 ? `${pendingCount} pending` : 'All synced';
+    pendingLabel.style.color = pendingCount > 0 ? '#FBBF24' : '#10B981';
+  }
+}
+
 async function triggerCloudSync() {
-  const localAcc = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
-  if (!localAcc || !localAcc.email) {
+  const token = getStoredAuthToken();
+  if (!token) {
     openCloudAuthModal('login');
     return;
   }
-  showToast('Syncing with Cloudflare D1...');
+  showToast('⚡ Syncing with Cloudflare D1...');
+  const syncBtn = document.getElementById('btnSyncNow');
+  if (syncBtn) {
+    syncBtn.innerText = 'Syncing...';
+    syncBtn.disabled = true;
+  }
+
   try {
-    await fetch(CLOUD_SYNC_BASE + '/api/sync/push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        accountId: localAcc.accountId,
-        profileId: currentActiveProfile?.id || 'prof_1',
-        dataType: 'progress',
-        payload: { lastSync: Date.now() }
-      })
-    });
-    showToast('✓ Cloud Sync Up to Date');
+    await ProfileSyncManager.flush();
+    if (currentActiveProfile && currentActiveProfile.id) {
+      await ProfileSyncManager.pull(currentActiveProfile.id);
+    }
+    await loadPlaylistsData();
+    const now = Date.now();
+    ProfileSyncManager.setLastSyncTimestamp(now);
+    showToast('✓ Cloud Synchronized');
+    renderSyncStatus();
   } catch (err) {
-    showToast('Sync error: ' + err.message);
+    showToast('⚠ Sync error: ' + err.message);
+  } finally {
+    if (syncBtn) {
+      syncBtn.innerText = 'Sync Cloud';
+      syncBtn.disabled = false;
+    }
   }
 }
 
@@ -4209,6 +4461,9 @@ async function saveActiveProfileChanges() {
 
 async function switchUserProfile(profileId) {
   playNavSound();
+  if (typeof ProfileSyncManager !== 'undefined') {
+    await ProfileSyncManager.flush();
+  }
   try {
     const res = await fetch('/api/profiles/switch', {
       method: 'POST',
@@ -4223,6 +4478,10 @@ async function switchUserProfile(profileId) {
       }
     }
   } catch (_) {}
+
+  if (typeof ProfileSyncManager !== 'undefined') {
+    await ProfileSyncManager.pull(profileId);
+  }
   
   localStorage.setItem('sv_last_profile_id', profileId);
   sessionStorage.setItem('sv_session_profile_active', 'true');
@@ -4893,6 +5152,9 @@ async function toggleUserRating(dedupKey, stars) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dedupKey, rating: targetStars })
     });
+    if (typeof ProfileSyncManager !== 'undefined') {
+      ProfileSyncManager.recordChange('ratings', dedupKey, { userRating: targetStars });
+    }
     // Dynamically re-rank suggestions based on updated rating!
     await refreshMltStrip(dedupKey);
   } catch (_) {}
@@ -4908,6 +5170,9 @@ async function toggleWatchedCoupled(dedupKey) {
       body: JSON.stringify({ dedupKey })
     });
     const d = await res.json();
+    if (typeof ProfileSyncManager !== 'undefined' && d.ok) {
+      ProfileSyncManager.recordChange('progress', dedupKey, { isWatched: d.isWatched });
+    }
     if (selectedDetailItem && selectedDetailItem.dedupKey === dedupKey) {
       selectedDetailItem.isWatched = d.isWatched;
       const wBtn = document.getElementById('detailWatchedBtn');
@@ -4950,6 +5215,9 @@ async function toggleWatchlist(dedupKey) {
       body: JSON.stringify({ dedupKey })
     });
     const d = await res.json();
+    if (typeof ProfileSyncManager !== 'undefined' && d.ok) {
+      ProfileSyncManager.recordChange('watchlist', dedupKey, { inWatchlist: d.inWatchlist });
+    }
     if (selectedDetailItem && selectedDetailItem.dedupKey === dedupKey) {
       selectedDetailItem.inWatchlist = d.inWatchlist;
       const wlBtn = document.getElementById('detailWatchlistBtn');
@@ -5130,6 +5398,13 @@ async function recordPlaybackProgress(dedupKey, posMs, durMs) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dedupKey, positionMs: posMs, durationMs: durMs })
     });
+    if (typeof ProfileSyncManager !== 'undefined') {
+      ProfileSyncManager.recordChange('progress', dedupKey, {
+        resumePositionMs: posMs,
+        durationMs: durMs,
+        isWatched: (durMs > 60000 && (posMs / durMs) >= 0.9)
+      });
+    }
   } catch (_) {}
 
   // Update in-memory item

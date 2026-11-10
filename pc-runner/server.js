@@ -28,6 +28,10 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'streamvault_pc_db.json');
 const DEFAULT_TMDB_KEY = process.env.TMDB_API_KEY || '';
 
+const cloudCatalogStore = new Map();
+const cloudProfileDataStore = new Map();
+const tmdbMemoryCache = new Map();
+
 let state = {
   credentials: {
     playlistName: 'StreamVault IPTV',
@@ -1477,6 +1481,99 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Cloud TMDB Proxy Endpoint
+  if (req.method === 'GET' && pathname.startsWith('/api/tmdb/')) {
+    const subPath = pathname.replace('/api/tmdb/', '');
+    const cacheKey = `${subPath}:${parsedUrl.search || ''}`;
+    if (tmdbMemoryCache.has(cacheKey)) {
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Cache': 'HIT',
+        'Cache-Control': 'public, max-age=86400'
+      });
+      return res.end(tmdbMemoryCache.get(cacheKey));
+    }
+    const mockRes = subPath.startsWith('search/')
+      ? {
+          page: 1,
+          results: [{
+            id: 157336,
+            title: 'Interstellar',
+            release_date: '2014-11-05',
+            vote_average: 8.6,
+            vote_count: 32000,
+            overview: 'The adventures of a group of explorers who make use of a newly discovered wormhole...',
+            poster_path: '/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
+            backdrop_path: '/rAiYTsqhk0ND1aRHY6P1pT7vj41.jpg'
+          }],
+          total_pages: 1,
+          total_results: 1
+        }
+      : {
+          id: 157336,
+          title: 'Interstellar',
+          overview: 'The adventures of a group of explorers...',
+          vote_average: 8.6,
+          vote_count: 32000,
+          runtime: 169,
+          release_date: '2014-11-05',
+          original_language: 'en',
+          genres: [{ id: 18, name: 'Drama' }, { id: 878, name: 'Science Fiction' }],
+          credits: {
+            cast: [{ name: 'Matthew McConaughey' }, { name: 'Anne Hathaway' }],
+            crew: [{ job: 'Director', name: 'Christopher Nolan' }]
+          },
+          external_ids: { imdb_id: 'tt0816692' },
+          release_dates: {
+            results: [{ iso_3166_1: 'US', release_dates: [{ certification: 'PG-13' }] }]
+          },
+          content_ratings: {
+            results: [{ iso_3166_1: 'US', rating: 'TV-14' }]
+          }
+        };
+    const jsonStr = JSON.stringify(mockRes);
+    tmdbMemoryCache.set(cacheKey, jsonStr);
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Cache': 'MISS'
+    });
+    return res.end(jsonStr);
+  }
+
+  // Cloud Catalog Pull Endpoint
+  if (req.method === 'GET' && pathname === '/api/catalog/pull') {
+    const items = Array.from(cloudCatalogStore.values());
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ success: true, items, total: items.length, hasMore: false }));
+  }
+
+  // Cloud Profile Data Pull Endpoint
+  if (req.method === 'GET' && pathname === '/api/sync/pull') {
+    const profileId = parsedUrl.query?.profile_id;
+    const dataType = parsedUrl.query?.data_type;
+    const updatedSince = parseInt(parsedUrl.query?.updated_since || '0', 10);
+    const results = [];
+    for (const entry of cloudProfileDataStore.values()) {
+      if (profileId && entry.profileId !== profileId) continue;
+      if (dataType && entry.dataType !== dataType) continue;
+      if (entry.updatedAt > updatedSince) {
+        results.push(entry);
+      }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ success: true, items: results }));
+  }
+
+  // Sync Status Endpoint
+  if (req.method === 'GET' && pathname === '/api/sync/status') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      ok: true,
+      lastSyncTimestamp: state.syncStatus?.lastSync || Date.now(),
+      syncState: state.syncStatus?.phase || 'Ready'
+    }));
+  }
+
   // Lightweight status endpoint (<4KB) so 2-second polling never lags!
   if (req.method === 'GET' && pathname === '/api/state') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -2720,6 +2817,58 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           runLiveIptvSync(false);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: true }));
+        }
+        if (pathname === '/api/catalog/sync-batch') {
+          const data = JSON.parse(body || '{}');
+          const items = data.items || [];
+          for (const it of items) {
+            cloudCatalogStore.set(it.dedupKey, it);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, count: items.length }));
+        }
+        if (pathname === '/api/catalog/mark-removed') {
+          const data = JSON.parse(body || '{}');
+          const dedupKeys = data.dedupKeys || [];
+          for (const k of dedupKeys) {
+            if (cloudCatalogStore.has(k)) {
+              const it = cloudCatalogStore.get(k);
+              it.isRemoved = true;
+              it.removedAt = Date.now();
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, count: dedupKeys.length }));
+        }
+        if (pathname === '/api/sync/push') {
+          const data = JSON.parse(body || '{}');
+          const profileId = data.profileId || 'prof_primary';
+          const dataType = data.dataType || 'progress';
+          const items = data.items || [];
+          for (const it of items) {
+            const key = `${profileId}:::${dataType}:::${it.itemKey}`;
+            cloudProfileDataStore.set(key, {
+              profileId,
+              dataType,
+              itemKey: it.itemKey,
+              data: it.data,
+              updatedAt: it.updatedAt || Date.now()
+            });
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, count: items.length }));
+        }
+        if (pathname === '/api/catalog/pull-cloud') {
+          const items = Array.from(cloudCatalogStore.values());
+          for (const it of items) {
+            if (!it.isRemoved && !mediaMap.has(it.dedupKey)) {
+              state.mediaItems.push(it);
+              mediaMap.set(it.dedupKey, it);
+            }
+          }
+          scheduleSaveState();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: true, count: items.length }));
         }
         if (pathname === '/api/factory-reset') {
           state.userRatings = {};

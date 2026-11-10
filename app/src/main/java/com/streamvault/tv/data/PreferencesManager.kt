@@ -73,6 +73,15 @@ class PreferencesManager(context: Context) {
     }
 
     // --- Cloud Session & Authentication ---
+    fun getCloudSyncBaseUrl(): String {
+        return prefs.getString("cloud_sync_base_url", "https://streamvault-sync.streamvault-app.workers.dev")
+            ?: "https://streamvault-sync.streamvault-app.workers.dev"
+    }
+
+    fun setCloudSyncBaseUrl(url: String) {
+        prefs.edit().putString("cloud_sync_base_url", url.trim().trimEnd('/')).apply()
+    }
+
     fun getAuthToken(): String? {
         return prefs.getString("auth_token", null)?.takeIf { it.isNotBlank() }
     }

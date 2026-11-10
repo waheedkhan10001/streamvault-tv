@@ -933,6 +933,7 @@ export default {
           return new Response(cached.response_json, {
             headers: {
               ...corsHeaders,
+              'Content-Type': 'application/json; charset=utf-8',
               'X-Cache': 'HIT',
               'Cache-Control': 'public, max-age=86400'
             }
@@ -965,6 +966,7 @@ export default {
           status: tmdbRes.status,
           headers: {
             ...corsHeaders,
+            'Content-Type': 'application/json; charset=utf-8',
             'X-Cache': 'MISS'
           }
         });

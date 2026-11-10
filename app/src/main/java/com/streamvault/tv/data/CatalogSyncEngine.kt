@@ -11,8 +11,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStreamReader
@@ -449,6 +451,7 @@ class CatalogSyncEngine(
                 }
 
                 var updatedInBatch = 0
+                val enrichedBatch = mutableListOf<MediaItem>()
                 for (item in queue) {
                     if (!isActive) break
                     val enrichedOk = enrichSingleItemFromTmdb(item, apiKey)
@@ -459,6 +462,10 @@ class CatalogSyncEngine(
                     } else {
                         delay(30) // ~33 requests/sec to TMDB (well within TMDB's 40-50 req/sec limit)
                     }
+                    val updatedItem = db.getItemByDedupKey(item.dedupKey)
+                    if (updatedItem != null) {
+                        enrichedBatch.add(updatedItem)
+                    }
                     updatedInBatch++
                     if (updatedInBatch % 25 == 0) {
                         val (enriched, total) = db.getEnrichmentCounts()
@@ -467,18 +474,199 @@ class CatalogSyncEngine(
                             enrichedCount = enriched,
                             totalToEnrich = total
                         )
+                        if (enrichedBatch.isNotEmpty()) {
+                            uploadCatalogSyncBatch(enrichedBatch.toList())
+                            enrichedBatch.clear()
+                        }
                         onProgress()
                     }
+                }
+                if (enrichedBatch.isNotEmpty()) {
+                    uploadCatalogSyncBatch(enrichedBatch.toList())
+                    enrichedBatch.clear()
                 }
                 onProgress()
             }
         }
     }
 
+    fun uploadCatalogSyncBatch(items: List<MediaItem>) {
+        val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return
+        val cloudBase = prefs.getCloudSyncBaseUrl()
+
+        items.chunked(25).forEach { chunk ->
+            var attempt = 0
+            var success = false
+            val payload = JSONObject().apply {
+                put("playlistId", "primary")
+                val arr = JSONArray()
+                chunk.forEach { it ->
+                    arr.put(JSONObject().apply {
+                        put("dedupKey", it.dedupKey)
+                        put("mediaType", it.mediaType.name)
+                        put("title", it.cleanTitle)
+                        put("cleanTitle", it.cleanTitle)
+                        put("year", it.year)
+                        put("tmdbId", it.tmdbId)
+                        put("overview", it.plot)
+                        put("posterPath", it.posterUrl)
+                        put("backdropPath", it.backdropUrl)
+                        put("rating", it.rating)
+                        put("runtimeMins", it.runtimeMins)
+                        put("genres", JSONArray(it.genres))
+                        put("versions", JSONArray(it.versions.map { v ->
+                            JSONObject().apply {
+                                put("streamId", v.streamId)
+                                put("name", v.rawTitle)
+                                put("language", v.languageTag)
+                                put("quality", v.qualityTag)
+                            }
+                        }))
+                        put("isAdult", it.isAdult)
+                    })
+                }
+                put("items", arr)
+            }.toString()
+
+            while (attempt < 3 && !success) {
+                attempt++
+                try {
+                    val req = Request.Builder()
+                        .url("$cloudBase/api/catalog/sync-batch")
+                        .header("Authorization", "Bearer $token")
+                        .header("Content-Type", "application/json")
+                        .post(payload.toRequestBody("application/json".toMediaTypeOrNull()))
+                        .build()
+                    httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            success = true
+                        } else if (resp.code == 401) {
+                            return
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (attempt < 3) {
+                        Thread.sleep(1000L * attempt)
+                    }
+                }
+            }
+        }
+    }
+
+    fun markCatalogTitlesRemoved(dedupKeys: List<String>) {
+        val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return
+        val cloudBase = prefs.getCloudSyncBaseUrl()
+        if (dedupKeys.isEmpty()) return
+        dedupKeys.chunked(50).forEach { chunk ->
+            try {
+                val payload = JSONObject().apply {
+                    put("dedupKeys", JSONArray(chunk))
+                }.toString()
+                val req = Request.Builder()
+                    .url("$cloudBase/api/catalog/mark-removed")
+                    .header("Authorization", "Bearer $token")
+                    .header("Content-Type", "application/json")
+                    .post(payload.toRequestBody("application/json".toMediaTypeOrNull()))
+                    .build()
+                httpClient.newCall(req).execute().close()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun pullCatalogFromCloud(onProgress: (Int, Int) -> Unit = { _, _ -> }): Int {
+        val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return 0
+        val cloudBase = prefs.getCloudSyncBaseUrl()
+        var offset = 0
+        val limit = 100
+        var hasMore = true
+        var totalImported = 0
+
+        while (hasMore) {
+            val url = "$cloudBase/api/catalog/pull?limit=$limit&offset=$offset"
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .build()
+
+            try {
+                val (items, total, more) = httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return totalImported
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    val itemsArr = json.optJSONArray("items") ?: JSONArray()
+                    val totalCount = json.optInt("total", 0)
+                    val moreFlag = json.optBoolean("hasMore", false)
+                    val parsedItems = mutableListOf<MediaItem>()
+                    for (i in 0 until itemsArr.length()) {
+                        val it = itemsArr.getJSONObject(i)
+                        if (it.optBoolean("isRemoved", false)) continue
+                        val dedupKey = it.optString("dedupKey")
+                        if (dedupKey.isBlank()) continue
+                        val genresArr = it.optJSONArray("genres") ?: JSONArray()
+                        val genresList = (0 until genresArr.length()).map { g -> genresArr.getString(g) }
+                        val versionsArr = it.optJSONArray("versions") ?: JSONArray()
+                        val versionsList = mutableListOf<StreamVersion>()
+                        for (v in 0 until versionsArr.length()) {
+                            val vObj = versionsArr.getJSONObject(v)
+                            versionsList.add(
+                                StreamVersion(
+                                    streamId = vObj.optString("streamId"),
+                                    rawTitle = vObj.optString("name", vObj.optString("rawTitle")),
+                                    languageTag = vObj.optString("language", vObj.optString("languageTag", "English")),
+                                    qualityTag = vObj.optString("quality", vObj.optString("qualityTag", "HD")),
+                                    subtitleTag = "",
+                                    containerExtension = "mp4",
+                                    categoryId = "",
+                                    categoryName = "",
+                                    addedTimestamp = 0L
+                                )
+                            )
+                        }
+                        parsedItems.add(
+                            MediaItem(
+                                dedupKey = dedupKey,
+                                primaryStreamId = versionsList.firstOrNull()?.streamId ?: "",
+                                tmdbId = it.optInt("tmdbId", 0),
+                                mediaType = if (it.optString("mediaType").equals("SERIES", ignoreCase = true)) MediaType.SERIES else MediaType.MOVIE,
+                                cleanTitle = it.optString("cleanTitle", it.optString("title")),
+                                rawTitle = it.optString("title"),
+                                year = it.optInt("year", 0),
+                                rating = it.optDouble("rating", 0.0),
+                                plot = it.optString("overview", ""),
+                                posterUrl = it.optString("posterPath", ""),
+                                backdropUrl = it.optString("backdropPath", ""),
+                                runtimeMins = it.optInt("runtimeMins", 0),
+                                genres = genresList,
+                                isEnriched = it.optInt("tmdbId", 0) > 0,
+                                versions = versionsList,
+                                isAdult = it.optBoolean("isAdult", false)
+                            )
+                        )
+                    }
+                    Triple(parsedItems, totalCount, moreFlag)
+                }
+
+                if (items.isNotEmpty()) {
+                    db.upsertMediaBatch(items, markNewIfInserted = false)
+                    totalImported += items.size
+                    onProgress(totalImported, total)
+                }
+
+                hasMore = more && items.isNotEmpty()
+                offset += limit
+            } catch (e: Exception) {
+                break
+            }
+        }
+        return totalImported
+    }
+
     private fun enrichSingleItemFromTmdb(item: MediaItem, apiKey: String): Boolean {
         return try {
             val endpointType = if (item.mediaType == MediaType.SERIES) "tv" else "movie"
             var resolvedTmdbId = item.tmdbId
+            val token = prefs.getAuthToken() ?: ""
+            val cloudBase = prefs.getCloudSyncBaseUrl()
+            val useWorkerProxy = apiKey.isBlank() || apiKey == XtreamCredentials.DEFAULT_TMDB_KEY
 
             // Step 1: If no TMDB ID was supplied by IPTV vendor, search TMDB by cleanTitle + year
             if (resolvedTmdbId <= 0) {
@@ -486,9 +674,16 @@ class CatalogSyncEngine(
                 val yearParam = if (item.year > 1900) {
                     if (item.mediaType == MediaType.SERIES) "&first_air_date_year=${item.year}" else "&year=${item.year}"
                 } else ""
-                val searchUrl = "https://api.themoviedb.org/3/search/$endpointType?api_key=$apiKey&query=$q$yearParam"
-                val req = Request.Builder().url(searchUrl).build()
-                httpClient.newCall(req).execute().use { resp ->
+                val searchUrl = if (useWorkerProxy) {
+                    "$cloudBase/api/tmdb/search/$endpointType?query=$q$yearParam"
+                } else {
+                    "https://api.themoviedb.org/3/search/$endpointType?api_key=$apiKey&query=$q$yearParam"
+                }
+                val reqBuilder = Request.Builder().url(searchUrl)
+                if (useWorkerProxy && token.isNotBlank()) {
+                    reqBuilder.header("Authorization", "Bearer $token")
+                }
+                httpClient.newCall(reqBuilder.build()).execute().use { resp ->
                     if (resp.code == 429) {
                         Thread.sleep(1200) // Respect rate limit backoff
                         return false
@@ -522,15 +717,23 @@ class CatalogSyncEngine(
                     language = item.language,
                     hasEmbeddedSubs = item.hasEmbeddedSubtitles,
                     embeddedSubLangs = item.embeddedSubtitleLanguages,
-                    embeddedAudioLangs = item.embeddedAudioLanguages
+                    embeddedAudioLangs = item.embeddedAudioLanguages,
+                    certification = item.certification
                 )
                 return false
             }
 
             // Step 2: Fetch full TMDB Details + Credits (Cast & Director) + External IDs (IMDb ID) in 1 call!
-            val detailUrl = "https://api.themoviedb.org/3/$endpointType/$resolvedTmdbId?api_key=$apiKey&append_to_response=credits,external_ids"
-            val req = Request.Builder().url(detailUrl).build()
-            httpClient.newCall(req).execute().use { resp ->
+            val detailUrl = if (useWorkerProxy) {
+                "$cloudBase/api/tmdb/$endpointType/$resolvedTmdbId?append_to_response=credits,external_ids,release_dates,content_ratings"
+            } else {
+                "https://api.themoviedb.org/3/$endpointType/$resolvedTmdbId?api_key=$apiKey&append_to_response=credits,external_ids,release_dates,content_ratings"
+            }
+            val reqBuilder = Request.Builder().url(detailUrl)
+            if (useWorkerProxy && token.isNotBlank()) {
+                reqBuilder.header("Authorization", "Bearer $token")
+            }
+            httpClient.newCall(reqBuilder.build()).execute().use { resp ->
                 if (resp.code == 429) {
                     Thread.sleep(1200)
                     return false
@@ -583,6 +786,41 @@ class CatalogSyncEngine(
                     obj.optJSONObject("external_ids")?.optString("imdb_id") ?: ""
                 }
 
+                var certification = item.certification
+                if (endpointType == "movie") {
+                    obj.optJSONObject("release_dates")?.optJSONArray("results")?.let { results ->
+                        for (i in 0 until results.length()) {
+                            val rObj = results.getJSONObject(i)
+                            if (rObj.optString("iso_3166_1").equals("US", ignoreCase = true)) {
+                                val dates = rObj.optJSONArray("release_dates")
+                                if (dates != null && dates.length() > 0) {
+                                    for (j in 0 until dates.length()) {
+                                        val cert = dates.getJSONObject(j).optString("certification")
+                                        if (cert.isNotBlank()) {
+                                            certification = cert
+                                            break
+                                        }
+                                    }
+                                }
+                                if (certification.isNotBlank()) break
+                            }
+                        }
+                    }
+                } else {
+                    obj.optJSONObject("content_ratings")?.optJSONArray("results")?.let { results ->
+                        for (i in 0 until results.length()) {
+                            val rObj = results.getJSONObject(i)
+                            if (rObj.optString("iso_3166_1").equals("US", ignoreCase = true)) {
+                                val cert = rObj.optString("rating")
+                                if (cert.isNotBlank()) {
+                                    certification = cert
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+
                 val posterPath = obj.optString("poster_path")
                 val backdropPath = obj.optString("backdrop_path")
                 val fullPoster = if (posterPath.startsWith("/")) "https://image.tmdb.org/t/p/w500$posterPath" else item.posterUrl
@@ -605,7 +843,8 @@ class CatalogSyncEngine(
                     language = resolvedLang,
                     hasEmbeddedSubs = item.hasEmbeddedSubtitles,
                     embeddedSubLangs = item.embeddedSubtitleLanguages,
-                    embeddedAudioLangs = item.embeddedAudioLanguages
+                    embeddedAudioLangs = item.embeddedAudioLanguages,
+                    certification = certification
                 )
                 true
             }

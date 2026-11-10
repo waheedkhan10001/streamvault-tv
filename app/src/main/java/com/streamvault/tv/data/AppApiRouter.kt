@@ -86,6 +86,8 @@ class AppApiRouter(
 
                 // 13. Trigger Sync Now
                 method == "POST" && path == "/api/sync-now" -> handleSyncNow()
+                method == "POST" && path == "/api/catalog/pull-cloud" -> handlePullCloudCatalog()
+                method == "GET" && path == "/api/sync/status" -> handleGetSyncStatus()
 
                 // 14. Factory Reset
                 method == "POST" && path == "/api/factory-reset" -> handleFactoryReset()
@@ -727,6 +729,23 @@ class AppApiRouter(
     private fun handleSyncNow(): String {
         syncEngine.triggerSync(isManual = true)
         return """{"ok":true}"""
+    }
+
+    private fun handlePullCloudCatalog(): String {
+        val count = syncEngine.pullCatalogFromCloud()
+        return JSONObject().apply {
+            put("ok", true)
+            put("count", count)
+            put("message", "Catalog pulled from cloud ($count titles)")
+        }.toString()
+    }
+
+    private fun handleGetSyncStatus(): String {
+        return JSONObject().apply {
+            put("ok", true)
+            put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
+            put("syncState", syncEngine.syncState.value.phase)
+        }.toString()
     }
 
     private fun handleFactoryReset(): String {
