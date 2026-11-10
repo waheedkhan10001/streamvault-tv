@@ -729,12 +729,29 @@ class StreamVaultDatabase(context: Context) :
         return newState
     }
 
+    fun getItemByDedupKey(dedupKey: String): MediaItem? {
+        val db = readableDatabase
+        db.rawQuery("SELECT * FROM media_items WHERE dedup_key = ? LIMIT 1", arrayOf(dedupKey)).use { c ->
+            val list = readMediaList(c)
+            return list.firstOrNull()
+        }
+    }
+
+    fun setUserStarRating(dedupKey: String, starRating: Double) {
+        val db = writableDatabase
+        val cv = ContentValues().apply {
+            put("rating", starRating)
+        }
+        db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
+    }
+
     fun savePlaybackProgress(dedupKey: String, positionMs: Long, durationMs: Long) {
         val db = writableDatabase
-        val finished = durationMs > 60_000L && positionMs.toDouble() / durationMs.toDouble() >= 0.92
+        val finished = durationMs > 60_000L && positionMs.toDouble() / durationMs.toDouble() >= 0.90
         val cv = ContentValues().apply {
             put("resume_position_ms", if (finished) 0L else positionMs)
             put("duration_ms", durationMs)
+            // F11: Never auto-clear is_watched! Only set it to 1 when completed.
             if (finished) put("is_watched", 1)
         }
         db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))

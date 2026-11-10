@@ -92,7 +92,12 @@ class MainActivity : Activity() {
     private var currentDedupKey: String = ""
     private var currentExpectedDurationMs: Long = 0L
     private val localAssetUrl = "file:///android_asset/tv-ui.html"
-    private val devServerUrl = "http://192.168.100.66:8765/tv"
+    private var resolveStreamThread: Thread? = null
+
+    lateinit var db: com.streamvault.tv.data.StreamVaultDatabase
+    lateinit var prefs: com.streamvault.tv.data.PreferencesManager
+    lateinit var syncEngine: com.streamvault.tv.data.CatalogSyncEngine
+    lateinit var apiRouter: com.streamvault.tv.data.AppApiRouter
 
     private var toneGen: ToneGenerator? = null
     private var lastBackPressTime: Long = 0L
@@ -173,6 +178,11 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun getAppVersion(): String = "2.6.0-standalone"
+
+        @JavascriptInterface
+        fun handleApiRequest(method: String, path: String, body: String): String {
+            return activity.apiRouter.handle(method, path, body)
+        }
     }
 
     private val VOICE_SEARCH_REQUEST_CODE = 1001
@@ -228,6 +238,15 @@ class MainActivity : Activity() {
 
         initAcousticClick()
 
+        db = com.streamvault.tv.data.StreamVaultDatabase.getInstance(this)
+        prefs = com.streamvault.tv.data.PreferencesManager(this)
+        syncEngine = com.streamvault.tv.data.CatalogSyncEngine(
+            db,
+            prefs,
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        )
+        apiRouter = com.streamvault.tv.data.AppApiRouter(this, db, prefs, syncEngine)
+
         try {
             toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 65)
         } catch (_: Exception) {}
@@ -280,15 +299,34 @@ class MainActivity : Activity() {
             }
 
             webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): WebResourceResponse? {
+                    val url = request?.url ?: return null
+                    val urlStr = url.toString()
+                    if (urlStr.contains("/api/")) {
+                        val path = url.path ?: ""
+                        val query = url.query ?: ""
+                        val fullPath = if (query.isNotEmpty()) "$path?$query" else path
+                        val method = request.method ?: "GET"
+                        val responseJson = apiRouter.handle(method, fullPath, "")
+                        return WebResourceResponse(
+                            "application/json",
+                            "UTF-8",
+                            java.io.ByteArrayInputStream(responseJson.toByteArray(Charsets.UTF_8))
+                        )
+                    }
+                    return super.shouldInterceptRequest(view, request)
+                }
+
                 override fun onReceivedError(
                     view: WebView?,
                     request: WebResourceRequest?,
                     error: WebResourceError?
                 ) {
                     Log.e("StreamVaultWeb", "Web error: ${error?.description}")
-                    // If dev server fails or is unreachable (e.g. PC closed), seamlessly load local standalone asset!
                     if (request?.isForMainFrame == true && view?.url?.startsWith("file:") != true) {
-                        Log.w("StreamVaultWeb", "Dev server unreachable. Falling back to standalone asset mode.")
                         view?.post {
                             view.loadUrl(localAssetUrl)
                         }
@@ -308,15 +346,8 @@ class MainActivity : Activity() {
 
         setContentView(rootLayout)
 
-        val sp = getSharedPreferences("streamvault_prefs", Context.MODE_PRIVATE)
-        val loadMode = sp.getString("ui_load_mode", "standalone")
-        val targetUrl = if (loadMode == "dev") {
-            sp.getString("dev_server_url", devServerUrl) ?: devServerUrl
-        } else {
-            localAssetUrl
-        }
-        Log.i("StreamVault", "Booting StreamVault in $loadMode mode: $targetUrl")
-        webView.loadUrl(targetUrl)
+        Log.i("StreamVault", "Booting StreamVault TV Standalone: $localAssetUrl")
+        webView.loadUrl(localAssetUrl)
     }
 
     private var clickPcmData: ByteArray? = null
@@ -963,21 +994,7 @@ class MainActivity : Activity() {
 
                     override fun onPlayerError(error: PlaybackException) {
                         Log.e("StreamVault", "Direct Player Error: ${error.message} (Code: ${error.errorCodeName})", error)
-                        if (!finalPlayUrl.contains("stream-proxy")) {
-                            Log.i("StreamVault", "Attempting fallback to local gigabit stream-proxy...")
-                            try {
-                                val proxyUrl = "http://192.168.100.66:8765/api/stream-proxy?raw=1&url=" + URLEncoder.encode(url, "UTF-8")
-                                val fallbackItem = MediaItem.Builder().setUri(Uri.parse(proxyUrl))
-                                if (isMkv) fallbackItem.setMimeType(MimeTypes.APPLICATION_MATROSKA)
-                                player.setMediaItem(fallbackItem.build())
-                                player.prepare()
-                                player.playWhenReady = true
-                            } catch (_: Exception) {
-                                flashCenterIndicator("Connection Error: ${error.errorCodeName}")
-                            }
-                        } else {
-                            flashCenterIndicator("Stream Error: ${error.errorCodeName}")
-                        }
+                        flashCenterIndicator("Stream unavailable (${error.errorCodeName})")
                     }
                 })
 
@@ -1086,6 +1103,9 @@ class MainActivity : Activity() {
     }
 
     private fun exitNativePlayer() {
+        resolveStreamThread?.interrupt()
+        resolveStreamThread = null
+
         val pos = exoPlayer?.currentPosition ?: 0L
         val dur = if ((exoPlayer?.duration ?: 0L) > 0) exoPlayer?.duration ?: 0L else currentExpectedDurationMs
 
@@ -1118,12 +1138,44 @@ class MainActivity : Activity() {
         if (event.action == KeyEvent.ACTION_DOWN) {
             val keyCode = event.keyCode
 
-            // 1. If native ExoPlayer is active
-            if (isPlayingVideo && exoPlayer != null) {
-                val player = exoPlayer!!
+            // 1. If native ExoPlayer mode is active (resolving or streaming)
+            if (isPlayingVideo) {
+                // F3: Back button always exits, even during stream resolution when exoPlayer is still preparing
+                if (keyCode == KeyEvent.KEYCODE_BACK) {
+                    if (isAudioSubDrawerOpen) {
+                        closeAudioSubDrawer()
+                        playAcousticTick()
+                        return true
+                    }
+                    if (isOsdVisible()) {
+                        hideOsdImmediately()
+                    } else {
+                        exitNativePlayer()
+                    }
+                    return true
+                }
 
-                // A. Handle Audio & Subtitles Drawer Navigation
-                if (isAudioSubDrawerOpen) {
+                // F5: Hardware Media Keys
+                when (keyCode) {
+                    KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                        if (exoPlayer?.isPlaying == false) togglePlayPause()
+                        return true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                        if (exoPlayer?.isPlaying == true) togglePlayPause()
+                        return true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_STOP -> {
+                        exitNativePlayer()
+                        return true
+                    }
+                }
+
+                if (exoPlayer != null) {
+                    val player = exoPlayer!!
+
+                    // A. Handle Audio & Subtitles Drawer Navigation
+                    if (isAudioSubDrawerOpen) {
                     when (keyCode) {
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
                             audioSubActiveColumn = 0
@@ -1222,8 +1274,10 @@ class MainActivity : Activity() {
                     }
                 }
             }
+            return true
+        }
 
-            // 2. Normal WebView Navigation & Standard App Exit
+        // 2. Normal WebView Navigation & Standard App Exit
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER -> {
@@ -1302,14 +1356,18 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         if (isPlayingVideo && exoPlayer != null) {
+            // F4: Pause playback immediately on background / TV Home
+            exoPlayer?.pause()
             val pos = exoPlayer?.currentPosition ?: 0L
             val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
             if (pos > 5000L && currentDedupKey.isNotEmpty()) {
+                db.savePlaybackProgress(currentDedupKey, pos, dur)
                 val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress('$currentDedupKey', $pos, $dur); }"
                 webView.evaluateJavascript(js, null)
             }
         }
         // Auto-lock adult content on TV standby / background
+        prefs.setAdultVaultUnlocked(false)
         val lockJs = "if(window.lockParentalControls){ window.lockParentalControls(); }"
         webView.evaluateJavascript(lockJs, null)
     }
@@ -1317,9 +1375,11 @@ class MainActivity : Activity() {
     override fun onStop() {
         super.onStop()
         if (isPlayingVideo && exoPlayer != null) {
+            exoPlayer?.pause()
             val pos = exoPlayer?.currentPosition ?: 0L
             val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
             if (pos > 5000L && currentDedupKey.isNotEmpty()) {
+                db.savePlaybackProgress(currentDedupKey, pos, dur)
                 val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress('$currentDedupKey', $pos, $dur); }"
                 webView.evaluateJavascript(js, null)
             }

@@ -211,12 +211,14 @@ object TitleParser {
         val finalLanguage = detectedLanguage ?: "English"
         val finalQualities = if (qualities.isEmpty()) listOf("HD") else qualities.toList()
 
-        // 7. Build canonical deduplication key so identical movies across folders merge into 1 card
-        val normalizedAlphaNum = working.lowercase(Locale.ROOT).replace(Regex("""[^a-z0-9]"""), "")
+        // 7. Build canonical deduplication key with Unicode-aware normalization (supports non-Latin titles: Urdu, Hindi, Arabic, etc.)
+        val normalized = java.text.Normalizer.normalize(working, java.text.Normalizer.Form.NFC)
+            .lowercase(Locale.ROOT)
+            .replace(Regex("""[^\p{L}\p{N}]"""), "")
         val dedupKey = when {
             tmdbId > 0 -> "tmdb:$tmdbId"
-            extractedYear > 0 && normalizedAlphaNum.length >= 2 -> "title:$normalizedAlphaNum:$extractedYear"
-            normalizedAlphaNum.length >= 3 -> "title:$normalizedAlphaNum"
+            extractedYear > 0 && normalized.length >= 2 -> "title:$normalized:$extractedYear"
+            normalized.length >= 2 -> "title:$normalized"
             else -> "raw:${rawTitle.hashCode()}"
         }
 

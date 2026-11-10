@@ -121,8 +121,9 @@ class SubtitleService(private val context: Context) {
                 val req = Request.Builder().url(track.downloadUrl).header("User-Agent", "StreamVaultTV/1.0").build()
                 httpClient.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return@withContext null
-                    val content = resp.body?.string() ?: return@withContext null
-                    rawFile.writeText(content, Charsets.UTF_8)
+                    val bytes = resp.body?.bytes() ?: return@withContext null
+                    val decoded = decodeSubtitleBytes(bytes)
+                    rawFile.writeText(decoded, Charsets.UTF_8)
                 }
             }
             if (offsetMs == 0L) {
@@ -151,6 +152,28 @@ class SubtitleService(private val context: Context) {
             val newStart = (startMs + offsetMs).coerceAtLeast(0L)
             val newEnd = (endMs + offsetMs).coerceAtLeast(newStart + 100L)
             "${formatSrtTime(newStart)} --> ${formatSrtTime(newEnd)}"
+        }
+    }
+
+    private fun decodeSubtitleBytes(bytes: ByteArray): String {
+        if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+            return String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+        }
+        if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) {
+            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+        }
+        if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) {
+            return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+        }
+        val utf8 = String(bytes, Charsets.UTF_8)
+        if (!utf8.contains('\uFFFD')) {
+            return utf8
+        }
+        // Fallback for Arabic / Windows-1256 or Western Windows-1252
+        return runCatching {
+            String(bytes, java.nio.charset.Charset.forName("windows-1256"))
+        }.getOrElse {
+            String(bytes, Charsets.ISO_8859_1)
         }
     }
 

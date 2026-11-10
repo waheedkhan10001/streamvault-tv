@@ -2072,11 +2072,9 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           item.resumePositionMs = Math.max(0, parseInt(positionMs, 10) || 0);
           if (durationMs) item.durationMs = parseInt(durationMs, 10);
           item.lastWatchedTimestamp = Date.now();
-          // Auto-mark watched if completed > 90%
+          // F11: Auto-mark watched if completed > 90%, but NEVER auto-clear watched on resume!
           if (item.durationMs > 0 && item.resumePositionMs > (item.durationMs * 0.90)) {
             item.isWatched = true;
-          } else if (item.durationMs > 0 && item.resumePositionMs < (item.durationMs * 0.90)) {
-            item.isWatched = false;
           }
           scheduleSaveState();
         }

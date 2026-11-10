@@ -1123,9 +1123,8 @@
 </div>
 
 <script>
-// Smart Universal Network Routing for Cloud, PC, and Standalone Mobile/TV
+// Smart Universal Network Routing for Cloud and Native Standalone TV
 const CLOUD_SYNC_BASE = 'https://streamvault-sync.streamvault-app.workers.dev';
-const COMPANION_PC_FALLBACK = 'http://192.168.100.66:8765';
 
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function(input, init) {
@@ -1137,16 +1136,27 @@ window.fetch = function(input, init) {
       return _rawFetch(CLOUD_SYNC_BASE + target, init);
     }
 
-    // 2. Catalog, Live TV, and Stream Routing
-    let base = localStorage.getItem('sv_server_base_url') || '';
-    if (!base) {
-      if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
-        base = window.location.origin;
-      } else {
-        base = COMPANION_PC_FALLBACK;
+    // 2. Native Standalone TV Engine (Direct In-Memory / SQLite via Kotlin bridge)
+    if (window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
+      const method = (init && init.method) ? init.method.toUpperCase() : 'GET';
+      const body = (init && init.body) ? (typeof init.body === 'string' ? init.body : JSON.stringify(init.body)) : '';
+      try {
+        const resStr = window.AndroidApp.handleApiRequest(method, input, body);
+        return Promise.resolve(new Response(resStr, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' }
+        }));
+      } catch (err) {
+        return Promise.resolve(new Response(JSON.stringify({ error: err.message, ok: false }), { status: 500 }));
       }
     }
-    const fullUrl = base.replace(/\/$/, '') + input;
+
+    // 3. Fallback to Browser Origin (PC Runner or Local Webview)
+    let base = localStorage.getItem('sv_server_base_url') || '';
+    if (!base && (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
+      base = window.location.origin;
+    }
+    const fullUrl = (base ? base.replace(/\/$/, '') : '') + input;
     return _rawFetch(fullUrl, init);
   }
   return _rawFetch(input, init);

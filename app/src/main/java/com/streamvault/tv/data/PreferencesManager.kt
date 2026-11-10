@@ -65,7 +65,7 @@ class PreferencesManager(context: Context) {
             .putStringSet("preferred_langs", creds.preferredLanguages)
             .putStringSet("hidden_langs", creds.hiddenLanguages)
             .putString("sub_langs", creds.preferredSubtitleLanguages.joinToString(","))
-            .apply()
+            .commit()
         _credentialsFlow.value = creds
     }
 
@@ -90,6 +90,89 @@ class PreferencesManager(context: Context) {
         val clean = query.trim()
         if (clean.length < 2) return
         val updated = (listOf(clean) + getRecentSearches().filterNot { it.equals(clean, ignoreCase = true) }).take(8)
-        prefs.edit().putString("recent_searches", updated.joinToString("||")).apply()
+        prefs.edit().putString("recent_searches", updated.joinToString("||")).commit()
+    }
+
+    fun clearRecentSearches() {
+        prefs.edit().remove("recent_searches").commit()
+    }
+
+    fun removeRecentSearch(query: String) {
+        val clean = query.trim()
+        val updated = getRecentSearches().filterNot { it.equals(clean, ignoreCase = true) }
+        prefs.edit().putString("recent_searches", updated.joinToString("||")).commit()
+    }
+
+    // --- Parental Controls (Hashed PIN, attempt-limited, per-device) ---
+    private fun getPinSalt(): String {
+        var salt = prefs.getString("parental_pin_salt", null)
+        if (salt == null) {
+            salt = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString("parental_pin_salt", salt).commit()
+        }
+        return salt
+    }
+
+    private fun hashPin(pin: String): String {
+        val salt = getPinSalt()
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val bytes = md.digest("$pin:$salt".toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    fun hasCustomParentalPin(): Boolean {
+        val defaultHash = hashPin("0000")
+        val currentHash = prefs.getString("parental_pin_hash", defaultHash) ?: defaultHash
+        return currentHash != defaultHash
+    }
+
+    fun verifyParentalPin(inputPin: String): Boolean {
+        val failedAttempts = prefs.getInt("pin_failed_attempts", 0)
+        val lockoutUntil = prefs.getLong("pin_lockout_until", 0L)
+        val now = System.currentTimeMillis()
+        if (now < lockoutUntil) return false
+
+        val defaultHash = hashPin("0000")
+        val storedHash = prefs.getString("parental_pin_hash", defaultHash) ?: defaultHash
+        val inputHash = hashPin(inputPin.trim())
+
+        if (inputHash == storedHash) {
+            prefs.edit().putInt("pin_failed_attempts", 0).putLong("pin_lockout_until", 0L).apply()
+            return true
+        } else {
+            val newAttempts = failedAttempts + 1
+            val editor = prefs.edit().putInt("pin_failed_attempts", newAttempts)
+            if (newAttempts >= 5) {
+                editor.putLong("pin_lockout_until", now + 60_000L) // 60s cooldown
+            }
+            editor.apply()
+            return false
+        }
+    }
+
+    fun setParentalPin(currentPin: String, newPin: String): Boolean {
+        if (!verifyParentalPin(currentPin)) return false
+        if (newPin.trim().length != 4) return false
+        val newHash = hashPin(newPin.trim())
+        return prefs.edit().putString("parental_pin_hash", newHash).commit()
+    }
+
+    fun isParentalLocked(): Boolean {
+        return prefs.getBoolean("parental_is_locked", true)
+    }
+
+    fun setParentalLocked(locked: Boolean) {
+        prefs.edit().putBoolean("parental_is_locked", locked).apply()
+    }
+
+    fun isAdultVaultUnlocked(): Boolean {
+        return !isParentalLocked() && prefs.getBoolean("parental_show_adult", false)
+    }
+
+    fun setAdultVaultUnlocked(unlocked: Boolean) {
+        prefs.edit()
+            .putBoolean("parental_is_locked", !unlocked)
+            .putBoolean("parental_show_adult", unlocked)
+            .apply()
     }
 }
