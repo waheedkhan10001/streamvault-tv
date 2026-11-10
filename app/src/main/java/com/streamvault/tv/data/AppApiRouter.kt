@@ -17,13 +17,32 @@ class AppApiRouter(
     private val syncEngine: CatalogSyncEngine
 ) {
 
-    fun handle(method: String, fullPath: String, bodyStr: String): String {
+    fun handle(method: String, fullPath: String, bodyStr: String, authHeader: String? = null): String {
         val path = if (fullPath.contains("?")) fullPath.substringBefore("?") else fullPath
         val queryString = if (fullPath.contains("?")) fullPath.substringAfter("?") else ""
         val queryParams = parseQueryParams(queryString)
 
+        val token = authHeader?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotBlank() }
+        val hasSession = !token.isNullOrBlank() || prefs.hasActiveSession()
+
+        // 6. Enforce in the native router too:
+        // /api/playlists*, /api/save-credentials, /api/sync-now, /api/profiles* return 401 when there is no session.
+        val isProtected = path.startsWith("/api/playlists") ||
+                path == "/api/save-credentials" ||
+                path == "/api/sync-now" ||
+                path.startsWith("/api/profiles")
+
+        if (isProtected && !hasSession) {
+            return """{"error":"Unauthorized - No active session","status":401,"ok":false}"""
+        }
+
         return try {
             when {
+                // 0. Session & Cloud Auth endpoints
+                method == "POST" && (path == "/api/session" || path == "/api/auth/session") -> handleSetSession(bodyStr)
+                (method == "DELETE" && (path == "/api/session" || path == "/api/auth/session")) ||
+                    (method == "POST" && path == "/api/auth/signout") -> handleSignOut()
+
                 // 1. App State Endpoint
                 method == "GET" && path == "/api/state" -> handleGetState()
 
@@ -94,7 +113,8 @@ class AppApiRouter(
             put("serverUrl", creds.serverUrl)
             put("username", creds.username)
             put("hasPassword", creds.password.isNotBlank())
-            put("displayName", creds.playlistName)
+            val primaryDisplayName = prefs.getAccountDisplayName().ifBlank { creds.playlistName.ifBlank { "User" } }
+            put("displayName", primaryDisplayName)
         }
 
         val parentalObj = JSONObject().apply {
@@ -498,9 +518,40 @@ class AppApiRouter(
     }
 
     private fun handleFactoryReset(): String {
+        prefs.clearAuthSession()
+        prefs.saveCredentials(XtreamCredentials())
         prefs.clearRecentSearches()
         prefs.setAdultVaultUnlocked(false)
-        return """{"ok":true}"""
+        db.clearCatalog()
+        return """{"ok":true,"message":"Factory reset complete"}"""
+    }
+
+    private fun handleSignOut(): String {
+        prefs.clearAuthSession()
+        prefs.saveCredentials(XtreamCredentials())
+        prefs.clearRecentSearches()
+        prefs.setAdultVaultUnlocked(false)
+        db.clearCatalog()
+        return """{"ok":true,"message":"Signed out successfully"}"""
+    }
+
+    private fun handleSetSession(bodyStr: String): String {
+        return try {
+            val json = JSONObject(bodyStr)
+            val token = json.optString("token", "").ifBlank { json.optString("authToken", "") }
+            val email = json.optString("email", "")
+            val displayName = json.optString("displayName", "")
+            if (token.isNotBlank()) {
+                prefs.setAuthToken(token)
+                if (email.isNotBlank()) prefs.setAccountEmail(email)
+                if (displayName.isNotBlank()) prefs.setAccountDisplayName(displayName)
+                """{"ok":true,"authenticated":true}"""
+            } else {
+                """{"ok":false,"error":"Token missing"}"""
+            }
+        } catch (e: Exception) {
+            """{"ok":false,"error":"${e.message}"}"""
+        }
     }
 
     private fun handleGetPlaylists(): String {

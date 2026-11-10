@@ -979,6 +979,21 @@ class StreamVaultDatabase(context: Context) :
         writableDatabase.delete("pinned_smart_rows", "row_id = ?", arrayOf(rowId))
     }
 
+    fun clearCatalog() {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("media_items", null, null)
+            db.delete("series_episodes", null, null)
+            db.delete("live_channels", null, null)
+            db.delete("pinned_smart_rows", null, null)
+            seedDefaultSmartRows(db)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     // Export & Import User Data (Watchlist, Watched, Resume Progress, Pinned Smart Rows)
     fun exportUserDataJson(): String {
         val root = JSONObject()

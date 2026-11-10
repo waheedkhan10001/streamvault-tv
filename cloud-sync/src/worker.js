@@ -465,6 +465,24 @@ export default {
         }, 200, corsHeaders);
       }
 
+      // C.1 Validate Session / Get Authenticated Account
+      if (method === 'GET' && pathname === '/api/auth/me') {
+        const auth = await authenticate(request, env);
+        if (!auth) {
+          return jsonResponse({ error: 'Unauthorized', authenticated: false }, 401, corsHeaders);
+        }
+        return jsonResponse({
+          ok: true,
+          authenticated: true,
+          account: {
+            accountId: auth.accountId,
+            email: auth.email,
+            isVerified: auth.isVerified,
+            displayName: auth.email.split('@')[0]
+          }
+        }, 200, corsHeaders);
+      }
+
       // D. Sign Out (Revoke Session Token)
       if (method === 'POST' && pathname === '/api/auth/signout') {
         const auth = await authenticate(request, env);

@@ -69,6 +69,58 @@ class PreferencesManager(context: Context) {
         _credentialsFlow.value = creds
     }
 
+    // --- Cloud Session & Authentication ---
+    fun getAuthToken(): String? {
+        return prefs.getString("auth_token", null)?.takeIf { it.isNotBlank() }
+    }
+
+    fun setAuthToken(token: String?) {
+        if (token.isNullOrBlank()) {
+            prefs.edit().remove("auth_token").apply()
+        } else {
+            prefs.edit().putString("auth_token", token.trim()).apply()
+        }
+    }
+
+    fun getAccountEmail(): String? {
+        return prefs.getString("account_email", null)
+    }
+
+    fun setAccountEmail(email: String?) {
+        if (email.isNullOrBlank()) {
+            prefs.edit().remove("account_email").apply()
+        } else {
+            prefs.edit().putString("account_email", email.trim()).apply()
+        }
+    }
+
+    fun getAccountDisplayName(): String {
+        val email = getAccountEmail() ?: ""
+        return prefs.getString("display_name", null)?.takeIf { it.isNotBlank() }
+            ?: if (email.contains("@")) email.substringBefore("@") else "User"
+    }
+
+    fun setAccountDisplayName(name: String?) {
+        if (name.isNullOrBlank()) {
+            prefs.edit().remove("display_name").apply()
+        } else {
+            prefs.edit().putString("display_name", name.trim()).apply()
+        }
+    }
+
+    fun hasActiveSession(): Boolean {
+        return !getAuthToken().isNullOrBlank()
+    }
+
+    fun clearAuthSession() {
+        prefs.edit()
+            .remove("auth_token")
+            .remove("account_email")
+            .remove("display_name")
+            .remove("account_id")
+            .apply()
+    }
+
     var lastFullSyncTimestamp: Long
         get() = prefs.getLong("last_full_sync_ts", 0L)
         set(value) = prefs.edit().putLong("last_full_sync_ts", value).apply()

@@ -879,7 +879,7 @@
       <div class="user-avatar-circle" id="sidebarAvatarCircle">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       </div>
-      <span class="user-profile-name" id="sidebarProfileName">Waleed</span>
+      <span class="user-profile-name" id="sidebarProfileName">Profile</span>
     </div>
     <button tabindex="0" id="sidebarSettingsBtn" class="settings-icon-btn tv-focusable" onclick="navigateToTab('SETTINGS')" onfocus="playNavSound()" title="Settings">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1074,21 +1074,17 @@
         Create New Cloud Account
       </button>
 
-      <div style="display:flex;align-items:center;gap:10px;margin:4px 0;">
-        <div style="flex:1;height:1px;background:#251C42;"></div>
-        <span style="font-size:10px;color:#6B7280;font-weight:700;text-transform:uppercase;">or continue as guest</span>
-        <div style="flex:1;height:1px;background:#251C42;"></div>
-      </div>
-
-      <button tabindex="0" id="welcomeBtnGuest" class="btn tv-focusable" style="background:transparent;border:1.5px dashed #4B5563;color:#D1D5DB;padding:9px 12px;font-size:12px;font-weight:700;" onclick="continueAsGuest()">
-        Enter IPTV Credentials Directly →
-      </button>
-
-      <div style="font-size:10px;color:#6B7280;text-align:center;line-height:1.35;margin-top:2px;">
+      <div style="font-size:10px;color:#6B7280;text-align:center;line-height:1.35;margin-top:6px;">
         Cloud accounts sync securely via Cloudflare Workers + D1 Serverless Database.
       </div>
     </div>
   </div>
+</div>
+
+<!-- Full-Screen "Who's Watching?" Profile Picker Overlay -->
+<div id="profilePickerOverlay" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:radial-gradient(circle at 50% 30%, #1A1230 0%, #090714 70%);z-index:99998;flex-direction:column;justify-content:center;align-items:center;">
+  <div style="font-size:26px;font-weight:900;color:#FFFFFF;margin-bottom:28px;letter-spacing:-0.5px;">Who's watching?</div>
+  <div id="profilePickerCards" style="display:flex;gap:20px;align-items:center;justify-content:center;flex-wrap:wrap;max-width:850px;"></div>
 </div>
 
 
@@ -1096,16 +1092,16 @@
 <div id="userProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#120E24;border:1.5px solid #251C42;border-radius:18px;max-width:420px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
-      <div id="userProfileAvatarInitial" style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#4C1D95);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:900;box-shadow:0 4px 14px rgba(124, 58, 237, 0.5);">W</div>
+      <div id="userProfileAvatarInitial" style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#4C1D95);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:900;box-shadow:0 4px 14px rgba(124, 58, 237, 0.5);">P</div>
       <div>
-        <div id="userProfileModalName" style="font-size:18px;font-weight:900;color:#FFFFFF;">Waleed Khan</div>
-        <div style="font-size:11px;color:#10B981;font-weight:700;">● Active Profile &middot; Master</div>
+        <div id="userProfileModalName" style="font-size:18px;font-weight:900;color:#FFFFFF;">Profile</div>
+        <div style="font-size:11px;color:#10B981;font-weight:700;">● Active Profile &middot; Primary</div>
       </div>
     </div>
     <div style="background:#0D0A1A;border:1px solid #1F1738;border-radius:10px;padding:10px 14px;margin-bottom:14px;">
       <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">IPTV Server</div>
-      <div id="userProfileModalIptvServer" style="font-size:13px;font-weight:700;color:#F3F4F6;">aadiflix.online:8080</div>
-      <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">User: <b id="userProfileModalIptvUser">waleed84838</b> &middot; Status: <span style="color:#10B981;font-weight:800;">Connected</span></div>
+      <div id="userProfileModalIptvServer" style="font-size:13px;font-weight:700;color:#F3F4F6;">No server configured</div>
+      <div style="font-size:11px;color:#9CA3AF;margin-top:2px;">User: <b id="userProfileModalIptvUser">—</b> &middot; Status: <span id="userProfileModalStatus" style="color:#10B981;font-weight:800;">Connected</span></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;">
       <button tabindex="0" id="userModalSettingsBtn" class="btn tv-focusable" style="justify-content:flex-start;padding:10px 14px;" onclick="closeUserProfileModal();navigateToTab('SETTINGS');">
@@ -1114,8 +1110,8 @@
       <button tabindex="0" class="btn tv-focusable" style="justify-content:flex-start;padding:10px 14px;" onclick="switchProfileFlow();">
         Switch Profile
       </button>
-      <button tabindex="0" class="btn tv-focusable" style="justify-content:flex-start;padding:10px 14px;color:#F87171;" onclick="closeUserProfileModal();openFactoryResetModal();">
-        Log Out
+      <button tabindex="0" class="btn tv-focusable" style="justify-content:flex-start;padding:10px 14px;color:#F87171;" onclick="closeUserProfileModal();confirmSignOutAccount();">
+        Sign Out
       </button>
       <button tabindex="0" class="btn tv-focusable" style="justify-content:center;padding:10px 14px;margin-top:4px;" onclick="closeUserProfileModal();">
         Back
@@ -1263,9 +1259,18 @@ window.fetch = function(input, init) {
         const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
         const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
         try {
-          const resStr = window.AndroidApp.handleApiRequest(method, input, body);
+          const resStr = (typeof window.AndroidApp.handleApiRequestWithAuth === 'function')
+            ? window.AndroidApp.handleApiRequestWithAuth(method, input, body, token)
+            : window.AndroidApp.handleApiRequest(method, input, body);
+          let status = 200;
+          try {
+            const parsed = JSON.parse(resStr);
+            if (parsed && (parsed.status === 401 || (parsed.error && parsed.error.includes('Unauthorized')))) {
+              status = 401;
+            }
+          } catch (_) {}
           return Promise.resolve(new Response(resStr, {
-            status: 200,
+            status: status,
             headers: { 'Content-Type': 'application/json; charset=utf-8' }
           }));
         } catch (err) {
@@ -1280,8 +1285,17 @@ window.fetch = function(input, init) {
         if (window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
           const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
           const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
-          const resStr = window.AndroidApp.handleApiRequest(method, input, body);
-          return new Response(resStr, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+          const resStr = (typeof window.AndroidApp.handleApiRequestWithAuth === 'function')
+            ? window.AndroidApp.handleApiRequestWithAuth(method, input, body, token)
+            : window.AndroidApp.handleApiRequest(method, input, body);
+          let status = 200;
+          try {
+            const parsed = JSON.parse(resStr);
+            if (parsed && (parsed.status === 401 || (parsed.error && parsed.error.includes('Unauthorized')))) {
+              status = 401;
+            }
+          } catch (_) {}
+          return new Response(resStr, { status: status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
         }
         throw err;
       });
@@ -1292,9 +1306,18 @@ window.fetch = function(input, init) {
       const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
       const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
       try {
-        const resStr = window.AndroidApp.handleApiRequest(method, input, body);
+        const resStr = (typeof window.AndroidApp.handleApiRequestWithAuth === 'function')
+          ? window.AndroidApp.handleApiRequestWithAuth(method, input, body, token)
+          : window.AndroidApp.handleApiRequest(method, input, body);
+        let status = 200;
+        try {
+          const parsed = JSON.parse(resStr);
+          if (parsed && (parsed.status === 401 || (parsed.error && parsed.error.includes('Unauthorized')))) {
+            status = 401;
+          }
+        } catch (_) {}
         return Promise.resolve(new Response(resStr, {
-          status: 200,
+          status: status,
           headers: { 'Content-Type': 'application/json; charset=utf-8' }
         }));
       } catch (err) {
@@ -1476,47 +1499,305 @@ function playNavSound() {
   } catch (_) {}
 }
 
-async function init() {
-  applyProfileTheme(localStorage.getItem('streamvault_active_theme') || 'purple');
-  renderSidebar();
+function getStoredAuthToken() {
+  return localStorage.getItem('sv_auth_token') || localStorage.getItem('streamvault_session_token') || '';
+}
 
-  // Fresh Install Check: If no cloud account and not in guest mode, show Welcome Screen immediately!
-  if (!checkAuthAndRoute()) {
-    setupMouseHoverFocus();
-    setupKeyboardNavigation();
+function getAccountDisplayName() {
+  try {
+    const acc = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
+    if (acc.displayName) return acc.displayName;
+    if (acc.email && acc.email.includes('@')) return acc.email.split('@')[0];
+  } catch (_) {}
+  if (appStatus?.credentials?.displayName) return appStatus.credentials.displayName;
+  return 'User';
+}
+
+function getDefaultProfile() {
+  return {
+    id: 'prof_primary',
+    name: getAccountDisplayName(),
+    avatarColor: '#7C3AED',
+    isKids: false,
+    theme: localStorage.getItem('streamvault_active_theme') || 'purple',
+    isPrimary: true
+  };
+}
+
+function hasActivePlaylist() {
+  const creds = appStatus?.credentials;
+  return !!(creds && creds.serverUrl && creds.username);
+}
+
+function isAppLockedForPlaylist() {
+  return !hasActivePlaylist() && !!getStoredAuthToken();
+}
+
+async function syncSessionToNative(token) {
+  if (!token) return;
+  try {
+    const acc = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
+    await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: token,
+        email: acc.email || '',
+        displayName: acc.displayName || getAccountDisplayName()
+      })
+    });
+  } catch (_) {}
+}
+
+async function validateSessionInBackground(token) {
+  if (!token) return;
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (res.status === 401) {
+      console.warn('[Auth] Session invalidated by server (401)');
+      await confirmSignOutAccount();
+    } else if (res.ok) {
+      const data = await res.json();
+      if (data && data.account) {
+        localStorage.setItem('streamvault_account', JSON.stringify(data.account));
+        updateUserProfileUI();
+      }
+    }
+  } catch (err) {
+    console.log('[Auth] Background validation offline, allowing cached session');
+  }
+}
+
+let tvPairingPollInterval = null;
+
+async function showWelcomeScreen() {
+  const overlay = document.getElementById('welcomeScreenOverlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+
+  const sb = document.getElementById('sidebar');
+  if (sb) sb.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/auth/request-code', { method: 'POST' }).catch(() => null);
+    if (res && res.ok) {
+      const data = await res.json();
+      const code = data.code || '';
+      if (code) {
+        const codeDisplay = document.getElementById('welcomeCodeDisplay');
+        if (codeDisplay) codeDisplay.innerText = code;
+        const qrImg = document.getElementById('welcomeQrImg');
+        if (qrImg) {
+          qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=6&data=${encodeURIComponent('https://streamvault-sync.streamvault-app.workers.dev/link?code=' + code)}`;
+        }
+        startTvPairingPolling(code);
+      }
+    }
+  } catch (err) {
+    console.warn('[Welcome] Could not load pairing code:', err);
+  }
+
+  setTimeout(() => {
+    document.getElementById('welcomeBtnSignIn')?.focus();
+  }, 100);
+}
+
+function hideWelcomeScreen() {
+  const overlay = document.getElementById('welcomeScreenOverlay');
+  if (overlay) overlay.style.display = 'none';
+  if (tvPairingPollInterval) {
+    clearInterval(tvPairingPollInterval);
+    tvPairingPollInterval = null;
+  }
+  const sb = document.getElementById('sidebar');
+  if (sb) sb.style.display = 'flex';
+}
+
+function startTvPairingPolling(code) {
+  if (tvPairingPollInterval) clearInterval(tvPairingPollInterval);
+  tvPairingPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/auth/poll-code?code=' + encodeURIComponent(code)).catch(() => null);
+      if (!res || !res.ok) return;
+      const data = await res.json();
+      if (data.status === 'paired' && data.exchangeToken) {
+        clearInterval(tvPairingPollInterval);
+        tvPairingPollInterval = null;
+        const exRes = await fetch('/api/auth/pair-exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, exchangeToken: data.exchangeToken })
+        });
+        if (exRes.ok) {
+          const exData = await exRes.json();
+          if (exData.token) {
+            await handleSuccessfulAuth(exData);
+          }
+        }
+      }
+    } catch (_) {}
+  }, 3000);
+}
+
+async function handleSuccessfulAuth(data) {
+  localStorage.setItem('sv_auth_token', data.token);
+  localStorage.setItem('streamvault_session_token', data.token);
+  const accountObj = {
+    accountId: data.accountId,
+    email: data.email,
+    displayName: data.displayName || (data.email ? data.email.split('@')[0] : 'User')
+  };
+  localStorage.setItem('streamvault_account', JSON.stringify(accountObj));
+
+  await syncSessionToNative(data.token);
+  closeCloudAuthModal();
+  hideWelcomeScreen();
+  showToast('✓ Welcome back! Cloud sync active.');
+
+  await checkAuthAndRoute();
+}
+
+function showProfilePicker(profiles, onSelect) {
+  const overlay = document.getElementById('profilePickerOverlay');
+  const cardsContainer = document.getElementById('profilePickerCards');
+  if (!overlay || !cardsContainer) {
+    if (onSelect && profiles[0]) onSelect(profiles[0]);
     return;
   }
 
-  try {
-    const res = await fetch('/api/state');
-    appStatus = await res.json();
-    updateUserProfileUI();
-    if (appStatus && appStatus.totalCatalogCount) {
-      document.getElementById('sidebarCatalogCount').innerText = `${appStatus.totalCatalogCount.toLocaleString()} Titles`;
-    }
-  } catch (_) {}
+  const lastId = localStorage.getItem('sv_last_profile_id');
+  cardsContainer.innerHTML = profiles.map((p, idx) => {
+    const isSelected = p.id === lastId || (!lastId && idx === 0);
+    const initial = (p.name || 'U').charAt(0).toUpperCase();
+    const color = p.avatarColor || '#7C3AED';
+    return `
+      <div tabindex="0" class="profile-picker-card tv-focusable" data-profile-id="${escapeHtml(p.id)}" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 20px;border-radius:14px;background:#151028;border:2px solid ${isSelected ? 'var(--theme-border, #A78BFA)' : '#281F48'};cursor:pointer;min-width:130px;transition:transform 0.2s, border-color 0.2s;">
+        <div style="width:72px;height:72px;border-radius:50%;background:${escapeHtml(color)};display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:32px;font-weight:900;box-shadow:0 6px 18px rgba(0,0,0,0.6);">
+          ${escapeHtml(initial)}
+        </div>
+        <div style="font-size:15px;font-weight:800;color:#FFFFFF;text-align:center;">
+          ${escapeHtml(p.name)}
+          ${p.isKids ? '<div style="font-size:10px;color:#F59E0B;font-weight:700;margin-top:2px;">KIDS</div>' : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
 
-  // Check if IPTV credentials are configured
-  const hasIptv = !!(appStatus?.credentials?.serverUrl && appStatus?.credentials?.username);
-  if (!hasIptv) {
-    showToast('⚙ Cloud account active! Please enter your IPTV provider in Settings.');
-    await navigateToTab('SETTINGS');
-  } else {
-    await navigateToTab('HOME');
+  overlay.style.display = 'flex';
+
+  const cards = cardsContainer.querySelectorAll('.profile-picker-card');
+  cards.forEach(card => {
+    card.onclick = () => {
+      const pid = card.getAttribute('data-profile-id');
+      const chosen = profiles.find(p => p.id === pid) || profiles[0];
+      overlay.style.display = 'none';
+      if (onSelect) onSelect(chosen);
+    };
+  });
+
+  setTimeout(() => {
+    const target = cardsContainer.querySelector('.profile-picker-card[style*="var(--theme-border"]') || cards[0];
+    if (target) target.focus();
+  }, 60);
+}
+
+async function activateProfileAndEnterApp(profile) {
+  currentActiveProfile = { ...profile };
+  sessionStorage.setItem('sv_session_profile_active', 'true');
+  localStorage.setItem('sv_last_profile_id', profile.id);
+  if (profile.theme) applyProfileTheme(profile.theme);
+  updateUserProfileUI();
+  if (appStatus && appStatus.totalCatalogCount) {
+    const catCount = document.getElementById('sidebarCatalogCount');
+    if (catCount) catCount.innerText = `${appStatus.totalCatalogCount.toLocaleString()} Titles`;
   }
-
+  await navigateToTab('HOME');
   const activeNav = document.querySelector('.nav-btn.active');
   if (activeNav) activeNav.focus();
   setupMouseHoverFocus();
   setupKeyboardNavigation();
 }
 
+async function checkAuthAndRoute() {
+  const token = getStoredAuthToken();
+  if (!token) {
+    showWelcomeScreen();
+    return false;
+  }
+
+  // Session exists: revalidate in background, sync to native router
+  validateSessionInBackground(token);
+  await syncSessionToNative(token);
+
+  // Load app state
+  try {
+    const res = await fetch('/api/state');
+    if (res.ok) {
+      appStatus = await res.json();
+    }
+  } catch (_) {}
+
+  // Check if IPTV playlist configured
+  const hasIptv = hasActivePlaylist();
+  if (!hasIptv) {
+    renderSidebar(true);
+    showToast('⚙ Cloud account active! Please enter your IPTV provider in Settings.');
+    await navigateToTab('SETTINGS');
+    const activeNav = document.getElementById('sidebarSettingsBtn') || document.querySelector('.nav-btn.active');
+    if (activeNav) activeNav.focus();
+    setupMouseHoverFocus();
+    setupKeyboardNavigation();
+    return true;
+  }
+
+  // Playlist is active -> load profiles
+  let profilesList = [];
+  try {
+    const pRes = await fetch('/api/profiles');
+    if (pRes.ok) {
+      const pData = await pRes.json();
+      profilesList = pData.profiles || [];
+    }
+  } catch (_) {}
+
+  renderSidebar(false);
+
+  // If > 1 profile and not yet picked this session, show profile picker
+  const isProfileActiveThisSession = sessionStorage.getItem('sv_session_profile_active') === 'true';
+  if (profilesList.length > 1 && !isProfileActiveThisSession) {
+    showProfilePicker(profilesList, async (selectedProfile) => {
+      await activateProfileAndEnterApp(selectedProfile);
+    });
+    return true;
+  }
+
+  const lastProfileId = localStorage.getItem('sv_last_profile_id');
+  const targetProf = profilesList.find(p => p.id === lastProfileId) || profilesList[0] || getDefaultProfile();
+  await activateProfileAndEnterApp(targetProf);
+  return true;
+}
+
+async function init() {
+  applyProfileTheme(localStorage.getItem('streamvault_active_theme') || 'purple');
+  renderSidebar();
+
+  const isAuthedAndRouted = await checkAuthAndRoute();
+  if (!isAuthedAndRouted) {
+    setupMouseHoverFocus();
+    setupKeyboardNavigation();
+    return;
+  }
+}
+
 
 let previousTab = 'HOME';
 
-function renderSidebar() {
+function renderSidebar(lockedToPlaylist = false) {
   const container = document.getElementById('navList');
   if (!container) return;
+  const isLocked = lockedToPlaylist || isAppLockedForPlaylist();
   const items = [...NAV_ITEMS];
   const isAdultUnlocked = appStatus?.parentalControl && !appStatus.parentalControl.isLocked && appStatus.parentalControl.showAdult;
   if (isAdultUnlocked) {
@@ -1526,19 +1807,32 @@ function renderSidebar() {
       svg: `<svg viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1.5" fill="#F59E0B"/></svg>`
     });
   }
-  container.innerHTML = items.map((item) => `
-    <div tabindex="0" class="nav-btn tv-focusable ${currentTab === item.id ? 'active' : ''}"
-         data-tab="${item.id}"
-         onclick="navigateToTab('${item.id}')"
-         onfocus="playNavSound()"
-         title="${item.label}">
-      <div class="nav-icon">${item.svg}</div>
-      <span class="nav-label">${item.label}</span>
-    </div>
-  `).join('');
+  container.innerHTML = items.map((item) => {
+    const disabledAttr = isLocked ? 'style="opacity:0.35;pointer-events:none;"' : '';
+    return `
+      <div tabindex="${isLocked ? '-1' : '0'}" class="nav-btn tv-focusable ${currentTab === item.id ? 'active' : ''}"
+           data-tab="${item.id}"
+           ${disabledAttr}
+           onclick="navigateToTab('${item.id}')"
+           onfocus="playNavSound()"
+           title="${item.label}">
+        <div class="nav-icon">${item.svg}</div>
+        <span class="nav-label">${item.label}</span>
+      </div>
+    `;
+  }).join('');
 
   const userPill = document.getElementById('sidebarUserProfilePill') || document.querySelector('.user-profile-pill');
   if (userPill) {
+    if (isLocked) {
+      userPill.style.opacity = '0.35';
+      userPill.style.pointerEvents = 'none';
+      userPill.tabIndex = -1;
+    } else {
+      userPill.style.opacity = '1';
+      userPill.style.pointerEvents = 'auto';
+      userPill.tabIndex = 0;
+    }
     if (currentTab === 'PROFILE') userPill.classList.add('active');
     else userPill.classList.remove('active');
   }
@@ -1551,6 +1845,15 @@ function renderSidebar() {
 }
 
 async function navigateToTab(tabId, customFilter = null, focusFirstCard = false) {
+  if (!getStoredAuthToken()) {
+    showWelcomeScreen();
+    return;
+  }
+  if (isAppLockedForPlaylist() && tabId !== 'SETTINGS') {
+    showToast('⚙ Please enter your IPTV provider in Settings.');
+    tabId = 'SETTINGS';
+  }
+
   if (currentTab !== 'SETTINGS' && currentTab !== 'PROFILE' && (tabId === 'SETTINGS' || tabId === 'PROFILE')) {
     previousTab = currentTab;
   }
@@ -2529,7 +2832,7 @@ async function loadWatchlist(vp) {
 }
 
 // 4.5. USER PROFILES & PERSONAL PREFERENCES (Isolated from Account & IPTV credentials)
-let currentActiveProfile = { id: 'prof_1', name: 'Waleed Khan', avatarColor: '#7C3AED', isKids: false, theme: 'purple' };
+let currentActiveProfile = getDefaultProfile();
 
 function applyProfileTheme(themeKey) {
   document.body.classList.remove('theme-netflix', 'theme-disney', 'theme-prime');
@@ -2562,12 +2865,11 @@ async function loadProfile(vp) {
   } catch (_) {}
 
   const savedTheme = localStorage.getItem('streamvault_active_theme') || 'purple';
+  const primaryName = getAccountDisplayName();
   const profiles = (profilesData && profilesData.profiles && profilesData.profiles.length)
     ? profilesData.profiles
     : [
-        { id: 'prof_1', name: (appStatus?.credentials?.displayName || 'Waleed Khan'), avatarColor: '#7C3AED', isKids: false, isActive: true, theme: savedTheme },
-        { id: 'prof_2', name: 'Family', avatarColor: '#059669', isKids: false, isActive: false, theme: 'netflix' },
-        { id: 'prof_3', name: 'Kids', avatarColor: '#D97706', isKids: true, isActive: false, theme: 'disney' }
+        { id: 'prof_primary', name: primaryName, avatarColor: '#7C3AED', isKids: false, isActive: true, isPrimary: true, theme: savedTheme }
       ];
   const activeProf = profiles.find(p => p.id === profilesData.activeProfileId) || profiles[0];
   if (!activeProf.theme) activeProf.theme = savedTheme;
@@ -3343,22 +3645,26 @@ function openFactoryResetModal() {
 
 function updateUserProfileUI() {
   const creds = (appStatus && appStatus.credentials) || {};
-  const name = creds.displayName || 'Waleed Khan';
+  const name = currentActiveProfile?.name || getAccountDisplayName();
   const pillName = document.querySelector('.user-profile-name');
   if (pillName) pillName.innerText = name;
-  const initial = (name[0] || 'W').toUpperCase();
+  const initial = (name[0] || 'U').toUpperCase();
   const avatarInit = document.getElementById('userProfileAvatarInitial');
   if (avatarInit) avatarInit.innerText = initial;
   const modalName = document.getElementById('userProfileModalName');
   if (modalName) modalName.innerText = name;
   const modalUser = document.getElementById('userProfileModalIptvUser');
-  if (modalUser) modalUser.innerText = creds.username || 'user';
+  if (modalUser) modalUser.innerText = creds.username || '—';
   const modalServer = document.getElementById('userProfileModalIptvServer');
-  if (modalServer && creds.serverUrl) {
-    try {
-      modalServer.innerText = new URL(creds.serverUrl).host;
-    } catch (_) {
-      modalServer.innerText = creds.serverUrl;
+  if (modalServer) {
+    if (creds.serverUrl) {
+      try {
+        modalServer.innerText = new URL(creds.serverUrl).host;
+      } catch (_) {
+        modalServer.innerText = creds.serverUrl;
+      }
+    } else {
+      modalServer.innerText = 'No server configured';
     }
   }
 }
@@ -3571,21 +3877,7 @@ async function handleCloudAuthSubmit(e) {
         console.log('[StreamVault Cloud] Dev verification code:', data.devCode);
       }
     } else if (data.success && data.token) {
-      localStorage.setItem('sv_auth_token', data.token);
-      localStorage.setItem('streamvault_session_token', data.token);
-      localStorage.setItem('streamvault_account', JSON.stringify({
-        accountId: data.accountId,
-        email: data.email
-      }));
-      closeCloudAuthModal();
-      hideWelcomeScreen();
-      showToast('✓ Welcome back! Cloud sync active.');
-      const vp = document.getElementById('mainViewport');
-      if (vp && currentTab === 'SETTINGS') {
-        loadSettings(vp);
-      } else {
-        await navigateToTab('HOME');
-      }
+      await handleSuccessfulAuth(data);
     } else {
       if (statusMsg) {
         statusMsg.style.color = '#EF4444';
@@ -3623,21 +3915,7 @@ async function handleVerifyCodeSubmit(e) {
     });
     const data = await res.json();
     if (data.success && data.token) {
-      localStorage.setItem('sv_auth_token', data.token);
-      localStorage.setItem('streamvault_session_token', data.token);
-      localStorage.setItem('streamvault_account', JSON.stringify({
-        accountId: data.accountId,
-        email: data.email
-      }));
-      closeCloudAuthModal();
-      hideWelcomeScreen();
-      showToast('✓ Account verified and activated! Welcome to StreamVault TV.');
-      const vp = document.getElementById('mainViewport');
-      if (vp && currentTab === 'SETTINGS') {
-        loadSettings(vp);
-      } else {
-        await navigateToTab('SETTINGS');
-      }
+      await handleSuccessfulAuth(data);
     } else {
       if (statusMsg) {
         statusMsg.style.color = '#EF4444';
@@ -3705,7 +3983,7 @@ function closeSignOutModal() {
 
 async function confirmSignOutAccount() {
   playNavSound();
-  const token = localStorage.getItem('sv_auth_token') || localStorage.getItem('streamvault_session_token');
+  const token = getStoredAuthToken();
   if (token) {
     try {
       await fetch(CLOUD_SYNC_BASE + '/api/auth/signout', {
@@ -3717,12 +3995,24 @@ async function confirmSignOutAccount() {
   localStorage.removeItem('sv_auth_token');
   localStorage.removeItem('streamvault_session_token');
   localStorage.removeItem('streamvault_account');
+  localStorage.removeItem('sv_last_profile_id');
+  localStorage.removeItem('streamvault_active_theme');
+  sessionStorage.clear();
+
+  try {
+    await fetch('/api/session', { method: 'DELETE' }).catch(() => {});
+  } catch (_) {}
+  try {
+    await fetch('/api/factory-reset', { method: 'POST' }).catch(() => {});
+  } catch (_) {}
+
+  appStatus = null;
+  homeData = null;
+  currentActiveProfile = null;
   closeSignOutModal();
-  showToast('✓ Signed out of Cloud Account');
-  const vp = document.getElementById('mainViewport');
-  if (vp && currentTab === 'SETTINGS') {
-    loadSettings(vp);
-  }
+  closeUserProfileModal();
+  showToast('✓ Signed out. TV restored to clean state.');
+  showWelcomeScreen();
 }
 
 async function triggerCloudSync() {
@@ -5271,12 +5561,25 @@ function fastNavigate(current, key) {
     }
     if (current.id === 'welcomeBtnSignUp') {
       if (key === 'ArrowUp') { document.getElementById('welcomeBtnSignIn')?.focus(); playNavSound(); return true; }
-      if (key === 'ArrowDown') { document.getElementById('welcomeBtnGuest')?.focus(); playNavSound(); return true; }
       return true;
     }
-    if (current.id === 'welcomeBtnGuest') {
-      if (key === 'ArrowUp') { document.getElementById('welcomeBtnSignUp')?.focus(); playNavSound(); return true; }
+    return true;
+  }
+
+  // 0.15. Profile Picker Overlay Navigation Flow
+  const pickerOverlay = document.getElementById('profilePickerOverlay');
+  if (pickerOverlay && pickerOverlay.style.display === 'flex') {
+    const cards = Array.from(pickerOverlay.querySelectorAll('.profile-picker-card'));
+    const idx = cards.indexOf(current);
+    if (idx === -1) {
+      if (cards[0]) { cards[0].focus(); playNavSound(); return true; }
       return true;
+    }
+    if (key === 'ArrowRight' && idx < cards.length - 1) {
+      cards[idx + 1].focus(); playNavSound(); return true;
+    }
+    if (key === 'ArrowLeft' && idx > 0) {
+      cards[idx - 1].focus(); playNavSound(); return true;
     }
     return true;
   }
@@ -6689,6 +6992,8 @@ function navigateSpatial(key) {
     container = document.getElementById('playlistModal');
   } else if (document.getElementById('cloudAuthModal') && document.getElementById('cloudAuthModal').style.display === 'flex') {
     container = document.getElementById('cloudAuthModal');
+  } else if (document.getElementById('profilePickerOverlay') && document.getElementById('profilePickerOverlay').style.display === 'flex') {
+    container = document.getElementById('profilePickerOverlay');
   } else if (document.getElementById('welcomeScreenOverlay') && document.getElementById('welcomeScreenOverlay').style.display === 'flex') {
     container = document.getElementById('welcomeScreenOverlay');
   } else if (document.getElementById('factoryResetModal') && document.getElementById('factoryResetModal').style.display === 'flex') {

@@ -183,6 +183,12 @@ class MainActivity : Activity() {
         fun handleApiRequest(method: String, path: String, body: String): String {
             return activity.apiRouter.handle(method, path, body)
         }
+
+        @JavascriptInterface
+        fun handleApiRequestWithAuth(method: String, path: String, body: String, authToken: String?): String {
+            val authHeader = if (!authToken.isNullOrBlank()) "Bearer $authToken" else null
+            return activity.apiRouter.handle(method, path, body, authHeader)
+        }
     }
 
     private val VOICE_SEARCH_REQUEST_CODE = 1001
