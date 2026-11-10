@@ -71,6 +71,12 @@ class AppApiRouter(
                 // 14. Factory Reset
                 method == "POST" && path == "/api/factory-reset" -> handleFactoryReset()
 
+                // 15. Playlists Management
+                method == "GET" && path == "/api/playlists" -> handleGetPlaylists()
+                method == "POST" && path == "/api/playlists" -> handleAddPlaylist(bodyStr)
+                method == "PUT" && path.startsWith("/api/playlists") -> handleUpdatePlaylist(bodyStr)
+                method == "DELETE" && path.startsWith("/api/playlists") -> handleDeletePlaylist(path)
+
                 else -> """{"error":"Endpoint not found","path":"$path"}"""
             }
         } catch (e: Exception) {
@@ -495,6 +501,62 @@ class AppApiRouter(
         prefs.clearRecentSearches()
         prefs.setAdultVaultUnlocked(false)
         return """{"ok":true}"""
+    }
+
+    private fun handleGetPlaylists(): String {
+        val creds = prefs.loadCredentials()
+        val (enriched, total) = db.getEnrichmentCounts()
+        val syncState = syncEngine.syncState.value
+        val playlistsArr = JSONArray()
+
+        if (creds.serverUrl.isNotBlank() && creds.username.isNotBlank()) {
+            val pl = JSONObject().apply {
+                put("playlist_id", "local_pl_primary")
+                put("name", creds.playlistName.ifBlank { "Primary IPTV" })
+                put("server_url", creds.serverUrl)
+                put("username", creds.username)
+                put("is_enabled", 1)
+                put("status", when {
+                    syncState.isSyncing -> "syncing"
+                    syncState.errorMessage != null -> "failed"
+                    else -> "working"
+                })
+                put("total_titles", total)
+                put("enriched_titles", enriched)
+                put("last_sync_at", System.currentTimeMillis())
+            }
+            playlistsArr.put(pl)
+        }
+
+        return JSONObject().apply {
+            put("success", true)
+            put("playlists", playlistsArr)
+        }.toString()
+    }
+
+    private fun handleAddPlaylist(bodyStr: String): String {
+        handleSaveCredentials(bodyStr)
+        return JSONObject().apply {
+            put("success", true)
+            put("message", "Playlist added")
+        }.toString()
+    }
+
+    private fun handleUpdatePlaylist(bodyStr: String): String {
+        handleSaveCredentials(bodyStr)
+        return JSONObject().apply {
+            put("success", true)
+            put("message", "Playlist updated")
+        }.toString()
+    }
+
+    private fun handleDeletePlaylist(path: String): String {
+        val current = prefs.loadCredentials()
+        prefs.saveCredentials(current.copy(serverUrl = "", username = "", password = ""))
+        return JSONObject().apply {
+            put("success", true)
+            put("message", "Playlist removed")
+        }.toString()
     }
 
     // --- Helpers ---

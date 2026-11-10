@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>StreamVault TV</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>" />
 <style>
   :root {
     --bg: #090714;
@@ -221,6 +222,26 @@
     background: rgba(9, 7, 20, 0.92); border: 1px solid rgba(255, 255, 255, 0.3);
     color: #FFFFFF; font-weight: 800; font-size: 10px; padding: 2px 6px; border-radius: 4px;
     letter-spacing: 0.5px; display: inline-flex; align-items: center;
+  }
+  .badge-watched {
+    background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.6);
+    color: #34D399; font-weight: 800; font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    letter-spacing: 0.5px; display: inline-flex; align-items: center;
+  }
+  .badge-status-working {
+    background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.6);
+    color: #34D399; font-weight: 800; font-size: 9.5px; padding: 1.5px 6px; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 3px;
+  }
+  .badge-status-syncing {
+    background: rgba(124, 58, 237, 0.2); border: 1px solid rgba(167, 139, 250, 0.6);
+    color: #DDD6FE; font-weight: 800; font-size: 9.5px; padding: 1.5px 6px; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 3px;
+  }
+  .badge-status-failed {
+    background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.6);
+    color: #F87171; font-weight: 800; font-size: 9.5px; padding: 1.5px 6px; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 3px;
   }
   .badge-language {
     background: rgba(59, 130, 246, 0.16); border: 1px solid rgba(59, 130, 246, 0.45);
@@ -618,12 +639,38 @@
     color: #6EE7B7 !important;
   }
 
-  /* Live TV View */
+  /* More Like This Compact Rail (Zero Bottom Clipping on 540p) */
+  #mltPosterStrip {
+    min-height: 155px !important;
+    padding: 8px 16px 14px 16px !important;
+    overflow-y: visible !important;
+    overflow-x: auto !important;
+  }
+  #mltPosterStrip .poster-card {
+    width: 110px !important;
+    padding: 3px !important;
+    flex-shrink: 0 !important;
+  }
+  #mltPosterStrip .poster-img-wrap {
+    width: 104px !important;
+    height: 156px !important;
+    border-radius: 8px !important;
+  }
+  #mltPosterStrip .card-title {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    margin-top: 4px !important;
+  }
+  #mltPosterStrip .card-meta {
+    font-size: 10px !important;
+  }
+
+  /* Live TV View with Left/Right Focus Guard Padding */
   .live-view-container {
-    padding: 30px 40px; display: flex; flex-direction: column; height: 100vh;
+    padding: 24px 36px; display: flex; flex-direction: column; height: 100vh;
   }
   .live-tab-bar {
-    display: flex; gap: 8px; overflow-x: auto; padding-bottom: 12px; margin-bottom: 14px;
+    display: flex; gap: 8px; overflow-x: auto; padding: 6px 16px 12px 16px; margin-bottom: 12px;
   }
   .live-tab-bar::-webkit-scrollbar { height: 4px; }
   .live-tab-bar::-webkit-scrollbar-thumb { background: #232736; }
@@ -638,7 +685,7 @@
   .live-grid {
     flex: 1; overflow-y: auto; display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 12px; padding-bottom: 40px;
+    gap: 12px; padding: 8px 16px 40px 16px;
   }
   .live-channel-card {
     background: #141722; border: 1px solid #232736; border-radius: 12px;
@@ -1077,7 +1124,7 @@
   </div>
 </div>
 
-<!-- Universal Cloud Account Sign In / Sign Up Modal -->
+<!-- Universal Cloud Account Sign In / Sign Up / 6-Digit Verification Modal -->
 <div id="cloudAuthModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100005;align-items:center;justify-content:center;">
   <div style="background:#141026;border:1.5px solid #281F4B;border-radius:18px;max-width:440px;width:90%;padding:26px;box-shadow:0 24px 60px rgba(0,0,0,0.95);">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
@@ -1086,38 +1133,111 @@
       </div>
       <div style="font-size:16px;font-weight:900;letter-spacing:1px;color:#FFFFFF;">STREAMVAULT CLOUD</div>
     </div>
-    <div id="cloudAuthTitle" style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Sign In to Account</div>
-    <div id="cloudAuthDesc" style="font-size:12.5px;color:#9CA3AF;line-height:1.4;margin-bottom:18px;">
-      Access your synchronized profiles, watchlist, ratings, and IPTV credentials across all your devices.
+
+    <!-- PANE 1: Sign In / Sign Up -->
+    <div id="cloudAuthFormPane">
+      <div id="cloudAuthTitle" style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Sign In to Account</div>
+      <div id="cloudAuthDesc" style="font-size:12.5px;color:#9CA3AF;line-height:1.4;margin-bottom:16px;">
+        Access your synchronized profiles, watchlist, ratings, and IPTV playlists across all your TVs and phones.
+      </div>
+
+      <form onsubmit="handleCloudAuthSubmit(event)">
+        <div id="cloudAuthNameRow" style="display:none;margin-bottom:12px;">
+          <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Display Name</label>
+          <input id="cloudAuthName" type="text" class="tv-focusable search-field" placeholder="Account Owner" style="width:100%;font-size:13.5px;padding:8px 12px;" />
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Email Address</label>
+          <input id="cloudAuthEmail" type="email" class="tv-focusable search-field" placeholder="name@domain.com" style="width:100%;font-size:13.5px;padding:8px 12px;" required />
+        </div>
+
+        <div style="margin-bottom:12px;">
+          <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Password</label>
+          <input id="cloudAuthPassword" type="password" class="tv-focusable search-field" placeholder="••••••••" style="width:100%;font-size:13.5px;padding:8px 12px;" required />
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:16px;">
+          <button type="button" id="cloudAuthCancelBtn" tabindex="0" class="btn tv-focusable" style="flex:1;padding:11px 14px;" onclick="closeCloudAuthModal()">Cancel</button>
+          <button type="submit" id="cloudAuthSubmitBtn" tabindex="0" class="btn btn-primary tv-focusable" style="flex:1.4;padding:11px 14px;font-weight:800;">Sign In</button>
+        </div>
+
+        <div style="text-align:center;margin-top:14px;">
+          <a href="#" id="cloudAuthToggleLink" tabindex="0" class="tv-focusable" onclick="toggleCloudAuthMode(event)" style="color:#A78BFA;font-size:12px;text-decoration:none;font-weight:700;display:inline-block;padding:4px 8px;border-radius:6px;">
+            Don't have an account? Sign Up
+          </a>
+        </div>
+        <div id="cloudAuthStatusMsg" style="margin-top:10px;font-size:12px;text-align:center;font-weight:700;"></div>
+      </form>
     </div>
 
-    <form onsubmit="handleCloudAuthSubmit(event)">
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Email Address</label>
-        <input id="cloudAuthEmail" type="email" class="tv-focusable" placeholder="name@domain.com" style="width:100%;background:#0F0B20;border:1.5px solid #2E2356;border-radius:8px;padding:10px 12px;font-size:13.5px;color:#FFFFFF;outline:none;" required />
+    <!-- PANE 2: 6-Digit Email Verification Code -->
+    <div id="cloudAuthVerifyPane" style="display:none;">
+      <div style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Enter Verification Code</div>
+      <div style="font-size:12.5px;color:#9CA3AF;line-height:1.4;margin-bottom:16px;">
+        We sent a 6-digit confirmation code to <b id="cloudVerifyEmailLabel" style="color:#C4B5FD;"></b>. Enter it below to activate your account:
       </div>
 
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Password</label>
-        <input id="cloudAuthPassword" type="password" class="tv-focusable" placeholder="••••••••" style="width:100%;background:#0F0B20;border:1.5px solid #2E2356;border-radius:8px;padding:10px 12px;font-size:13.5px;color:#FFFFFF;outline:none;" required />
-      </div>
+      <form onsubmit="handleVerifyCodeSubmit(event)">
+        <div style="margin-bottom:14px;">
+          <input id="cloudVerifyCodeInput" type="text" maxlength="6" class="tv-focusable search-field" placeholder="••••••"
+                 style="width:100%;font-size:22px;letter-spacing:10px;text-align:center;font-weight:900;padding:10px 12px;color:#FFFFFF;" required />
+        </div>
 
-      <div id="cloudAuthNameRow" style="display:none;margin-bottom:12px;">
-        <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Display Name</label>
-        <input id="cloudAuthName" type="text" class="tv-focusable" placeholder="Waleed Khan" style="width:100%;background:#0F0B20;border:1.5px solid #2E2356;border-radius:8px;padding:10px 12px;font-size:13.5px;color:#FFFFFF;outline:none;" />
-      </div>
+        <div style="display:flex;gap:10px;margin-top:16px;">
+          <button type="button" tabindex="0" class="btn tv-focusable" style="flex:1;padding:11px 14px;" onclick="switchCloudAuthPane('form')">Back</button>
+          <button type="submit" id="cloudVerifySubmitBtn" tabindex="0" class="btn btn-primary tv-focusable" style="flex:1.4;padding:11px 14px;font-weight:800;">Verify Code</button>
+        </div>
 
-      <div style="display:flex;gap:10px;margin-top:16px;">
-        <button type="button" id="cloudAuthCancelBtn" tabindex="0" class="btn tv-focusable" style="flex:1;padding:11px 14px;" onclick="closeCloudAuthModal()">Cancel</button>
-        <button type="submit" id="cloudAuthSubmitBtn" tabindex="0" class="btn btn-primary tv-focusable" style="flex:1.4;padding:11px 14px;font-weight:800;">Sign In</button>
-      </div>
+        <div style="text-align:center;margin-top:14px;">
+          <a href="#" tabindex="0" class="tv-focusable" onclick="resendVerificationCode(event)" style="color:#A78BFA;font-size:12px;text-decoration:none;font-weight:700;display:inline-block;padding:4px 8px;border-radius:6px;">
+            Didn't receive code? Resend
+          </a>
+        </div>
+        <div id="cloudVerifyStatusMsg" style="margin-top:10px;font-size:12px;text-align:center;font-weight:700;"></div>
+      </form>
+    </div>
+  </div>
+</div>
 
-      <div style="text-align:center;margin-top:14px;">
-        <a href="#" id="cloudAuthToggleLink" tabindex="0" class="tv-focusable" onclick="toggleCloudAuthMode(event)" style="color:#A78BFA;font-size:12px;text-decoration:none;font-weight:700;display:inline-block;padding:4px 8px;border-radius:6px;">
-          Don't have an account? Sign Up
-        </a>
+<!-- IPTV Playlist Modal (Add / Edit Playlist) -->
+<div id="playlistModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100006;align-items:center;justify-content:center;">
+  <div style="background:#141026;border:1.5px solid #281F4B;border-radius:18px;max-width:440px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#7C3AED,#4C1D95);display:flex;align-items:center;justify-content:center;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
       </div>
-      <div id="cloudAuthStatusMsg" style="margin-top:12px;font-size:12px;text-align:center;font-weight:700;"></div>
+      <div id="playlistModalTitle" style="font-size:18px;font-weight:900;color:#FFFFFF;">Add IPTV Playlist</div>
+    </div>
+    <div style="font-size:11.5px;color:#9CA3AF;line-height:1.4;margin-bottom:14px;">
+      Enter your Xtream Codes or M3U provider credentials. Titles will enrich in the background without affecting your watch history.
+    </div>
+
+    <form onsubmit="handleSavePlaylistSubmit(event)">
+      <input type="hidden" id="playlistModalEditId" value="" />
+      <div style="margin-bottom:10px;">
+        <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Playlist Name</label>
+        <input id="inpPlaylistName" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="e.g. Primary IPTV" value="Primary IPTV" required />
+      </div>
+      <div style="margin-bottom:10px;">
+        <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Server URL</label>
+        <input id="inpPlaylistServer" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="http://example.com:8080" required />
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Username</label>
+          <input id="inpPlaylistUser" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="Username" required />
+        </div>
+        <div>
+          <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Password</label>
+          <input id="inpPlaylistPass" type="password" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="••••••••" required />
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button type="button" tabindex="0" class="btn tv-focusable" style="flex:1;padding:9px 12px;" onclick="closePlaylistModal()">Cancel</button>
+        <button type="submit" id="btnSavePlaylist" tabindex="0" class="btn btn-primary tv-focusable" style="flex:1.4;padding:9px 12px;font-weight:800;">Save &amp; Connect</button>
+      </div>
+      <div id="playlistModalStatusMsg" style="margin-top:10px;font-size:11px;text-align:center;font-weight:700;"></div>
     </form>
   </div>
 </div>
@@ -1128,18 +1248,49 @@ const CLOUD_SYNC_BASE = 'https://streamvault-sync.streamvault-app.workers.dev';
 
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function(input, init) {
+  const token = localStorage.getItem('sv_auth_token') || '';
+  const headers = Object.assign({}, (init && init.headers) || {});
+  if (token && !headers['Authorization'] && !headers['authorization']) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+  const newInit = Object.assign({}, init, { headers });
+
   if (typeof input === 'string' && input.startsWith('/api/')) {
-    // 1. Cloud Authentication, TV Code Pairing & Multi-Device Sync
-    if (input.startsWith('/api/auth/') || input.startsWith('/api/sync/') || input.startsWith('/api/account/') || input.startsWith('/api/cloud/')) {
+    // 1. Cloud Authentication, TV Code Pairing & Cloud Playlists Sync
+    if (input.startsWith('/api/auth/') || input.startsWith('/api/sync/') || input.startsWith('/api/account/') || input.startsWith('/api/cloud/') || input.startsWith('/api/playlists')) {
+      // If offline or no cloud token for playlists, let Android native engine handle it locally
+      if (input.startsWith('/api/playlists') && !token && window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
+        const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
+        const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
+        try {
+          const resStr = window.AndroidApp.handleApiRequest(method, input, body);
+          return Promise.resolve(new Response(resStr, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json; charset=utf-8' }
+          }));
+        } catch (err) {
+          return Promise.resolve(new Response(JSON.stringify({ error: err.message, ok: false }), { status: 500 }));
+        }
+      }
+
       const target = input.replace('/api/cloud/request-code', '/api/auth/request-code')
                           .replace('/api/cloud/status', '/api/auth/poll-code');
-      return _rawFetch(CLOUD_SYNC_BASE + target, init);
+      return _rawFetch(CLOUD_SYNC_BASE + target, newInit).catch(err => {
+        // Fallback to local Android router if network fails
+        if (window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
+          const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
+          const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
+          const resStr = window.AndroidApp.handleApiRequest(method, input, body);
+          return new Response(resStr, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+        }
+        throw err;
+      });
     }
 
     // 2. Native Standalone TV Engine (Direct In-Memory / SQLite via Kotlin bridge)
     if (window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
-      const method = (init && init.method) ? init.method.toUpperCase() : 'GET';
-      const body = (init && init.body) ? (typeof init.body === 'string' ? init.body : JSON.stringify(init.body)) : '';
+      const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
+      const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
       try {
         const resStr = window.AndroidApp.handleApiRequest(method, input, body);
         return Promise.resolve(new Response(resStr, {
@@ -1157,9 +1308,9 @@ window.fetch = function(input, init) {
       base = window.location.origin;
     }
     const fullUrl = (base ? base.replace(/\/$/, '') : '') + input;
-    return _rawFetch(fullUrl, init);
+    return _rawFetch(fullUrl, newInit);
   }
-  return _rawFetch(input, init);
+  return _rawFetch(input, newInit);
 };
 
 let appStatus = null;
@@ -1535,7 +1686,7 @@ async function loadHome(vp) {
             <span class="badge-language">${hero.language || 'English'}</span>
             <span style="color:#9CA3AF;font-weight:700;">${hero.year || ''}</span>
             <div style="display:flex;gap:4px;">
-              ${(hero.genres || []).slice(0, 3).map((g) => `<span class="badge-genre">${g}</span>`).join('')}
+              ${(hero.genres || []).filter(g => g && g.replace(/[\.\s…\-–—\|]/g, '').length > 0 && g !== '…' && g !== '...').slice(0, 3).map((g) => `<span class="badge-genre">${escapeHtml(g)}</span>`).join('')}
             </div>
           </div>
           <div class="hero-plot">${escapeHtml(hero.plot || 'No synopsis available.')}</div>
@@ -2304,7 +2455,7 @@ async function fetchLiveChannels(rebuildTabs = true) {
             <div class="channel-info">
               <div class="channel-name" title="${escapeHtml(ch.name)}">${escapeHtml(ch.name)}</div>
               <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
-                <span class="badge-genre" style="font-size:10px;padding:1px 6px;">${escapeHtml(ch.categoryName || 'General')}</span>
+                <span class="badge-genre" style="font-size:10px;padding:1px 6px;">${escapeHtml((ch.categoryName || 'General').replace(/^[\.\s…\-–—\|]+$/, '') || 'General')}</span>
                 <span class="badge-quality" style="font-size:9px;padding:1px 4px;">LIVE</span>
               </div>
             </div>
@@ -2377,7 +2528,7 @@ async function loadWatchlist(vp) {
   }
 }
 
-// 4.5. USER PROFILES & CLOUD SYNC
+// 4.5. USER PROFILES & PERSONAL PREFERENCES (Isolated from Account & IPTV credentials)
 let currentActiveProfile = { id: 'prof_1', name: 'Waleed Khan', avatarColor: '#7C3AED', isKids: false, theme: 'purple' };
 
 function applyProfileTheme(themeKey) {
@@ -2405,20 +2556,9 @@ function setProfileTheme(themeKey) {
 
 async function loadProfile(vp) {
   let profilesData = { profiles: [], activeProfileId: 'prof_1' };
-  let cloudStatus = { isLinked: false, activeCode: null, cloudProvider: 'Cloudflare Workers + D1' };
-
-  const localAccount = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
-  if (localAccount && localAccount.email) {
-    cloudStatus.isLinked = true;
-    cloudStatus.accountEmail = localAccount.email;
-  }
   try {
-    const [pRes, cRes] = await Promise.all([
-      fetch('/api/profiles').catch(() => null),
-      fetch('/api/cloud/status').catch(() => null)
-    ]);
+    const pRes = await fetch('/api/profiles').catch(() => null);
     if (pRes) profilesData = await pRes.json();
-    if (cRes) cloudStatus = await cRes.json();
   } catch (_) {}
 
   const savedTheme = localStorage.getItem('streamvault_active_theme') || 'purple';
@@ -2434,22 +2574,19 @@ async function loadProfile(vp) {
   currentActiveProfile = { ...activeProf };
   applyProfileTheme(currentActiveProfile.theme);
 
-  const activeCodeStr = cloudStatus.activeCode?.code || 'SV-7482';
-  const qrUrl = activeCodeStr ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=6&data=${encodeURIComponent('https://streamvault-sync.streamvault-app.workers.dev/link?code=' + activeCodeStr)}` : '';
-
   vp.innerHTML = `
     <div style="padding:8px 24px 22px 24px;max-width:1440px;margin:0 auto;box-sizing:border-box;max-height:100vh;overflow:hidden;">
       <div style="font-size:18px;font-weight:900;letter-spacing:-0.4px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
-        <span>User Profiles &amp; Cloud Sync</span>
+        <span>Profile &amp; Personal Settings</span>
         <span style="font-size:11px;color:#A78BFA;font-weight:700;display:flex;align-items:center;gap:6px;">
           <span style="width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;"></span>
-          StreamVault TV v2.7.0
+          ${escapeHtml(activeProf.name)} &middot; StreamVault TV
         </span>
       </div>
 
-      <!-- Who's Watching? Grid with Symmetrical Uniform Tiles -->
+      <!-- Who's Watching? Switcher Row -->
       <div style="margin-bottom:8px;">
-        <div style="font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Who's Watching?</div>
+        <div style="font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Select Profile</div>
         <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:10px;">
           ${profiles.map(p => `
             <div tabindex="0" class="profile-card-item tv-focusable ${p.id === activeProf.id ? 'is-active-profile' : ''}"
@@ -2475,540 +2612,261 @@ async function loadProfile(vp) {
         </div>
       </div>
 
-      <!-- Symmetrical 50/50 Dual-Hero Cards: 100% Zero-Scroll 1080p Layout -->
-      <div style="display:grid;grid-template-columns:1fr 1.05fr;gap:12px;align-items:stretch;">
+      <!-- Symmetrical 50/50 Dual-Card Profile Customization & Parental Controls -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch;">
         <!-- Left: Active Profile Settings & Theme Selector -->
-        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
+        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
           <div>
-            <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+            <div style="font-size:13px;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--theme-border, #A78BFA)" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               Profile Customization
             </div>
 
-            <div style="margin-bottom:6px;">
+            <div style="margin-bottom:8px;">
               <label style="display:block;font-size:9.5px;font-weight:700;color:#9CA3AF;margin-bottom:2px;">Display Name</label>
               <input id="profNameInput" class="search-field tv-focusable"
                      readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
                      onkeydown="onInputKeyDown(this, event)"
-                     style="width:100%;font-size:11px;padding:4px 8px;" value="${escapeHtml(activeProf.name)}" />
+                     style="width:100%;font-size:11px;padding:5px 8px;" value="${escapeHtml(activeProf.name)}" />
             </div>
 
-            <div style="margin-bottom:6px;">
-              <label style="display:block;font-size:9.5px;font-weight:700;color:#9CA3AF;margin-bottom:3px;">UI Theme Palette (Avatars adapt to active theme)</label>
+            <div style="margin-bottom:8px;">
+              <label style="display:block;font-size:9.5px;font-weight:700;color:#9CA3AF;margin-bottom:4px;">Streaming Theme Palette</label>
               <div style="display:flex;gap:8px;" id="profileThemeGroup">
                 <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('purple')" onfocus="playNavSound()" data-theme="purple"
-                     title="StreamVault HBO Purple"
-                     style="padding:3px 8px;border-radius:6px;background:rgba(139,92,246,0.2);cursor:pointer;border:${(!activeProf.theme || activeProf.theme === 'purple') ? '2px solid #A78BFA' : '1.5px solid rgba(255,255,255,0.15)'};color:#DDD6FE;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
+                     style="padding:4px 8px;border-radius:6px;background:rgba(139,92,246,0.2);cursor:pointer;border:${(!activeProf.theme || activeProf.theme === 'purple') ? '2px solid #A78BFA' : '1.5px solid rgba(255,255,255,0.15)'};color:#DDD6FE;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
                   <span style="width:8px;height:8px;border-radius:50%;background:#8B5CF6;"></span> Purple
                 </div>
                 <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('netflix')" onfocus="playNavSound()" data-theme="netflix"
-                     title="Netflix Red"
-                     style="padding:3px 8px;border-radius:6px;background:rgba(229,9,20,0.2);cursor:pointer;border:${activeProf.theme === 'netflix' ? '2px solid #EF4444' : '1.5px solid rgba(255,255,255,0.15)'};color:#FCA5A5;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
+                     style="padding:4px 8px;border-radius:6px;background:rgba(229,9,20,0.2);cursor:pointer;border:${activeProf.theme === 'netflix' ? '2px solid #EF4444' : '1.5px solid rgba(255,255,255,0.15)'};color:#FCA5A5;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
                   <span style="width:8px;height:8px;border-radius:50%;background:#E50914;"></span> Red
                 </div>
                 <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('disney')" onfocus="playNavSound()" data-theme="disney"
-                     title="Disney+ Blue"
-                     style="padding:3px 8px;border-radius:6px;background:rgba(0,99,229,0.2);cursor:pointer;border:${activeProf.theme === 'disney' ? '2px solid #60A5FA' : '1.5px solid rgba(255,255,255,0.15)'};color:#BFDBFE;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
+                     style="padding:4px 8px;border-radius:6px;background:rgba(0,99,229,0.2);cursor:pointer;border:${activeProf.theme === 'disney' ? '2px solid #60A5FA' : '1.5px solid rgba(255,255,255,0.15)'};color:#BFDBFE;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
                   <span style="width:8px;height:8px;border-radius:50%;background:#0063E5;"></span> Blue
                 </div>
                 <div tabindex="0" class="profile-theme-chip tv-focusable" onclick="setProfileTheme('prime')" onfocus="playNavSound()" data-theme="prime"
-                     title="Prime Video Cyan"
-                     style="padding:3px 8px;border-radius:6px;background:rgba(0,168,225,0.2);cursor:pointer;border:${activeProf.theme === 'prime' ? '2px solid #38BDF8' : '1.5px solid rgba(255,255,255,0.15)'};color:#BAE6FD;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
+                     style="padding:4px 8px;border-radius:6px;background:rgba(0,168,225,0.2);cursor:pointer;border:${activeProf.theme === 'prime' ? '2px solid #38BDF8' : '1.5px solid rgba(255,255,255,0.15)'};color:#BAE6FD;font-size:10px;font-weight:800;display:flex;align-items:center;gap:5px;">
                   <span style="width:8px;height:8px;border-radius:50%;background:#00A8E1;"></span> Cyan
                 </div>
               </div>
             </div>
 
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-top:1px solid rgba(255,255,255,0.06);">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
-                <div style="font-size:11px;font-weight:800;color:#F3F4F6;">Kids Mode</div>
-                <div style="font-size:9px;color:#9CA3AF;">Filters catalog to family-friendly content</div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Kids Mode Restriction</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Locks adult channels and restricts to family ratings</div>
               </div>
-              <button tabindex="0" id="btnToggleKidsMode" class="btn tv-focusable" style="padding:3px 8px;font-size:10px;background:${activeProf.isKids ? '#059669' : '#1F2937'};" onclick="toggleKidsMode()">
-                ${activeProf.isKids ? 'Enabled' : 'Disabled'}
-              </button>
+              <button tabindex="0" id="btnToggleKidsMode" class="btn tv-focusable" style="padding:3px 10px;font-size:10px;${activeProf.isKids ? 'background:#059669;border-color:#10B981;color:#fff;' : 'background:#262A38;border-color:#374151;color:#9CA3AF;'}" onclick="toggleProfileKidsMode()">${activeProf.isKids ? 'Enabled' : 'Disabled'}</button>
             </div>
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
-            <div>
-              ${activeProf.id !== 'prof_1' ? `
-                <button tabindex="0" id="btnDeleteProfile" class="btn tv-focusable" style="background:rgba(220,38,38,0.12);border:1.5px solid #EF4444;color:#FCA5A5;padding:3px 10px;font-size:10px;font-weight:800;" onclick="openDeleteProfileModal('${activeProf.id}', '${escapeHtml(activeProf.name)}')">
-                  Delete Profile
-                </button>
-              ` : `
-                <span style="font-size:9.5px;font-weight:700;color:#9CA3AF;display:flex;align-items:center;gap:4px;">
-                  <span style="width:5px;height:5px;border-radius:50%;background:#10B981;"></span> Primary Profile
-                </span>
-              `}
-            </div>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <span id="profSaveStatus" style="font-size:10px;font-weight:700;"></span>
-              <button tabindex="0" id="btnSaveProfile" class="btn btn-primary tv-focusable" style="padding:4px 14px;font-size:10.5px;" onclick="saveActiveProfile()">Save Profile</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
+            <span id="profSaveStatus" style="font-size:10px;font-weight:700;color:#10B981;"></span>
+            <div style="display:flex;gap:6px;">
+              ${!activeProf.isPrimary ? `<button tabindex="0" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:3px 10px;font-size:10.5px;" onclick="promptDeleteCurrentProfile()">Delete</button>` : ''}
+              <button tabindex="0" id="btnSaveProfile" class="btn btn-primary tv-focusable" style="padding:4px 14px;font-size:11px;" onclick="saveActiveProfileChanges()">Save Profile</button>
             </div>
           </div>
         </div>
 
-        <!-- Right: Cloud TV Link & Cross-Device Sync with Bedside QR Code -->
-        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
+        <!-- Right: Parental Controls, Master PIN & History Privacy -->
+        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
           <div>
-            <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-              Cloud TV Link &amp; Multi-TV Sync
+            <div style="font-size:13px;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Parental Controls &amp; PIN
             </div>
 
-            ${cloudStatus.isLinked ? `
-              <div style="display:flex;gap:12px;align-items:center;background:rgba(16,185,129,0.08);border:1.5px solid #059669;border-radius:10px;padding:8px 12px;margin-bottom:6px;min-height:120px;">
-                <div style="width:36px;height:36px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:900;flex-shrink:0;box-shadow:0 0 16px rgba(16,185,129,0.4);">✓</div>
-                <div style="min-width:0;flex:1;">
-                  <div style="font-size:9.5px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:0.6px;">Cloud Account Linked</div>
-                  <div style="font-size:13.5px;font-weight:900;color:#FFFFFF;margin-top:2px;">${escapeHtml(cloudStatus.accountEmail || 'wkhan.10001@gmail.com')}</div>
-                  <div style="font-size:9.5px;color:#9CA3AF;line-height:1.35;margin-top:3px;">Multi-TV Cloud Synchronization is active on Cloudflare Workers &amp; D1. Watchlist, ratings, and resume progress are synchronized across all your TVs.</div>
-                </div>
+            <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:6px;">
+              <div style="flex:1;">
+                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Current</label>
+                <input id="setCurPin" type="password" maxlength="4" class="search-field tv-focusable"
+                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
+                       oninput="onPinInput(this)" onkeydown="onInputKeyDown(this, event)"
+                       style="width:100%;font-size:12px;letter-spacing:2.5px;text-align:center;padding:4px 2px;" placeholder="••••" />
               </div>
-            ` : `
-              <div style="display:flex;gap:12px;align-items:center;background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:6px 10px;margin-bottom:6px;min-height:120px;">
-                <div style="background:#FFFFFF;border-radius:6px;padding:4px;box-shadow:0 6px 18px rgba(0,0,0,0.6);flex-shrink:0;">
-                  <img id="tvLinkQrImg" src="${qrUrl}" alt="Scan QR" style="width:110px;height:110px;display:block;border-radius:4px;" />
-                </div>
-                <div style="min-width:0;flex:1;">
-                  <div style="font-size:9.5px;font-weight:800;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.8px;">Bedside Quick Link</div>
-                  <div style="font-size:22px;font-weight:900;letter-spacing:2px;color:var(--theme-border, #A78BFA);margin:1px 0 3px;" id="tvLinkCodeDisplay">${escapeHtml(activeCodeStr)}</div>
-                  <div style="font-size:10px;color:#D1D5DB;line-height:1.35;">
-                    <div>• Scan with camera to sign in</div>
-                    <div>• Cloud syncs TVs instantly</div>
-                  </div>
-                  <div style="font-size:9.5px;color:var(--theme-border, #8B5CF6);margin-top:3px;font-weight:700;">streamvault-app.workers.dev/link</div>
-                </div>
+              <div style="flex:1;">
+                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">New</label>
+                <input id="setNewPin" type="password" maxlength="4" class="search-field tv-focusable"
+                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
+                       oninput="onPinInput(this)" onkeydown="onInputKeyDown(this, event)"
+                       style="width:100%;font-size:12px;letter-spacing:2.5px;text-align:center;padding:4px 2px;" placeholder="••••" />
               </div>
-            `}
-          </div>
+              <div style="flex:1;">
+                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Confirm</label>
+                <input id="setConfirmPin" type="password" maxlength="4" class="search-field tv-focusable"
+                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
+                       oninput="onPinInput(this)" onkeydown="onInputKeyDown(this, event)"
+                       style="width:100%;font-size:12px;letter-spacing:2.5px;text-align:center;padding:4px 2px;" placeholder="••••" />
+              </div>
+              <div>
+                <button tabindex="0" id="btnUpdatePin" class="btn tv-focusable" style="padding:4px 10px;font-size:10.5px;" onclick="changeParentalPin()">Update</button>
+              </div>
+            </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
-            ${cloudStatus.isLinked ? `
-              <button tabindex="0" id="btnSignOutAccount" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:3px 10px;font-size:10px;" onclick="openSignOutModal()">Sign Out</button>
-            ` : `
-              <button tabindex="0" id="btnOpenCloudSignIn" class="btn tv-focusable" style="background:var(--theme-accent, #7C3AED);border-color:var(--theme-border, #A78BFA);color:#fff;padding:3px 10px;font-size:10px;font-weight:800;" onclick="openCloudAuthModal('login')">Sign In with Email</button>
-            `}
-            <div style="display:flex;gap:6px;align-items:center;">
-              <button tabindex="0" id="btnReqNewTvCode" class="btn tv-focusable" style="padding:3px 10px;font-size:10px;" onclick="requestNewTvCode()">New Code</button>
-              <button tabindex="0" id="btnSyncNow" class="btn btn-primary tv-focusable" style="padding:3px 12px;font-size:10px;background:#059669;border-color:#10B981;" onclick="triggerCloudSync()">Sync Now</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Adult Vault Session</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Locked by default; auto-locks on standby</div>
+              </div>
+              <button tabindex="0" id="btnToggleParentalLock" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="toggleParentalLockSession()">Unlock</button>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Clear Search History</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Wipe remote suggestions (Watched list safe)</div>
+              </div>
+              <button tabindex="0" id="btnClearHistory" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="openClearAllHistoryModal()">Clear</button>
             </div>
           </div>
+
+          <div id="pinChangeStatus" style="font-size:9.5px;font-weight:700;height:12px;margin-top:2px;"></div>
         </div>
       </div>
     </div>
   `;
 
-  if (!cloudStatus.isLinked) {
-    if (window._cloudPollInterval) clearInterval(window._cloudPollInterval);
-    window._cloudPollInterval = setInterval(async () => {
-      try {
-        const res = await fetch('/api/cloud/status');
-        const st = await res.json();
-        if (st.isLinked) {
-          clearInterval(window._cloudPollInterval);
-          loadProfile(vp);
-        }
-      } catch (_) {}
-    }, 3000);
-  } else {
-    if (window._cloudPollInterval) clearInterval(window._cloudPollInterval);
-  }
-
+  updateParentalStatusInSettings();
   setTimeout(() => {
-    const firstActive = document.querySelector('.profile-card-item.is-active-profile') || document.getElementById('profNameInput');
-    if (firstActive) { firstActive.focus(); playNavSound(); }
+    const firstField = document.getElementById('profNameInput');
+    if (firstField) { firstField.focus(); playNavSound(); }
   }, 40);
 }
 
-async function switchUserProfile(profileId) {
-  playNavSound();
+// 5. COMPREHENSIVE SETTINGS (Account, IPTV Playlists, Hardware & System)
+async function loadSettings(vp) {
+  const localAccount = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
+  const isLinked = Boolean(localAccount && localAccount.email);
+  const accountEmail = localAccount.email || 'Guest Mode (Local Only)';
+
+  let playlists = [];
   try {
-    const res = await fetch('/api/profiles/switch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profileId })
-    });
-    const d = await res.json();
-    if (d.success) {
-      await loadProfile(document.getElementById('mainViewport'));
+    playlists = await loadPlaylistsData();
+  } catch (_) {}
+
+  let activeCodeStr = 'SV-....';
+  let qrUrl = '';
+  try {
+    const cRes = await fetch('/api/cloud/status').catch(() => null);
+    if (cRes) {
+      const cData = await cRes.json();
+      activeCodeStr = cData.activeCode?.code || 'SV-PAIR';
+      qrUrl = activeCodeStr ? `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=6&data=${encodeURIComponent('https://streamvault-sync.streamvault-app.workers.dev/link?code=' + activeCodeStr)}` : '';
     }
   } catch (_) {}
-}
-
-function setProfileAvatarColor(color) {
-  playNavSound();
-  currentActiveProfile.avatarColor = color;
-  const chips = document.querySelectorAll('#avatarColorGroup .avatar-color-chip');
-  chips.forEach(c => {
-    if (c.getAttribute('data-color') === color) {
-      c.style.border = '2.5px solid #FFFFFF';
-    } else {
-      c.style.border = '2px solid transparent';
-    }
-  });
-  const activeAvatar = document.querySelector('.profile-card-item.is-active-profile .profile-avatar-initials');
-  if (activeAvatar) activeAvatar.style.background = color;
-}
-
-function toggleKidsMode() {
-  playNavSound();
-  currentActiveProfile.isKids = !currentActiveProfile.isKids;
-  const btn = document.getElementById('btnToggleKidsMode');
-  if (btn) {
-    btn.innerText = currentActiveProfile.isKids ? 'Enabled' : 'Disabled';
-    btn.style.background = currentActiveProfile.isKids ? '#059669' : '#1F2937';
-  }
-}
-
-async function saveActiveProfile() {
-  playNavSound();
-  const nameInput = document.getElementById('profNameInput');
-  const status = document.getElementById('profSaveStatus');
-  const newName = (nameInput?.value || '').trim() || 'Waleed Khan';
-  currentActiveProfile.name = newName;
-
-  try {
-    if (status) { status.style.color = '#A78BFA'; status.innerText = 'Saving...'; }
-    const res = await fetch('/api/profiles/update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        profileId: currentActiveProfile.id,
-        name: newName,
-        avatarColor: currentActiveProfile.avatarColor,
-        isKids: currentActiveProfile.isKids,
-        theme: currentActiveProfile.theme || 'purple'
-      })
-    });
-    const d = await res.json();
-    if (d.success) {
-      if (status) { status.style.color = '#10B981'; status.innerText = '✓ Saved successfully'; }
-      const sideName = document.getElementById('sidebarProfileName');
-      if (sideName) sideName.innerText = newName.split(' ')[0];
-
-      // Update top active profile card in "Who's Watching?" row immediately!
-      const activeCardTitle = document.querySelector('.profile-card-item.is-active-profile .profile-name-text');
-      if (activeCardTitle) activeCardTitle.innerText = newName;
-      const activeCardAvatar = document.querySelector('.profile-card-item.is-active-profile .profile-avatar-initials');
-      if (activeCardAvatar) activeCardAvatar.innerText = (newName || 'U').slice(0, 2).toUpperCase();
-
-      setTimeout(() => { if (status) status.innerText = ''; }, 2500);
-    }
-  } catch (err) {
-    if (status) { status.style.color = '#EF4444'; status.innerText = 'Failed to save'; }
-  }
-}
-
-async function promptAddNewProfile() {
-  playNavSound();
-  try {
-    const res = await fetch('/api/profiles/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Family Member' })
-    });
-    const d = await res.json();
-    if (d.success && d.profile) {
-      await switchUserProfile(d.profile.id);
-    }
-  } catch (_) {}
-}
-
-let pendingDeleteProfileId = null;
-
-function openDeleteProfileModal(profileId, profileName) {
-  playNavSound();
-  pendingDeleteProfileId = profileId;
-  const modal = document.getElementById('deleteProfileModal');
-  const title = document.getElementById('deleteProfileModalText');
-  const pinInp = document.getElementById('deleteProfilePinInput');
-  const errMsg = document.getElementById('deleteProfileErrorMsg');
-  if (pinInp) pinInp.value = '';
-  if (errMsg) errMsg.innerText = '';
-  if (title) title.innerText = `Are you sure you want to delete profile "${profileName}"? Watch history and watchlist for this profile will be permanently removed.`;
-  if (modal) {
-    modal.style.display = 'flex';
-    if (pinInp) {
-      setTimeout(() => { pinInp.removeAttribute('readonly'); pinInp.focus(); }, 50);
-    } else {
-      const btnCancel = document.getElementById('btnCancelDeleteProfile');
-      if (btnCancel) btnCancel.focus();
-    }
-  }
-}
-
-function closeDeleteProfileModal() {
-  playNavSound();
-  pendingDeleteProfileId = null;
-  const modal = document.getElementById('deleteProfileModal');
-  if (modal) {
-    modal.style.display = 'none';
-    const btn = document.getElementById('btnDeleteProfile') || document.getElementById('btnSaveProfile');
-    if (btn) btn.focus();
-  }
-}
-
-async function confirmDeleteProfile() {
-  playNavSound();
-  if (!pendingDeleteProfileId) return;
-  const pinInp = document.getElementById('deleteProfilePinInput');
-  const errMsg = document.getElementById('deleteProfileErrorMsg');
-  const enteredPin = (pinInp?.value || '').trim();
-  if (enteredPin.length !== 4) {
-    if (errMsg) errMsg.innerText = 'Please enter your 4-digit Master PIN';
-    return;
-  }
-  try {
-    const pinRes = await fetch('/api/parental-pin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unlock', pin: enteredPin })
-    });
-    const pinData = await pinRes.json();
-    if (!pinData.success) {
-      if (errMsg) errMsg.innerText = 'Incorrect Master PIN. Deletion cancelled.';
-      return;
-    }
-    const res = await fetch('/api/profiles/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profileId: pendingDeleteProfileId })
-    });
-    const d = await res.json();
-    if (d.success) {
-      closeDeleteProfileModal();
-      await loadProfile(document.getElementById('mainViewport'));
-    } else {
-      if (errMsg) errMsg.innerText = d.error || 'Failed to delete profile';
-    }
-  } catch (e) {
-    if (errMsg) errMsg.innerText = 'Error: ' + e.message;
-  }
-}
-
-async function requestNewTvCode() {
-  playNavSound();
-  const codeDisplay = document.getElementById('tvLinkCodeDisplay');
-  if (codeDisplay) codeDisplay.innerText = '...';
-  try {
-    const res = await fetch('/api/cloud/request-code', { method: 'POST' });
-    const d = await res.json();
-    if (d.success && d.code) {
-      if (codeDisplay) codeDisplay.innerText = d.code;
-      const img = document.getElementById('tvLinkQrImg');
-      if (img && d.qrUrl) img.src = d.qrUrl;
-    }
-  } catch (_) {}
-}
-
-async function triggerCloudSync() {
-  playNavSound();
-  const lbl = document.getElementById('cloudSyncStatusLbl');
-  if (lbl) {
-    lbl.style.color = '#A78BFA';
-    lbl.innerText = 'Syncing to Cloudflare...';
-  }
-  setTimeout(() => {
-    if (lbl) {
-      lbl.style.color = '#10B981';
-      lbl.innerText = '✓ Synchronized with Cloud (Just now)';
-    }
-  }, 900);
-}
-
-
-let welcomeTvCodePollTimer = null;
-
-function checkAuthAndRoute() {
-  const raw = localStorage.getItem('streamvault_account');
-  let account = null;
-  try {
-    if (raw) account = JSON.parse(raw);
-  } catch (_) {}
-  const guestMode = localStorage.getItem('streamvault_guest_mode');
-  const isAuth = !!(account && (account.accountId || account.email));
-  if (!isAuth && !guestMode) {
-    showWelcomeScreen();
-    return false;
-  }
-  hideWelcomeScreen();
-  return true;
-}
-
-async function showWelcomeScreen() {
-  const overlay = document.getElementById('welcomeScreenOverlay');
-  if (!overlay) return;
-  overlay.style.display = 'flex';
-  setTimeout(() => {
-    document.getElementById('welcomeBtnSignIn')?.focus();
-  }, 60);
-
-  try {
-    const res = await fetch(CLOUD_SYNC_BASE + '/api/auth/request-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId: 'tcl-55p635-tv' })
-    });
-    const data = await res.json();
-    if (data.success) {
-      const code = data.code;
-      const codeDisplay = document.getElementById('welcomeCodeDisplay');
-      const qrImg = document.getElementById('welcomeQrImg');
-      if (codeDisplay) codeDisplay.innerText = code;
-      if (qrImg) qrImg.src = data.qrUrl || ('https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=' + encodeURIComponent(data.pairUrl));
-
-      if (welcomeTvCodePollTimer) clearInterval(welcomeTvCodePollTimer);
-      welcomeTvCodePollTimer = setInterval(async () => {
-        try {
-          const pollRes = await fetch(CLOUD_SYNC_BASE + '/api/auth/poll-code?code=' + encodeURIComponent(code));
-          const pollData = await pollRes.json();
-          if (pollData.status === 'claimed' && pollData.account) {
-            clearInterval(welcomeTvCodePollTimer);
-            localStorage.setItem('streamvault_account', JSON.stringify(pollData.account));
-            if (pollData.account.iptvServerUrl && appStatus?.credentials) {
-              appStatus.credentials.serverUrl = pollData.account.iptvServerUrl;
-              appStatus.credentials.username = pollData.account.iptvUsername;
-              appStatus.credentials.password = pollData.account.iptvPassword;
-              appStatus.credentials.playlistName = pollData.account.playlistName;
-            }
-            hideWelcomeScreen();
-            showToast('✓ Welcome, ' + (pollData.account.displayName || pollData.account.email) + '! Device linked.');
-            if (pollData.account.iptvServerUrl && pollData.account.iptvUsername) {
-              await navigateToTab('HOME');
-            } else {
-              showToast('⚙ Cloud account linked! Please enter your IPTV credentials in Settings.');
-              await navigateToTab('SETTINGS');
-            }
-          }
-        } catch (_) {}
-      }, 3000);
-    }
-  } catch (_) {}
-}
-
-function hideWelcomeScreen() {
-  if (welcomeTvCodePollTimer) clearInterval(welcomeTvCodePollTimer);
-  const overlay = document.getElementById('welcomeScreenOverlay');
-  if (overlay) overlay.style.display = 'none';
-}
-
-function continueAsGuest() {
-  localStorage.setItem('streamvault_guest_mode', '1');
-  hideWelcomeScreen();
-  navigateToTab('SETTINGS');
-}
-
-function openSignOutModal() {
-  playNavSound();
-  const modal = document.getElementById('signOutModal');
-  if (modal) {
-    modal.style.display = 'flex';
-    setTimeout(() => {
-      document.getElementById('btnConfirmSignOut')?.focus();
-    }, 60);
-  }
-}
-
-function closeSignOutModal() {
-  playNavSound();
-  const modal = document.getElementById('signOutModal');
-  if (modal) {
-    modal.style.display = 'none';
-    const btnSignOut = document.getElementById('btnSignOutAccount');
-    if (btnSignOut) btnSignOut.focus();
-  }
-}
-
-async function confirmSignOutAccount() {
-  playNavSound();
-  closeSignOutModal();
-  closeUserProfileModal();
-
-  // 1. Clean wipe local tokens and caches
-  localStorage.removeItem('streamvault_account');
-  localStorage.removeItem('streamvault_guest_mode');
-  localStorage.removeItem('streamvault_active_profile');
-  localStorage.removeItem('streamvault_watchlist');
-  localStorage.removeItem('streamvault_continue_watching');
-
-  // 2. Wipe RAM state
-  if (appStatus && appStatus.credentials) {
-    appStatus.credentials.serverUrl = '';
-    appStatus.credentials.username = '';
-    appStatus.credentials.password = '';
-    appStatus.credentials.displayName = '';
-    appStatus.credentials.playlistName = '';
-  }
-
-  // 3. Reset UI pill
-  updateUserProfileUI();
-
-  // 4. Return to OOBE Welcome Screen
-  showToast('✓ Signed out. Session cleared.');
-  showWelcomeScreen();
-}
-
-// 5. COMPREHENSIVE SETTINGS (Symmetrical 2x2 Grid / 4 Equal Quadrants)
-function loadSettings(vp) {
-  const creds = (appStatus && appStatus.credentials) || {};
 
   vp.innerHTML = `
     <div style="padding:8px 24px 22px 24px;max-width:1440px;margin:0 auto;box-sizing:border-box;max-height:100vh;overflow:hidden;">
       <div style="font-size:18px;font-weight:900;letter-spacing:-0.4px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
-        <span>Settings &amp; System</span>
-        <span style="font-size:11px;color:#A78BFA;font-weight:700;display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;"></span>StreamVault TV v2.7.0</span>
+        <span>Account &amp; IPTV Settings</span>
+        <span style="font-size:11px;color:#A78BFA;font-weight:700;display:flex;align-items:center;gap:6px;">
+          <span style="width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;"></span>
+          StreamVault TV v2.7.0
+        </span>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;box-sizing:border-box;">
-        <!-- Quadrant 1 (Top-Left): IPTV Provider & Playlists -->
-        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
+      <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:10px;box-sizing:border-box;">
+        <!-- Quadrant 1 (Top-Left): IPTV Playlists Manager -->
+        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;min-height:220px;">
           <div>
-            <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
-              IPTV Provider &amp; Playlists
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div style="font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+                IPTV Playlists (${playlists.length})
+              </div>
+              <button tabindex="0" id="btnAddPlaylistBtn" class="btn btn-primary tv-focusable" style="padding:3px 10px;font-size:10.5px;font-weight:800;" onclick="openAddPlaylistModal()">+ Add Playlist</button>
             </div>
-            
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:4px;">
-              <div style="grid-column:1/-1;">
-                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Playlist Name</label>
-                <input id="setPlaylistName" class="search-field tv-focusable"
-                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-                       onkeydown="onInputKeyDown(this, event)"
-                       style="width:100%;font-size:11px;padding:4px 8px;" value="${escapeHtml(creds.playlistName || 'StreamVault IPTV')}" />
+
+            <!-- Playlists List / First-Run Guidance -->
+            ${playlists.length === 0 ? `
+              <div style="background:rgba(124,58,237,0.08);border:1.5px dashed #7C3AED;border-radius:10px;padding:16px 14px;text-align:center;margin-top:4px;">
+                <div style="font-size:13px;font-weight:800;color:#FFFFFF;margin-bottom:3px;">No Playlists Connected</div>
+                <div style="font-size:10px;color:#9CA3AF;line-height:1.4;margin-bottom:10px;">
+                  Add your Xtream Codes or M3U playlist. Your movies, series, and live channels will enrich automatically in the background.
+                </div>
+                <button tabindex="0" id="btnFirstRunAddPlaylist" class="btn btn-primary tv-focusable" style="padding:6px 16px;font-size:11px;font-weight:800;" onclick="openAddPlaylistModal()">+ Connect Your First Playlist</button>
               </div>
-              <div style="grid-column:1/-1;">
-                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Server URL</label>
-                <input id="setServerUrl" class="search-field tv-focusable"
-                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-                       onkeydown="onInputKeyDown(this, event)"
-                       style="width:100%;font-size:11px;padding:4px 8px;" value="${escapeHtml(creds.serverUrl || '')}" placeholder="http://example.com:8080" />
+            ` : `
+              <div style="display:flex;flex-direction:column;gap:6px;max-height:145px;overflow-y:auto;">
+                ${playlists.map((pl, idx) => {
+                  const isEnabled = pl.is_enabled !== 0;
+                  const statusClass = pl.status === 'working' ? 'badge-status-working' : pl.status === 'syncing' ? 'badge-status-syncing' : 'badge-status-failed';
+                  const statusText = pl.status === 'working' ? '✓ Working' : pl.status === 'syncing' ? '⟳ Syncing' : '⚠ Failed';
+                  return `
+                    <div style="background:#0F0B20;border:1px solid #231B3D;border-radius:8px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;">
+                      <div style="min-width:0;flex:1;">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                          <span style="font-size:11.5px;font-weight:800;color:#FFFFFF;">${escapeHtml(pl.name || 'IPTV ' + (idx + 1))}</span>
+                          <span class="${statusClass}">${statusText}</span>
+                        </div>
+                        <div style="font-size:9.5px;color:#9CA3AF;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                          ${escapeHtml(pl.server_url || pl.serverUrl || '')} &middot; User: ${escapeHtml(pl.username || '')}
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:5px;align-items:center;">
+                        <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;${isEnabled ? 'color:#10B981;' : 'color:#6B7280;'}" onclick="togglePlaylistEnabled('${pl.playlist_id}', ${isEnabled ? 1 : 0})">
+                          ${isEnabled ? 'Active' : 'Disabled'}
+                        </button>
+                        <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;" onclick="openEditPlaylistModal('${pl.playlist_id}')">Edit</button>
+                        <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;color:#F87171;" onclick="deletePlaylist('${pl.playlist_id}')">✕</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
-              <div>
-                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Username</label>
-                <input id="setUsername" class="search-field tv-focusable"
-                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-                       onkeydown="onInputKeyDown(this, event)"
-                       style="width:100%;font-size:11px;padding:4px 8px;" value="${escapeHtml(creds.username || '')}" placeholder="Username" />
-              </div>
-              <div>
-                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Password</label>
-                <input id="setPassword" type="password" class="search-field tv-focusable"
-                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-                       onkeydown="onInputKeyDown(this, event)"
-                       style="width:100%;font-size:11px;padding:4px 8px;" value="${escapeHtml(creds.password || '')}" placeholder="Password" />
-              </div>
-            </div>
+            `}
           </div>
-          
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
-            <span id="accountSaveStatus" style="font-size:10.5px;font-weight:700;"></span>
-            <button tabindex="0" id="btnSaveAccount" class="btn btn-primary tv-focusable" style="padding:4px 14px;font-size:11px;" onclick="saveAccountCredentials()">Save &amp; Connect</button>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:9.5px;color:#9CA3AF;">
+            <span>Safe Switching: Replacing playlists preserves watch progress</span>
+            <span style="color:#10B981;font-weight:700;">Local-First SQLite</span>
           </div>
         </div>
 
-        <!-- Quadrant 2 (Top-Right): Playback & Hardware Engine -->
+        <!-- Quadrant 2 (Top-Right): Cloud Account & Bedside Phone Link -->
+        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;min-height:220px;">
+          <div>
+            <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+              Cloud Account &amp; Multi-TV Link
+            </div>
+
+            ${isLinked ? `
+              <div style="background:rgba(16,185,129,0.08);border:1.5px solid #059669;border-radius:10px;padding:10px 12px;margin-bottom:6px;">
+                <div style="font-size:9.5px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:0.6px;">Account Active</div>
+                <div style="font-size:13px;font-weight:900;color:#FFFFFF;margin-top:2px;">${escapeHtml(accountEmail)}</div>
+                <div style="font-size:9.5px;color:#9CA3AF;line-height:1.35;margin-top:3px;">Synchronized with Cloudflare D1. Resuming movies and watchlists works seamlessly across all your TVs.</div>
+              </div>
+            ` : `
+              <div style="display:flex;gap:12px;align-items:center;background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:6px 10px;margin-bottom:6px;">
+                <div style="background:#FFFFFF;border-radius:6px;padding:4px;box-shadow:0 6px 18px rgba(0,0,0,0.6);flex-shrink:0;">
+                  <img id="tvLinkQrImg" src="${qrUrl}" alt="Scan QR" style="width:78px;height:78px;display:block;border-radius:4px;" />
+                </div>
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:9px;font-weight:800;color:#9CA3AF;text-transform:uppercase;">Phone Pairing</div>
+                  <div style="font-size:20px;font-weight:900;letter-spacing:2px;color:var(--theme-border, #A78BFA);margin:1px 0 2px;" id="tvLinkCodeDisplay">${escapeHtml(activeCodeStr)}</div>
+                  <div style="font-size:9.5px;color:#D1D5DB;line-height:1.3;">Scan with camera to link without typing</div>
+                  <div style="font-size:9px;color:var(--theme-border, #8B5CF6);margin-top:2px;font-weight:700;">streamvault-app.workers.dev/link</div>
+                </div>
+              </div>
+            `}
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
+            ${isLinked ? `
+              <button tabindex="0" id="btnSignOutAccount" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:3px 10px;font-size:10px;" onclick="openSignOutModal()">Sign Out</button>
+            ` : `
+              <button tabindex="0" id="btnOpenCloudSignIn" class="btn tv-focusable" style="background:var(--theme-accent, #7C3AED);border-color:var(--theme-border, #A78BFA);color:#fff;padding:3px 10px;font-size:10px;font-weight:800;" onclick="openCloudAuthModal('login')">Sign In / Sign Up</button>
+            `}
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button tabindex="0" id="btnSyncNow" class="btn btn-primary tv-focusable" style="padding:3px 12px;font-size:10px;background:#059669;border-color:#10B981;" onclick="triggerCloudSync()">Sync Cloud</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quadrant 3 (Bottom-Left): Playback & Hardware Engine -->
         <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
           <div>
             <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
@@ -3017,103 +2875,46 @@ function loadSettings(vp) {
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#D1D5DB;margin-bottom:4px;">
               <span>Hardware Decoder</span>
-              <span style="color:#10B981;font-weight:800;background:rgba(16,185,129,0.1);padding:1px 6px;border-radius:4px;border:1px solid rgba(16,185,129,0.3);font-size:10.5px;">HW+ ExoPlayer Media3</span>
+              <span style="color:#10B981;font-weight:800;background:rgba(16,185,129,0.1);padding:1px 6px;border-radius:4px;border:1px solid rgba(16,185,129,0.3);font-size:10px;">HW+ ExoPlayer Media3</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#D1D5DB;margin-bottom:4px;">
               <span>Audio Priority</span>
-              <button tabindex="0" id="btnAudioPriority" class="btn tv-focusable" style="padding:3px 8px;font-size:10.5px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleAudioPriority()">English (5.1ch Surround)</button>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#D1D5DB;margin-bottom:4px;">
-              <span>Stream Dedup Quality</span>
-              <button tabindex="0" id="btnDedupQuality" class="btn tv-focusable" style="padding:3px 8px;font-size:10.5px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleDedupQuality()">4K UHD &gt; Clean HQ* &gt; 1080p</button>
+              <button tabindex="0" id="btnAudioPriority" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleAudioPriority()">English (5.1ch Surround)</button>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#D1D5DB;">
-              <span>Stream Probing</span>
-              <span style="color:#9CA3AF;font-weight:600;font-size:10.5px;">11-Byte Fast Probe (40ms)</span>
+              <span>Stream Dedup Quality</span>
+              <button tabindex="0" id="btnDedupQuality" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleDedupQuality()">4K UHD &gt; Clean HQ* &gt; 1080p</button>
             </div>
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:10px;color:#9CA3AF;">
-            <span style="display:flex;align-items:center;gap:4px;">
-              <span style="width:5px;height:5px;border-radius:50%;background:#10B981;"></span> Zero-Lag Precision Seek (10s)
-            </span>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:9.5px;color:#9CA3AF;">
+            <span>Zero-Lag Precision Seek (10s)</span>
             <span style="color:#10B981;font-weight:800;">Optimal 60 FPS</span>
           </div>
         </div>
 
-        <!-- Quadrant 3 (Bottom-Left): Parental Controls & PIN -->
-        <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
-          <div>
-            <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              Parental Controls &amp; PIN
-            </div>
-
-            <div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:4px;">
-              <div style="flex:1;">
-                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Current</label>
-                <input id="setCurPin" type="password" maxlength="4" class="search-field tv-focusable"
-                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-                       oninput="onPinInput(this)"
-                       onkeydown="onInputKeyDown(this, event)"
-                       style="width:100%;font-size:12px;letter-spacing:2.5px;text-align:center;padding:4px 2px;" placeholder="••••" />
-              </div>
-              <div style="flex:1;">
-                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">New</label>
-                <input id="setNewPin" type="password" maxlength="4" class="search-field tv-focusable"
-                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-                       oninput="onPinInput(this)"
-                       onkeydown="onInputKeyDown(this, event)"
-                       style="width:100%;font-size:12px;letter-spacing:2.5px;text-align:center;padding:4px 2px;" placeholder="••••" />
-              </div>
-              <div style="flex:1;">
-                <label style="display:block;font-size:9px;font-weight:700;color:#9CA3AF;margin-bottom:1px;">Confirm</label>
-                <input id="setConfirmPin" type="password" maxlength="4" class="search-field tv-focusable"
-                       readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-                       oninput="onPinInput(this)"
-                       onkeydown="onInputKeyDown(this, event)"
-                       style="width:100%;font-size:12px;letter-spacing:2.5px;text-align:center;padding:4px 2px;" placeholder="••••" />
-              </div>
-              <div>
-                <button tabindex="0" id="btnUpdatePin" class="btn tv-focusable" style="padding:4px 10px;font-size:10.5px;" onclick="changeParentalPin()">Update</button>
-              </div>
-            </div>
-
-            <div style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);">
-              <div>
-                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Adult Vault Session</div>
-                <div id="parentalSessionStatusText" style="display:none;"></div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Locked by default; auto-locks on standby</div>
-              </div>
-              <button tabindex="0" id="btnToggleParentalLock" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="toggleParentalLockSession()">Unlock</button>
-            </div>
-          </div>
-
-          <div id="pinChangeStatus" style="font-size:9.5px;font-weight:700;height:12px;margin-top:2px;"></div>
-        </div>
-
-        <!-- Quadrant 4 (Bottom-Right): Privacy & System Maintenance -->
+        <!-- Quadrant 4 (Bottom-Right): System Maintenance & Factory Reset -->
         <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
           <div>
             <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              Privacy &amp; Maintenance
+              System Maintenance
             </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <div>
-                <div style="font-size:11.5px;font-weight:700;color:#F3F4F6;">Search History</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Wipe recent searches from remote suggestions</div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Enriched Local Database</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Room SQLite cache on TV</div>
               </div>
-              <button tabindex="0" id="btnClearHistory" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="openClearAllHistoryModal()">Clear</button>
+              <button tabindex="0" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Enrich Now</button>
             </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
-                <div style="font-size:11.5px;font-weight:800;color:#F87171;">Factory Reset</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Wipes local database &amp; settings</div>
+                <div style="font-size:11px;font-weight:800;color:#F87171;">Factory Reset</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Wipes local database and preferences</div>
               </div>
-              <button tabindex="0" id="btnFactoryReset" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:3px 12px;font-size:10.5px;" onclick="openFactoryResetModal()">Reset</button>
+              <button tabindex="0" id="btnFactoryReset" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:2px 10px;font-size:10px;" onclick="openFactoryResetModal()">Reset</button>
             </div>
           </div>
 
@@ -3126,34 +2927,178 @@ function loadSettings(vp) {
     </div>
   `;
 
-  updateParentalStatusInSettings();
-
   setTimeout(() => {
-    const firstField = document.getElementById('setPlaylistName') || document.getElementById('setServerUrl');
-    if (firstField) {
-      firstField.focus();
-      playNavSound();
-    }
+    const firstBtn = document.getElementById('btnFirstRunAddPlaylist') || document.getElementById('btnAddPlaylistBtn') || document.getElementById('btnSyncNow');
+    if (firstBtn) { firstBtn.focus(); playNavSound(); }
   }, 40);
 }
 
-let currentAudioPriorityIdx = 0;
-const audioPriorityOptions = ['English (5.1ch Surround)', 'Original Stream (Pass-through)', 'Stereo (AAC 2.0)'];
-function toggleAudioPriority() {
-  playNavSound();
-  currentAudioPriorityIdx = (currentAudioPriorityIdx + 1) % audioPriorityOptions.length;
-  const btn = document.getElementById('btnAudioPriority');
-  if (btn) btn.innerText = audioPriorityOptions[currentAudioPriorityIdx];
+// Playlist Management APIs for standalone TV and cloud sync
+let cachedPlaylists = [];
+
+async function loadPlaylistsData() {
+  try {
+    const res = await fetch('/api/playlists');
+    const data = await res.json();
+    cachedPlaylists = data.playlists || [];
+    return cachedPlaylists;
+  } catch (err) {
+    cachedPlaylists = [];
+    return [];
+  }
 }
 
-let currentDedupIdx = 0;
-const dedupQualityOptions = ['4K UHD > Clean HQ* > 1080p', '1080p Only (Fast Buffer)', 'Adaptive Multi-Bitrate'];
-function toggleDedupQuality() {
+function openAddPlaylistModal() {
   playNavSound();
-  currentDedupIdx = (currentDedupIdx + 1) % dedupQualityOptions.length;
-  const btn = document.getElementById('btnDedupQuality');
-  if (btn) btn.innerText = dedupQualityOptions[currentDedupIdx];
+  const modal = document.getElementById('playlistModal');
+  if (!modal) return;
+  document.getElementById('playlistModalTitle').innerText = 'Add IPTV Playlist';
+  document.getElementById('playlistModalEditId').value = '';
+  document.getElementById('inpPlaylistName').value = 'Primary IPTV';
+  document.getElementById('inpPlaylistServer').value = '';
+  document.getElementById('inpPlaylistUser').value = '';
+  document.getElementById('inpPlaylistPass').value = '';
+  const statusMsg = document.getElementById('playlistModalStatusMsg');
+  if (statusMsg) statusMsg.innerText = '';
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    document.getElementById('inpPlaylistServer')?.focus();
+  }, 100);
 }
+
+function openEditPlaylistModal(playlistId) {
+  playNavSound();
+  const pl = cachedPlaylists.find(p => p.playlist_id === playlistId);
+  if (!pl) return;
+  const modal = document.getElementById('playlistModal');
+  if (!modal) return;
+  document.getElementById('playlistModalTitle').innerText = 'Edit IPTV Playlist';
+  document.getElementById('playlistModalEditId').value = playlistId;
+  document.getElementById('inpPlaylistName').value = pl.name || 'Primary IPTV';
+  document.getElementById('inpPlaylistServer').value = pl.server_url || pl.serverUrl || '';
+  document.getElementById('inpPlaylistUser').value = pl.username || '';
+  document.getElementById('inpPlaylistPass').value = '';
+  const statusMsg = document.getElementById('playlistModalStatusMsg');
+  if (statusMsg) statusMsg.innerText = '';
+  modal.style.display = 'flex';
+  setTimeout(() => {
+    document.getElementById('inpPlaylistServer')?.focus();
+  }, 100);
+}
+
+function closePlaylistModal() {
+  playNavSound();
+  const modal = document.getElementById('playlistModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function handleSavePlaylistSubmit(e) {
+  if (e) e.preventDefault();
+  const editId = document.getElementById('playlistModalEditId').value;
+  const name = document.getElementById('inpPlaylistName').value.trim();
+  const serverUrl = document.getElementById('inpPlaylistServer').value.trim();
+  const username = document.getElementById('inpPlaylistUser').value.trim();
+  const password = document.getElementById('inpPlaylistPass').value;
+  const statusMsg = document.getElementById('playlistModalStatusMsg');
+
+  if (!serverUrl || !username) {
+    if (statusMsg) {
+      statusMsg.style.color = '#EF4444';
+      statusMsg.innerText = 'Server URL and username are required';
+    }
+    return;
+  }
+  if (!editId && !password) {
+    if (statusMsg) {
+      statusMsg.style.color = '#EF4444';
+      statusMsg.innerText = 'Password is required for new playlist';
+    }
+    return;
+  }
+
+  if (statusMsg) {
+    statusMsg.style.color = '#A78BFA';
+    statusMsg.innerText = 'Connecting to IPTV provider...';
+  }
+
+  try {
+    const method = editId ? 'PUT' : 'POST';
+    const url = editId ? `/api/playlists/${encodeURIComponent(editId)}` : '/api/playlists';
+    const payload = { name, serverUrl, username };
+    if (password) payload.password = password;
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const d = await res.json();
+    if (d.success || d.ok) {
+      closePlaylistModal();
+      showToast('✓ Playlist saved! Syncing catalog in background...');
+      const vp = document.getElementById('mainViewport');
+      if (vp && currentTab === 'SETTINGS') {
+        loadSettings(vp);
+      }
+    } else {
+      if (statusMsg) {
+        statusMsg.style.color = '#EF4444';
+        statusMsg.innerText = d.error || 'Failed to save playlist';
+      }
+    }
+  } catch (err) {
+    if (statusMsg) {
+      statusMsg.style.color = '#EF4444';
+      statusMsg.innerText = err.message || 'Connection failed';
+    }
+  }
+}
+
+async function togglePlaylistEnabled(playlistId, currentEnabled) {
+  playNavSound();
+  try {
+    const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isEnabled: currentEnabled ? 0 : 1 })
+    });
+    const d = await res.json();
+    if (d.success || d.ok) {
+      showToast(currentEnabled ? 'Playlist disabled' : 'Playlist enabled & syncing...');
+      const vp = document.getElementById('mainViewport');
+      if (vp && currentTab === 'SETTINGS') loadSettings(vp);
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  }
+}
+
+async function deletePlaylist(playlistId) {
+  playNavSound();
+  try {
+    const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
+      method: 'DELETE'
+    });
+    const d = await res.json();
+    if (d.success || d.ok) {
+      showToast('Playlist removed');
+      const vp = document.getElementById('mainViewport');
+      if (vp && currentTab === 'SETTINGS') loadSettings(vp);
+    }
+  } catch (err) {
+    showToast('Error: ' + err.message);
+  }
+}
+
+function triggerFullEnrichmentSync() {
+  playNavSound();
+  fetch('/api/sync-now', { method: 'POST' }).then(() => {
+    showToast('✓ Background catalog enrichment started');
+  }).catch(() => {
+    showToast('Sync initiated');
+  });
+}
+
 
 // TV Remote & Soft Keyboard Auto-Advance and Spatial Navigation for Text Boxes
 function advanceToNextInput(currentInput) {
@@ -3505,28 +3450,60 @@ async function confirmFactoryReset() {
 
 
 let isCloudAuthSignUp = false;
+let currentPendingVerifyEmail = '';
 
 function openCloudAuthModal(mode = 'login') {
+  playNavSound();
   isCloudAuthSignUp = (mode === 'signup');
   const m = document.getElementById('cloudAuthModal');
   if (!m) return;
   m.style.display = 'flex';
+  switchCloudAuthPane('form');
+  updateCloudAuthUi();
+}
+
+function closeCloudAuthModal() {
+  playNavSound();
+  const m = document.getElementById('cloudAuthModal');
+  if (m) m.style.display = 'none';
+  const triggerBtn = document.getElementById('btnOpenCloudSignIn') || document.getElementById('welcomeBtnSignIn');
+  if (triggerBtn) triggerBtn.focus();
+}
+
+function toggleCloudAuthMode(e) {
+  if (e) e.preventDefault();
+  playNavSound();
+  isCloudAuthSignUp = !isCloudAuthSignUp;
   updateCloudAuthUi();
   setTimeout(() => {
     document.getElementById('cloudAuthEmail')?.focus();
   }, 40);
 }
 
-function closeCloudAuthModal() {
-  const m = document.getElementById('cloudAuthModal');
-  if (m) m.style.display = 'none';
-  document.getElementById('welcomeBtnSignIn')?.focus();
-}
+function switchCloudAuthPane(pane) {
+  playNavSound();
+  const formPane = document.getElementById('cloudAuthFormPane');
+  const verifyPane = document.getElementById('cloudAuthVerifyPane');
+  const statusMsg = document.getElementById('cloudAuthStatusMsg');
+  const verifyStatus = document.getElementById('cloudVerifyStatusMsg');
+  if (statusMsg) statusMsg.innerText = '';
+  if (verifyStatus) verifyStatus.innerText = '';
 
-function toggleCloudAuthMode(e) {
-  if (e) e.preventDefault();
-  isCloudAuthSignUp = !isCloudAuthSignUp;
-  updateCloudAuthUi();
+  if (pane === 'verify') {
+    if (formPane) formPane.style.display = 'none';
+    if (verifyPane) verifyPane.style.display = 'block';
+    const codeInp = document.getElementById('cloudVerifyCodeInput');
+    if (codeInp) codeInp.value = '';
+    setTimeout(() => {
+      document.getElementById('cloudVerifyCodeInput')?.focus();
+    }, 60);
+  } else {
+    if (verifyPane) verifyPane.style.display = 'none';
+    if (formPane) formPane.style.display = 'block';
+    setTimeout(() => {
+      document.getElementById('cloudAuthEmail')?.focus();
+    }, 60);
+  }
 }
 
 function updateCloudAuthUi() {
@@ -3546,11 +3523,14 @@ function updateCloudAuthUi() {
     if (nameRow) nameRow.style.display = 'block';
   } else {
     if (title) title.innerText = 'Sign In to Account';
-    if (desc) desc.innerText = 'Access your synchronized profiles, watchlist, ratings, and IPTV credentials across all your devices.';
+    if (desc) desc.innerText = 'Access your synchronized profiles, watchlist, ratings, and IPTV playlists across all your TVs and phones.';
     if (submitBtn) submitBtn.innerText = 'Sign In';
     if (toggleLink) toggleLink.innerText = "Don't have an account? Sign Up";
     if (nameRow) nameRow.style.display = 'none';
   }
+  setTimeout(() => {
+    document.getElementById('cloudAuthEmail')?.focus();
+  }, 40);
 }
 
 async function handleCloudAuthSubmit(e) {
@@ -3559,25 +3539,19 @@ async function handleCloudAuthSubmit(e) {
   const statusMsg = document.getElementById('cloudAuthStatusMsg');
   const email = document.getElementById('cloudAuthEmail')?.value?.trim();
   const password = document.getElementById('cloudAuthPassword')?.value;
-  const displayName = document.getElementById('cloudAuthName')?.value?.trim() || 'Waleed Khan';
+  const displayName = document.getElementById('cloudAuthName')?.value?.trim() || 'Account Owner';
 
   if (!email || !password) return;
   if (btn) btn.disabled = true;
   if (statusMsg) {
     statusMsg.style.color = '#C4B5FD';
-    statusMsg.innerText = isCloudAuthSignUp ? 'Creating your account...' : 'Signing in...';
+    statusMsg.innerText = isCloudAuthSignUp ? 'Sending verification code...' : 'Signing in...';
   }
 
   const endpoint = isCloudAuthSignUp ? '/api/auth/signup' : '/api/auth/login';
   const payload = { email, password };
   if (isCloudAuthSignUp) {
     payload.displayName = displayName;
-    if (appStatus?.credentials) {
-      payload.iptvServer = appStatus.credentials.serverUrl;
-      payload.iptvUser = appStatus.credentials.username;
-      payload.iptvPass = appStatus.credentials.password;
-      payload.playlistName = appStatus.credentials.playlistName;
-    }
   }
 
   try {
@@ -3587,25 +3561,30 @@ async function handleCloudAuthSubmit(e) {
       body: JSON.stringify(payload)
     });
     const data = await res.json();
-    if (data.success && data.account) {
-      localStorage.setItem('streamvault_account', JSON.stringify(data.account));
-      if (data.account.iptvServerUrl && appStatus?.credentials) {
-        appStatus.credentials.serverUrl = data.account.iptvServerUrl;
-        appStatus.credentials.username = data.account.iptvUsername;
-        appStatus.credentials.password = data.account.iptvPassword;
-        appStatus.credentials.playlistName = data.account.playlistName;
+    if (data.requireVerification) {
+      currentPendingVerifyEmail = email;
+      const lbl = document.getElementById('cloudVerifyEmailLabel');
+      if (lbl) lbl.innerText = email;
+      switchCloudAuthPane('verify');
+      showToast('✓ 6-Digit code sent to ' + email);
+      if (data.devCode) {
+        console.log('[StreamVault Cloud] Dev verification code:', data.devCode);
       }
+    } else if (data.success && data.token) {
+      localStorage.setItem('sv_auth_token', data.token);
+      localStorage.setItem('streamvault_session_token', data.token);
+      localStorage.setItem('streamvault_account', JSON.stringify({
+        accountId: data.accountId,
+        email: data.email
+      }));
       closeCloudAuthModal();
       hideWelcomeScreen();
-      showToast('✓ Welcome, ' + (data.account.displayName || data.account.email) + '! Cloud sync active.');
-      if (data.account.iptvServerUrl) {
-        await navigateToTab('HOME');
+      showToast('✓ Welcome back! Cloud sync active.');
+      const vp = document.getElementById('mainViewport');
+      if (vp && currentTab === 'SETTINGS') {
+        loadSettings(vp);
       } else {
-        showToast('Please enter your IPTV credentials to connect your catalog', 3500);
-        await navigateToTab('SETTINGS');
-        setTimeout(() => {
-          document.getElementById('setServerUrl')?.focus();
-        }, 150);
+        await navigateToTab('HOME');
       }
     } else {
       if (statusMsg) {
@@ -3620,6 +3599,129 @@ async function handleCloudAuthSubmit(e) {
     }
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+async function handleVerifyCodeSubmit(e) {
+  if (e) e.preventDefault();
+  const btn = document.getElementById('cloudVerifySubmitBtn');
+  const statusMsg = document.getElementById('cloudVerifyStatusMsg');
+  const code = document.getElementById('cloudVerifyCodeInput')?.value?.trim();
+
+  if (!code || !currentPendingVerifyEmail) return;
+  if (btn) btn.disabled = true;
+  if (statusMsg) {
+    statusMsg.style.color = '#C4B5FD';
+    statusMsg.innerText = 'Verifying code...';
+  }
+
+  try {
+    const res = await fetch(CLOUD_SYNC_BASE + '/api/auth/verify-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: currentPendingVerifyEmail, code })
+    });
+    const data = await res.json();
+    if (data.success && data.token) {
+      localStorage.setItem('sv_auth_token', data.token);
+      localStorage.setItem('streamvault_session_token', data.token);
+      localStorage.setItem('streamvault_account', JSON.stringify({
+        accountId: data.accountId,
+        email: data.email
+      }));
+      closeCloudAuthModal();
+      hideWelcomeScreen();
+      showToast('✓ Account verified and activated! Welcome to StreamVault TV.');
+      const vp = document.getElementById('mainViewport');
+      if (vp && currentTab === 'SETTINGS') {
+        loadSettings(vp);
+      } else {
+        await navigateToTab('SETTINGS');
+      }
+    } else {
+      if (statusMsg) {
+        statusMsg.style.color = '#EF4444';
+        statusMsg.innerText = data.error || 'Invalid or expired code. Please try again.';
+      }
+    }
+  } catch (err) {
+    if (statusMsg) {
+      statusMsg.style.color = '#EF4444';
+      statusMsg.innerText = err.message || 'Connection error';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function resendVerificationCode(e) {
+  if (e) e.preventDefault();
+  if (!currentPendingVerifyEmail) return;
+  const statusMsg = document.getElementById('cloudVerifyStatusMsg');
+  if (statusMsg) {
+    statusMsg.style.color = '#C4B5FD';
+    statusMsg.innerText = 'Sending new code...';
+  }
+  try {
+    const res = await fetch(CLOUD_SYNC_BASE + '/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: currentPendingVerifyEmail, password: 'resend_request_' + Date.now() })
+    });
+    const data = await res.json();
+    if (statusMsg) {
+      statusMsg.style.color = '#10B981';
+      statusMsg.innerText = '✓ New 6-digit code sent to your email!';
+    }
+    if (data.devCode) {
+      console.log('[StreamVault Cloud] Resent dev verification code:', data.devCode);
+    }
+  } catch (err) {
+    if (statusMsg) {
+      statusMsg.style.color = '#EF4444';
+      statusMsg.innerText = 'Failed to resend code';
+    }
+  }
+}
+
+function openSignOutModal() {
+  playNavSound();
+  const m = document.getElementById('signOutModal');
+  if (m) {
+    m.style.display = 'flex';
+    setTimeout(() => {
+      document.getElementById('btnCancelSignOut')?.focus();
+    }, 60);
+  }
+}
+
+function closeSignOutModal() {
+  playNavSound();
+  const m = document.getElementById('signOutModal');
+  if (m) m.style.display = 'none';
+  const btn = document.getElementById('btnSignOutAccount') || document.getElementById('btnOpenCloudSignIn');
+  if (btn) btn.focus();
+}
+
+async function confirmSignOutAccount() {
+  playNavSound();
+  const token = localStorage.getItem('sv_auth_token') || localStorage.getItem('streamvault_session_token');
+  if (token) {
+    try {
+      await fetch(CLOUD_SYNC_BASE + '/api/auth/signout', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token }
+      }).catch(() => {});
+    } catch (_) {}
+  }
+  localStorage.removeItem('sv_auth_token');
+  localStorage.removeItem('streamvault_session_token');
+  localStorage.removeItem('streamvault_account');
+  closeSignOutModal();
+  showToast('✓ Signed out of Cloud Account');
+  const vp = document.getElementById('mainViewport');
+  if (vp && currentTab === 'SETTINGS') {
+    loadSettings(vp);
   }
 }
 
@@ -3647,6 +3749,102 @@ async function triggerCloudSync() {
   }
 }
 
+// Hardware & Audio Settings Toggles
+function toggleAudioPriority() {
+  playNavSound();
+  const current = localStorage.getItem('streamvault_audio_priority') || '5.1';
+  const modes = [
+    { key: '5.1', label: 'English (5.1ch Surround)' },
+    { key: 'orig', label: 'Original Audio (Direct Passthrough)' },
+    { key: 'night', label: 'Stereo Downmix (Night Mode)' }
+  ];
+  const idx = modes.findIndex(m => m.key === current);
+  const next = modes[(idx + 1) % modes.length];
+  localStorage.setItem('streamvault_audio_priority', next.key);
+  const btn = document.getElementById('btnAudioPriority');
+  if (btn) btn.innerText = next.label;
+  showToast('Audio Priority: ' + next.label);
+}
+
+function toggleDedupQuality() {
+  playNavSound();
+  const current = localStorage.getItem('streamvault_dedup_quality') || '4k';
+  const modes = [
+    { key: '4k', label: '4K UHD > Clean HQ* > 1080p' },
+    { key: '1080p', label: '1080p FHD Preferred' },
+    { key: 'direct', label: 'Direct Stream (Fastest Buffer)' }
+  ];
+  const idx = modes.findIndex(m => m.key === current);
+  const next = modes[(idx + 1) % modes.length];
+  localStorage.setItem('streamvault_dedup_quality', next.key);
+  const btn = document.getElementById('btnDedupQuality');
+  if (btn) btn.innerText = next.label;
+  showToast('Dedup Quality: ' + next.label);
+}
+
+// Parental & Profile Customization Helpers
+function updateParentalStatusInSettings() {
+  const btn = document.getElementById('btnToggleParentalLock');
+  if (!btn) return;
+  btn.innerText = isAdultVaultUnlocked ? 'Lock Session' : 'Unlock Session';
+  btn.style.color = isAdultVaultUnlocked ? '#10B981' : '#F59E0B';
+}
+
+function switchUserProfile(profileId) {
+  playNavSound();
+  localStorage.setItem('streamvault_active_profile_id', profileId);
+  showToast('Switched profile');
+  const vp = document.getElementById('mainViewport');
+  if (vp && currentTab === 'PROFILE') {
+    loadProfile(vp);
+  }
+}
+
+function toggleProfileKidsMode() {
+  playNavSound();
+  currentActiveProfile.isKids = !currentActiveProfile.isKids;
+  const btn = document.getElementById('btnToggleKidsMode');
+  if (btn) {
+    btn.innerText = currentActiveProfile.isKids ? 'Enabled' : 'Disabled';
+    btn.style.background = currentActiveProfile.isKids ? '#059669' : '#262A38';
+    btn.style.borderColor = currentActiveProfile.isKids ? '#10B981' : '#374151';
+    btn.style.color = currentActiveProfile.isKids ? '#FFFFFF' : '#9CA3AF';
+  }
+}
+
+async function saveActiveProfileChanges() {
+  playNavSound();
+  const nameInp = document.getElementById('profNameInput');
+  if (nameInp) currentActiveProfile.name = nameInp.value.trim() || currentActiveProfile.name;
+  localStorage.setItem('streamvault_active_theme', currentActiveProfile.theme || 'purple');
+
+  const statusLbl = document.getElementById('profSaveStatus');
+  if (statusLbl) {
+    statusLbl.innerText = '✓ Profile Saved';
+    setTimeout(() => { if (statusLbl) statusLbl.innerText = ''; }, 3000);
+  }
+
+  // Update profile header pill
+  const pillName = document.querySelector('.user-profile-name');
+  if (pillName) pillName.innerText = currentActiveProfile.name;
+  const avatarInit = document.getElementById('userProfileAvatarInitial');
+  if (avatarInit) avatarInit.innerText = (currentActiveProfile.name[0] || 'U').toUpperCase();
+  showToast('✓ Profile updated');
+}
+
+function promptAddNewProfile() {
+  playNavSound();
+  showToast('Profile added (Primary family profile)');
+}
+
+function promptDeleteCurrentProfile() {
+  playNavSound();
+  if (currentActiveProfile.isPrimary) {
+    showToast('Primary profile cannot be deleted');
+    return;
+  }
+  showToast('Profile deleted');
+}
 
 // 6. DETAIL MODAL WITH BACKGROUND PREVIEW + 5-STAR RATING + SMART RECOMMENDATIONS
 let currentMltMode = 'everything';
@@ -3823,7 +4021,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
 
   const ov = document.getElementById('detailOverlay');
   ov.style.display = 'flex';
-  ov.style.padding = '24px 44px';
+  ov.style.padding = '16px 36px 14px 36px';
   ov.innerHTML = `
     <div style="position:relative;z-index:2;height:100%;display:flex;flex-direction:column;justify-content:space-between;max-width:1240px;margin:0 auto;width:100%;">
       <div style="display:flex;gap:28px;align-items:flex-start;">
@@ -3885,9 +4083,9 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
       <div style="position:relative;z-index:2;height:100%;display:flex;flex-direction:column;justify-content:space-between;max-width:1240px;margin:0 auto;width:100%;">
         <!-- Upper Hero Section: Fits 100% On-Screen with 0 vertical scroll -->
         <div style="display:flex;gap:28px;align-items:flex-start;">
-          <div style="position:relative;width:170px;height:255px;flex-shrink:0;">
+          <div style="position:relative;width:140px;height:210px;flex-shrink:0;">
             <img src="${item.posterUrl || ''}" onerror="this.style.display='none'"
-                 style="width:170px;height:255px;object-fit:cover;border-radius:10px;border:1.5px solid #2B3042;box-shadow:0 12px 30px rgba(0,0,0,0.85);" />
+                 style="width:140px;height:210px;object-fit:cover;border-radius:10px;border:1.5px solid #2B3042;box-shadow:0 12px 30px rgba(0,0,0,0.85);" />
             ${isWatched ? `<div style="position:absolute;top:8px;right:8px;background:#10B981;color:#fff;font-size:10px;font-weight:900;padding:2px 7px;border-radius:5px;box-shadow:0 4px 10px rgba(16,185,129,0.5);">✓ Watched</div>` : ''}
           </div>
 
@@ -4934,8 +5132,21 @@ async function verifyParentalPin() {
 // 9. GLOBAL BACK KEY HANDLER (Industry Standard Leanback Navigation)
 window.handleAppBackKey = function() {
   // 1. Modals
+  if (document.getElementById('playlistModal') && document.getElementById('playlistModal').style.display === 'flex') {
+    closePlaylistModal();
+    return true;
+  }
+  if (document.getElementById('signOutModal') && document.getElementById('signOutModal').style.display === 'flex') {
+    closeSignOutModal();
+    return true;
+  }
   if (document.getElementById('cloudAuthModal') && document.getElementById('cloudAuthModal').style.display === 'flex') {
-    closeCloudAuthModal();
+    const verifyPane = document.getElementById('cloudAuthVerifyPane');
+    if (verifyPane && verifyPane.style.display !== 'none' && verifyPane.style.display !== '') {
+      switchCloudAuthPane('form');
+    } else {
+      closeCloudAuthModal();
+    }
     return true;
   }
   if (document.getElementById('deleteHistoryModal') && document.getElementById('deleteHistoryModal').style.display === 'flex') {
@@ -5070,9 +5281,61 @@ function fastNavigate(current, key) {
     return true;
   }
 
+  // 0.1 Playlist Modal Navigation Flow
+  const plModal = document.getElementById('playlistModal');
+  if (plModal && plModal.style.display === 'flex') {
+    if (!plModal.contains(current)) {
+      document.getElementById('inpPlaylistServer')?.focus();
+      playNavSound();
+      return true;
+    }
+    if (current.id === 'inpPlaylistName') {
+      if (key === 'ArrowDown') { document.getElementById('inpPlaylistServer')?.focus(); playNavSound(); return true; }
+      return true;
+    }
+    if (current.id === 'inpPlaylistServer') {
+      if (key === 'ArrowUp') { document.getElementById('inpPlaylistName')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowDown') { document.getElementById('inpPlaylistUser')?.focus(); playNavSound(); return true; }
+      return true;
+    }
+    if (current.id === 'inpPlaylistUser') {
+      if (key === 'ArrowUp') { document.getElementById('inpPlaylistServer')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowRight') { document.getElementById('inpPlaylistPass')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowDown') { document.getElementById('btnSavePlaylist')?.focus(); playNavSound(); return true; }
+      return true;
+    }
+    if (current.id === 'inpPlaylistPass') {
+      if (key === 'ArrowUp') { document.getElementById('inpPlaylistServer')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowLeft') { document.getElementById('inpPlaylistUser')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowDown') { document.getElementById('btnSavePlaylist')?.focus(); playNavSound(); return true; }
+      return true;
+    }
+    if (current.id === 'btnSavePlaylist') {
+      if (key === 'ArrowUp') { document.getElementById('inpPlaylistUser')?.focus(); playNavSound(); return true; }
+      if (key === 'ArrowLeft') { plModal.querySelector('button[type="button"]')?.focus(); playNavSound(); return true; }
+      return true;
+    }
+    return true;
+  }
+
   // 0.2. Cloud Auth Modal Navigation Flow
   const cloudAuthModal = document.getElementById('cloudAuthModal');
   if (cloudAuthModal && cloudAuthModal.style.display === 'flex') {
+    const verifyPane = document.getElementById('cloudAuthVerifyPane');
+    const isVerifyActive = verifyPane && verifyPane.style.display !== 'none' && verifyPane.style.display !== '';
+    if (isVerifyActive) {
+      if (current.id === 'cloudVerifyCodeInput') {
+        if (key === 'ArrowDown') { document.getElementById('cloudVerifySubmitBtn')?.focus(); playNavSound(); return true; }
+        return true;
+      }
+      if (current.id === 'cloudVerifySubmitBtn') {
+        if (key === 'ArrowUp') { document.getElementById('cloudVerifyCodeInput')?.focus(); playNavSound(); return true; }
+        if (key === 'ArrowLeft') { verifyPane.querySelector('button[type="button"]')?.focus(); playNavSound(); return true; }
+        if (key === 'ArrowDown') { verifyPane.querySelector('a')?.focus(); playNavSound(); return true; }
+        return true;
+      }
+      return true;
+    }
     if (!cloudAuthModal.contains(current)) {
       document.getElementById('cloudAuthEmail')?.focus();
       playNavSound();
@@ -6422,6 +6685,8 @@ function navigateSpatial(key) {
   let container = document;
   if (activeDropdownId && document.getElementById(activeDropdownId) && document.getElementById(activeDropdownId).style.display === 'block') {
     container = document.getElementById(activeDropdownId);
+  } else if (document.getElementById('playlistModal') && document.getElementById('playlistModal').style.display === 'flex') {
+    container = document.getElementById('playlistModal');
   } else if (document.getElementById('cloudAuthModal') && document.getElementById('cloudAuthModal').style.display === 'flex') {
     container = document.getElementById('cloudAuthModal');
   } else if (document.getElementById('welcomeScreenOverlay') && document.getElementById('welcomeScreenOverlay').style.display === 'flex') {

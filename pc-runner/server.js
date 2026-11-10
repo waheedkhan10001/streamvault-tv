@@ -1425,7 +1425,8 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(buildPhonePortalHtml());
     }
-    const htmlPath = path.join(__dirname, 'tv-ui.html');
+    const assetsHtmlPath = path.join(__dirname, '../app/src/main/assets/tv-ui.html');
+    const htmlPath = fs.existsSync(assetsHtmlPath) ? assetsHtmlPath : path.join(__dirname, 'tv-ui.html');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(fs.readFileSync(htmlPath, 'utf8'));
   }
@@ -2631,6 +2632,46 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           state.remoteSearchQuery = '';
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: true }));
+        }
+        if (pathname === '/api/playlists' && req.method === 'GET') {
+          const playlists = [];
+          if (state.credentials.serverUrl && state.credentials.username) {
+            playlists.push({
+              playlist_id: 'local_pl_primary',
+              name: state.credentials.playlistName || 'Primary IPTV',
+              server_url: state.credentials.serverUrl,
+              username: state.credentials.username,
+              is_enabled: 1,
+              status: state.syncStatus?.isSyncing ? 'syncing' : (state.syncStatus?.error ? 'failed' : 'working'),
+              total_titles: state.mediaItems.length,
+              enriched_titles: state.mediaItems.filter(m => m.tmdbId > 0).length,
+              last_sync_at: state.syncStatus?.lastSync || Date.now()
+            });
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, playlists }));
+        }
+        if (pathname === '/api/playlists' && req.method === 'POST') {
+          const data = JSON.parse(body || '{}');
+          state.credentials = {
+            ...state.credentials,
+            playlistName: data.name || data.playlistName || state.credentials.playlistName,
+            serverUrl: data.serverUrl || state.credentials.serverUrl,
+            username: data.username || state.credentials.username,
+            password: data.password || state.credentials.password
+          };
+          scheduleSaveState();
+          runLiveIptvSync(true);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, message: 'Playlist saved' }));
+        }
+        if (pathname.startsWith('/api/playlists/') && req.method === 'DELETE') {
+          state.credentials.serverUrl = '';
+          state.credentials.username = '';
+          state.credentials.password = '';
+          scheduleSaveState();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, message: 'Playlist removed' }));
         }
         if (pathname === '/api/save-credentials') {
           const isJson = (req.headers['content-type'] || '').includes('application/json');
