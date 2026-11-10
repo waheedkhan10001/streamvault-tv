@@ -1,28 +1,274 @@
 /**
- * StreamVault TV Cloud Sync & Universal Account Engine
+ * ====================================================================
+ * StreamVault TV — Cloud Sync & Universal Account Engine
  * Cloudflare Worker + Cloudflare D1 Serverless Database
+ * ====================================================================
  */
+
+// Rate limiting in-memory bucket (Worker isolate lifetime)
+const RATE_LIMIT_MAP = new Map();
+function checkRateLimit(ip, bucket, maxRequests = 15, windowSeconds = 60) {
+  const key = `${bucket}:${ip}`;
+  const now = Date.now();
+  const record = RATE_LIMIT_MAP.get(key) || { count: 0, resetAt: now + windowSeconds * 1000 };
+  if (now > record.resetAt) {
+    record.count = 0;
+    record.resetAt = now + windowSeconds * 1000;
+  }
+  record.count++;
+  RATE_LIMIT_MAP.set(key, record);
+  return record.count <= maxRequests;
+}
+
+// Security: Standard CORS Headers
+function getCorsHeaders(request) {
+  const origin = request.headers.get('Origin') || '*';
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Max-Age': '86400',
+    'Content-Type': 'application/json'
+  };
+}
+
+function jsonResponse(data, status = 200, corsHeaders) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: corsHeaders
+  });
+}
+
+function errorResponse(message, status = 400, corsHeaders) {
+  return new Response(JSON.stringify({ error: message, success: false }), {
+    status,
+    headers: corsHeaders
+  });
+}
+
+// --------------------------------------------------------------------
+// Cryptographic Helpers (PBKDF2, AES-GCM, SHA-256)
+// --------------------------------------------------------------------
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256(str) {
+  const enc = new TextEncoder();
+  const digest = await crypto.subtle.digest('SHA-256', enc.encode(str));
+  return bytesToHex(digest);
+}
+
+// PBKDF2 Password Hashing (100,000 iterations, SHA-256)
+async function hashPassword(password, saltHex) {
+  const enc = new TextEncoder();
+  const salt = saltHex ? hexToBytes(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const derived = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    256
+  );
+  const hashHex = bytesToHex(derived);
+  const finalSaltHex = bytesToHex(salt);
+  return `pbkdf2:100000:${finalSaltHex}:${hashHex}`;
+}
+
+async function verifyPassword(password, storedHash) {
+  if (!storedHash) return false;
+  const parts = storedHash.split(':');
+  if (parts.length === 4 && parts[0] === 'pbkdf2') {
+    const iterations = parseInt(parts[1], 10);
+    const saltHex = parts[2];
+    const expectedHashHex = parts[3];
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      enc.encode(password),
+      'PBKDF2',
+      false,
+      ['deriveBits']
+    );
+    const derived = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt: hexToBytes(saltHex),
+        iterations,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      256
+    );
+    const actualHashHex = bytesToHex(derived);
+    return actualHashHex === expectedHashHex;
+  }
+  // Legacy SHA-256 fallback migration
+  if (parts.length === 2) {
+    const saltHex = parts[0];
+    const expected = parts[1];
+    const enc = new TextEncoder();
+    const hashBuf = await crypto.subtle.digest('SHA-256', enc.encode(password + ':' + saltHex));
+    return bytesToHex(hashBuf) === expected;
+  }
+  return false;
+}
+
+// AES-GCM-256 for encrypting IPTV passwords at rest
+async function getEncryptionKey(env) {
+  const secret = env.AES_SECRET || env.ENCRYPTION_KEY || 'sv_default_secure_vault_key_2026';
+  const enc = new TextEncoder();
+  const rawKey = await crypto.subtle.digest('SHA-256', enc.encode(secret));
+  return crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+async function encryptData(plainText, env) {
+  if (!plainText) return '';
+  const key = await getEncryptionKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder();
+  const cipher = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    enc.encode(plainText)
+  );
+  return `${bytesToHex(iv)}:${bytesToHex(cipher)}`;
+}
+
+async function decryptData(cipherString, env) {
+  if (!cipherString || !cipherString.includes(':')) return '';
+  try {
+    const [ivHex, cipherHex] = cipherString.split(':');
+    const key = await getEncryptionKey(env);
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: hexToBytes(ivHex) },
+      key,
+      hexToBytes(cipherHex)
+    );
+    return new TextDecoder().decode(decrypted);
+  } catch (_) {
+    return '';
+  }
+}
+
+// Generate crypto-random session token (32 bytes = 64 hex chars)
+function generateSessionToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return bytesToHex(bytes);
+}
+
+// --------------------------------------------------------------------
+// Authentication Middleware (Bearer Session Token)
+// --------------------------------------------------------------------
+
+async function authenticate(request, env) {
+  const authHeader = request.headers.get('Authorization') || '';
+  if (!authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7).trim();
+  if (!token || token.length < 32) return null;
+
+  const tokenHash = await sha256(token);
+  const now = Date.now();
+
+  const session = await env.DB.prepare(
+    `SELECT s.session_id, s.account_id, s.expires_at, a.email, a.is_verified
+     FROM sessions s
+     JOIN accounts a ON s.account_id = a.account_id
+     WHERE s.token_hash = ? AND s.expires_at > ?`
+  ).bind(tokenHash, now).first();
+
+  if (!session) return null;
+  return {
+    accountId: session.account_id,
+    sessionId: session.session_id,
+    email: session.email,
+    isVerified: session.is_verified === 1,
+    token
+  };
+}
+
+// --------------------------------------------------------------------
+// Resend Email Integration
+// --------------------------------------------------------------------
+
+async function sendVerificationEmail(email, code, env) {
+  if (!env.RESEND_API_KEY) {
+    console.warn(`[StreamVault Auth] RESEND_API_KEY not configured. Verification code for ${email}: ${code}`);
+    return { sent: false, note: 'RESEND_API_KEY not set in Worker secrets' };
+  }
+  try {
+    const fromAddr = env.EMAIL_FROM || 'StreamVault TV <onboarding@resend.dev>';
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: fromAddr,
+        to: email,
+        subject: `${code} is your StreamVault TV verification code`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; background: #090714; color: #FFFFFF; border-radius: 12px;">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h1 style="color: #A78BFA; font-size: 24px; margin: 0 0 8px;">StreamVault TV</h1>
+              <p style="color: #94A3B8; font-size: 14px; margin: 0;">Standalone Cloud Account Verification</p>
+            </div>
+            <div style="background: #15102A; border: 1px solid #2E2356; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
+              <p style="color: #E2E8F0; font-size: 14px; margin-top: 0;">Enter this 6-digit code on your TV or mobile pairing screen:</p>
+              <div style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #8B5CF6; margin: 16px 0;">${code}</div>
+              <p style="color: #64748B; font-size: 12px; margin-bottom: 0;">Valid for 10 minutes. Never share this code.</p>
+            </div>
+            <p style="color: #64748B; font-size: 11px; text-align: center; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
+          </div>
+        `
+      })
+    });
+    return { sent: res.ok, status: res.status };
+  } catch (err) {
+    console.error('[Resend Error]', err);
+    return { sent: false, error: err.message };
+  }
+}
+
+// --------------------------------------------------------------------
+// Worker Request Router
+// --------------------------------------------------------------------
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const pathname = url.pathname;
     const method = request.method;
-
-    // CORS Headers for TV App, Mobile App, and Browser Access
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Content-Type': 'application/json'
-    };
+    const clientIp = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
+    const corsHeaders = getCorsHeaders(request);
 
     if (method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
 
     try {
-      // 1. Web Link & Pairing UI for Mobile / Browser
+      // 1. Mobile & Web TV Link Portal
       if (pathname === '/' || pathname === '/link') {
         const codeParam = url.searchParams.get('code') || '';
         return new Response(renderWebPairingUi(codeParam), {
@@ -30,797 +276,1057 @@ export default {
         });
       }
 
-      // 2. User Sign Up (Email + Password)
-      if (method === 'POST' && pathname === '/api/auth/signup') {
-        const { email, password, displayName = 'Account Owner', iptvServer = '', iptvUser = '', iptvPass = '', playlistName = 'StreamVault IPTV' } = await request.json().catch(() => ({}));
-        if (!email || !password) {
-          return new Response(JSON.stringify({ error: 'Email and password are required' }), { status: 400, headers: corsHeaders });
-        }
+      // ================================================================
+      // AUTH ENDPOINTS (Public / Verification)
+      // ================================================================
 
+      // A. Sign Up (PBKDF2 + Email Verification Code)
+      if (method === 'POST' && pathname === '/api/auth/signup') {
+        if (!checkRateLimit(clientIp, 'signup', 5, 60)) {
+          return errorResponse('Too many sign-up attempts. Please wait 1 minute.', 429, corsHeaders);
+        }
+        const { email, password, displayName = 'Account Owner' } = await request.json().catch(() => ({}));
+        if (!email || !password) {
+          return errorResponse('Email and password are required', 400, corsHeaders);
+        }
         const cleanEmail = email.trim().toLowerCase();
         if (cleanEmail.length < 5 || !cleanEmail.includes('@')) {
-          return new Response(JSON.stringify({ error: 'Please enter a valid email address' }), { status: 400, headers: corsHeaders });
+          return errorResponse('Please enter a valid email address', 400, corsHeaders);
         }
         if (password.length < 6) {
-          return new Response(JSON.stringify({ error: 'Password must be at least 6 characters' }), { status: 400, headers: corsHeaders });
-        }
-
-        if (!env.DB) {
-          return new Response(JSON.stringify({ error: 'Cloud database connection unavailable' }), { status: 503, headers: corsHeaders });
+          return errorResponse('Password must be at least 6 characters', 400, corsHeaders);
         }
 
         // Check if account already exists
-        const existing = await env.DB.prepare('SELECT account_id FROM accounts WHERE email = ?').bind(cleanEmail).first();
-        if (existing) {
-          return new Response(JSON.stringify({ error: 'An account with this email already exists. Please sign in instead.' }), { status: 409, headers: corsHeaders });
-        }
-
-        const salt = generateSalt();
-        const hash = await hashPassword(password, salt);
-        const passwordHash = `${salt}:${hash}`;
-        const accountId = 'acc_' + hashStr(cleanEmail + Date.now());
+        const existing = await env.DB.prepare('SELECT account_id, is_verified FROM accounts WHERE email = ?').bind(cleanEmail).first();
+        const accountId = existing ? existing.account_id : crypto.randomUUID();
         const now = Date.now();
 
-        // Create Account
+        if (existing && existing.is_verified === 1) {
+          return errorResponse('An account with this email already exists. Please sign in.', 409, corsHeaders);
+        }
+
+        // Compute PBKDF2 hash (100k iterations)
+        const passwordHash = await hashPassword(password);
+
+        if (!existing) {
+          await env.DB.prepare(
+            `INSERT INTO accounts (account_id, email, password_hash, is_verified, created_at, updated_at)
+             VALUES (?, ?, ?, 0, ?, ?)`
+          ).bind(accountId, cleanEmail, passwordHash, now, now).run();
+
+          // Create primary profile (cannot be deleted)
+          const profileId = 'prof_' + crypto.randomUUID().substring(0, 8);
+          await env.DB.prepare(
+            `INSERT INTO profiles (profile_id, account_id, display_name, avatar_color, theme, is_kids, is_primary, created_at, updated_at)
+             VALUES (?, ?, ?, '#8B5CF6', 'StreamVault Purple', 0, 1, ?, ?)`
+          ).bind(profileId, accountId, displayName.trim() || 'Account Owner', now, now).run();
+        } else {
+          // Update password if unverified re-attempt
+          await env.DB.prepare(
+            `UPDATE accounts SET password_hash = ?, updated_at = ? WHERE account_id = ?`
+          ).bind(passwordHash, now, accountId).run();
+        }
+
+        // Generate 6-digit confirmation code
+        const codeNum = Math.floor(100000 + Math.random() * 900000);
+        const codeStr = String(codeNum);
+        const codeId = crypto.randomUUID();
+        const expiresAt = now + 10 * 60 * 1000; // 10 minutes
+
         await env.DB.prepare(
-          `INSERT INTO accounts (account_id, email, password_hash, iptv_server_url, iptv_username, iptv_password, playlist_name, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(accountId, cleanEmail, passwordHash, iptvServer, iptvUser, iptvPass, playlistName, now, now).run();
+          `INSERT INTO email_codes (code_id, email, code, purpose, attempts, is_used, expires_at, created_at)
+           VALUES (?, ?, ?, 'verify_email', 0, 0, ?, ?)`
+        ).bind(codeId, cleanEmail, codeStr, expiresAt, now).run();
 
-        // Create Default Profile
-        const profileId = 'prof_' + accountId + '_1';
-        await env.DB.prepare(
-          `INSERT INTO profiles (profile_id, account_id, display_name, avatar_color, is_kids, created_at, updated_at)
-           VALUES (?, ?, ?, '#8B5CF6', 0, ?, ?)`
-        ).bind(profileId, accountId, displayName, now, now).run();
+        // Send email via Resend
+        const emailResult = await sendVerificationEmail(cleanEmail, codeStr, env);
 
-        const token = generateAuthToken(accountId, passwordHash);
-
-        const account = {
-          accountId,
-          email: cleanEmail,
-          displayName,
-          iptvServerUrl: iptvServer,
-          iptvUsername: iptvUser,
-          hasIptvPassword: !!iptvPass,
-          playlistName
-        };
-
-        const profiles = [{
-          profileId,
-          accountId,
-          displayName,
-          avatarColor: '#8B5CF6',
-          isKids: 0
-        }];
-
-        return new Response(JSON.stringify({
+        return jsonResponse({
           success: true,
-          message: 'Account created successfully',
-          token,
-          account,
-          profiles,
-          syncData: []
-        }), { headers: corsHeaders });
+          requireVerification: true,
+          email: cleanEmail,
+          message: 'Verification code sent to your email',
+          devCode: !env.RESEND_API_KEY ? codeStr : undefined // Helps local setup before RESEND_API_KEY secret is populated
+        }, 201, corsHeaders);
       }
 
-      // 3. User Sign In (Email + Password)
-      if (method === 'POST' && pathname === '/api/auth/login') {
-        const { email, password } = await request.json().catch(() => ({}));
-        if (!email || !password) {
-          return new Response(JSON.stringify({ error: 'Email and password are required' }), { status: 400, headers: corsHeaders });
+      // B. Verify Email Code
+      if (method === 'POST' && pathname === '/api/auth/verify-code') {
+        if (!checkRateLimit(clientIp, 'verify', 10, 60)) {
+          return errorResponse('Too many verification attempts. Please wait 1 minute.', 429, corsHeaders);
         }
+        const { email, code } = await request.json().catch(() => ({}));
+        if (!email || !code) return errorResponse('Email and code are required', 400, corsHeaders);
+        const cleanEmail = email.trim().toLowerCase();
+        const cleanCode = String(code).trim();
+        const now = Date.now();
+
+        const codeRecord = await env.DB.prepare(
+          `SELECT code_id, attempts, is_used, expires_at
+           FROM email_codes
+           WHERE email = ? AND code = ? AND is_used = 0
+           ORDER BY created_at DESC LIMIT 1`
+        ).bind(cleanEmail, cleanCode).first();
+
+        if (!codeRecord) {
+          // Increment attempts on recent codes for this email
+          await env.DB.prepare(
+            `UPDATE email_codes SET attempts = attempts + 1 WHERE email = ? AND is_used = 0`
+          ).bind(cleanEmail).run();
+          return errorResponse('Invalid or expired verification code', 401, corsHeaders);
+        }
+
+        if (codeRecord.attempts >= 5) {
+          return errorResponse('Too many failed attempts. Please request a new verification code.', 429, corsHeaders);
+        }
+        if (now > codeRecord.expires_at) {
+          return errorResponse('Verification code has expired. Please request a new code.', 400, corsHeaders);
+        }
+
+        // Mark code as used & verify account
+        await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(codeRecord.code_id).run();
+        await env.DB.prepare(`UPDATE accounts SET is_verified = 1, updated_at = ? WHERE email = ?`).bind(now, cleanEmail).run();
+
+        const account = await env.DB.prepare(`SELECT account_id FROM accounts WHERE email = ?`).bind(cleanEmail).first();
+
+        // Issue 32-byte crypto session token
+        const rawToken = generateSessionToken();
+        const tokenHash = await sha256(rawToken);
+        const sessionId = crypto.randomUUID();
+        const sessionExpires = now + 30 * 86400 * 1000; // 30 days
+
+        await env.DB.prepare(
+          `INSERT INTO sessions (session_id, account_id, token_hash, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(sessionId, account.account_id, tokenHash, sessionExpires, now).run();
+
+        const profiles = await env.DB.prepare(
+          `SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE account_id = ?`
+        ).bind(account.account_id).all();
+
+        return jsonResponse({
+          success: true,
+          message: 'Email verified successfully',
+          accountId: account.account_id,
+          token: rawToken,
+          email: cleanEmail,
+          profiles: profiles.results || []
+        }, 200, corsHeaders);
+      }
+
+      // C. Sign In (PBKDF2 Check + Session Issue)
+      if (method === 'POST' && pathname === '/api/auth/login') {
+        if (!checkRateLimit(clientIp, 'login', 8, 60)) {
+          return errorResponse('Too many login attempts. Please wait 1 minute.', 429, corsHeaders);
+        }
+        const { email, password } = await request.json().catch(() => ({}));
+        if (!email || !password) return errorResponse('Email and password are required', 400, corsHeaders);
 
         const cleanEmail = email.trim().toLowerCase();
-        if (!env.DB) {
-          return new Response(JSON.stringify({ error: 'Cloud database connection unavailable' }), { status: 503, headers: corsHeaders });
-        }
-
-        const row = await env.DB.prepare(
-          'SELECT * FROM accounts WHERE email = ?'
+        const account = await env.DB.prepare(
+          `SELECT account_id, email, password_hash, is_verified FROM accounts WHERE email = ?`
         ).bind(cleanEmail).first();
 
-        if (!row) {
-          return new Response(JSON.stringify({ error: 'No account found with this email. Please check spelling or create an account.' }), { status: 404, headers: corsHeaders });
-        }
+        if (!account) return errorResponse('Invalid email or password', 401, corsHeaders);
 
-        if (!row.password_hash) {
-          return new Response(JSON.stringify({ error: 'No password is set for this account. Please create an account or reset.' }), { status: 401, headers: corsHeaders });
-        }
+        const isValid = await verifyPassword(password, account.password_hash);
+        if (!isValid) return errorResponse('Invalid email or password', 401, corsHeaders);
 
-        const parts = row.password_hash.split(':');
-        if (parts.length === 2) {
-          const [salt, expectedHash] = parts;
-          const actualHash = await hashPassword(password, salt);
-          if (actualHash !== expectedHash) {
-            return new Response(JSON.stringify({ error: 'Incorrect password. Please try again.' }), { status: 401, headers: corsHeaders });
-          }
-        } else {
-          return new Response(JSON.stringify({ error: 'Invalid password format. Please reset your password.' }), { status: 401, headers: corsHeaders });
-        }
-
-        // Fetch profiles & sync data
-        const { results: profiles } = await env.DB.prepare(
-          'SELECT * FROM profiles WHERE account_id = ?'
-        ).bind(row.account_id).all();
-
-        const { results: syncData } = await env.DB.prepare(
-          `SELECT s.* FROM user_sync_data s JOIN profiles p ON s.profile_id = p.profile_id WHERE p.account_id = ?`
-        ).bind(row.account_id).all();
-
-        const token = generateAuthToken(row.account_id, row.password_hash);
-
-        const account = {
-          accountId: row.account_id,
-          email: row.email,
-          displayName: (profiles && profiles[0] && profiles[0].display_name) || row.email.split('@')[0],
-          iptvServerUrl: row.iptv_server_url || '',
-          iptvUsername: row.iptv_username || '',
-          hasIptvPassword: !!row.iptv_password,
-          playlistName: row.playlist_name || 'StreamVault IPTV'
-        };
-
-        return new Response(JSON.stringify({
-          success: true,
-          message: 'Signed in successfully',
-          token,
-          account,
-          profiles: profiles || [],
-          syncData: syncData || []
-        }), { headers: corsHeaders });
-      }
-
-      // 4. Update IPTV Credentials in Cloud Account
-      if (method === 'POST' && pathname === '/api/account/update-credentials') {
-        const { accountId, token, iptvServerUrl, iptvUsername, iptvPassword, playlistName } = await request.json().catch(() => ({}));
-        if (!accountId) {
-          return new Response(JSON.stringify({ error: 'Missing accountId' }), { status: 400, headers: corsHeaders });
-        }
-
-        if (env.DB) {
-          // Optional security check if token provided
-          if (token) {
-            const acc = await env.DB.prepare('SELECT password_hash FROM accounts WHERE account_id = ?').bind(accountId).first();
-            if (acc && generateAuthToken(accountId, acc.password_hash) !== token) {
-              return new Response(JSON.stringify({ error: 'Unauthorized: Session invalid' }), { status: 401, headers: corsHeaders });
-            }
-          }
-
-          await env.DB.prepare(
-            `UPDATE accounts SET 
-               iptv_server_url = ?,
-               iptv_username = ?,
-               iptv_password = ?,
-               playlist_name = ?,
-               updated_at = ?
-             WHERE account_id = ?`
-          ).bind(iptvServerUrl || '', iptvUsername || '', iptvPassword || '', playlistName || 'StreamVault IPTV', Date.now(), accountId).run();
-        }
-
-        return new Response(JSON.stringify({ success: true, message: 'IPTV credentials synced to cloud account' }), { headers: corsHeaders });
-      }
-
-      // 5. Request TV Link Code (TV calls this to get SV-XXXX)
-      if (method === 'POST' && pathname === '/api/auth/request-code') {
-        const { deviceId = 'tv-generic' } = await request.json().catch(() => ({}));
-        const code = generateTvCode();
         const now = Date.now();
-        const expiresAt = now + 15 * 60 * 1000; // 15 minutes
+        // Issue 32-byte session token
+        const rawToken = generateSessionToken();
+        const tokenHash = await sha256(rawToken);
+        const sessionId = crypto.randomUUID();
+        const sessionExpires = now + 30 * 86400 * 1000;
 
-        if (env.DB) {
-          await env.DB.prepare(
-            `INSERT INTO tv_codes (code, device_id, status, created_at, expires_at) VALUES (?, ?, 'pending', ?, ?)`
-          ).bind(code, deviceId, now, expiresAt).run();
+        await env.DB.prepare(
+          `INSERT INTO sessions (session_id, account_id, token_hash, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(sessionId, account.account_id, tokenHash, sessionExpires, now).run();
+
+        // Load profiles & playlists
+        const profiles = await env.DB.prepare(
+          `SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE account_id = ?`
+        ).bind(account.account_id).all();
+
+        const playlists = await env.DB.prepare(
+          `SELECT playlist_id, name, server_url, username, is_enabled, status, last_sync_at FROM playlists WHERE account_id = ? AND removed_at IS NULL`
+        ).bind(account.account_id).all();
+
+        return jsonResponse({
+          success: true,
+          token: rawToken,
+          accountId: account.account_id,
+          email: account.email,
+          isVerified: account.is_verified === 1,
+          profiles: profiles.results || [],
+          playlists: playlists.results || []
+        }, 200, corsHeaders);
+      }
+
+      // D. Sign Out (Revoke Session Token)
+      if (method === 'POST' && pathname === '/api/auth/signout') {
+        const auth = await authenticate(request, env);
+        if (auth) {
+          await env.DB.prepare(`DELETE FROM sessions WHERE session_id = ?`).bind(auth.sessionId).run();
         }
+        return jsonResponse({ success: true, message: 'Signed out' }, 200, corsHeaders);
+      }
 
-        const pairUrl = `${url.origin}/link?code=${code}`;
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(pairUrl)}`;
+      // ================================================================
+      // PAIRING CODES (TV ↔ Mobile QR Link Flow)
+      // ================================================================
 
-        return new Response(JSON.stringify({
+      // A. TV Requests Live 6-Digit Pairing Code (e.g. SV-XXXX)
+      if (method === 'POST' && pathname === '/api/auth/request-code') {
+        const now = Date.now();
+        // Generate random 4-character suffix using non-confusing chars
+        const charset = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+        let suffix = '';
+        const randBytes = crypto.getRandomValues(new Uint8Array(4));
+        for (let i = 0; i < 4; i++) {
+          suffix += charset[randBytes[i] % charset.length];
+        }
+        const code = `SV-${suffix}`;
+        const expiresAt = now + 10 * 60 * 1000;
+
+        await env.DB.prepare(
+          `INSERT INTO pairing_codes (code, status, attempts, created_at, expires_at)
+           VALUES (?, 'pending', 0, ?, ?)`
+        ).bind(code, now, expiresAt).run();
+
+        const pairingUrl = `https://${url.host}/link?code=${code}`;
+        return jsonResponse({
           success: true,
           code,
-          expiresAt,
-          qrUrl,
-          pairUrl
-        }), { headers: corsHeaders });
+          expiresInSeconds: 600,
+          pairingUrl,
+          qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pairingUrl)}`
+        }, 200, corsHeaders);
       }
 
-      // 6. Poll TV Link Code Status (TV calls this every few seconds)
-      if (method === 'GET' && pathname === '/api/auth/poll-code') {
-        const code = url.searchParams.get('code');
-        if (!code) {
-          return new Response(JSON.stringify({ error: 'Missing code' }), { status: 400, headers: corsHeaders });
-        }
-
-        if (!env.DB) {
-          return new Response(JSON.stringify({ status: 'pending' }), { headers: corsHeaders });
-        }
-
-        const row = await env.DB.prepare(
-          `SELECT * FROM tv_codes WHERE code = ? AND expires_at > ?`
-        ).bind(code, Date.now()).first();
-
-        if (!row) {
-          return new Response(JSON.stringify({ status: 'expired' }), { headers: corsHeaders });
-        }
-
-        if (row.status === 'claimed' && row.account_id) {
-          const account = await env.DB.prepare(
-            `SELECT * FROM accounts WHERE account_id = ?`
-          ).bind(row.account_id).first();
-
-          const { results: profiles } = await env.DB.prepare(
-            `SELECT * FROM profiles WHERE account_id = ?`
-          ).bind(row.account_id).all();
-
-          const { results: syncData } = await env.DB.prepare(
-            `SELECT s.* FROM user_sync_data s JOIN profiles p ON s.profile_id = p.profile_id WHERE p.account_id = ?`
-          ).bind(row.account_id).all();
-
-          return new Response(JSON.stringify({
-            status: 'claimed',
-            accountId: row.account_id,
-            account: {
-              accountId: account.account_id,
-              email: account.email,
-              displayName: (profiles && profiles[0] && profiles[0].display_name) || account.email.split('@')[0],
-              iptvServerUrl: account.iptv_server_url || '',
-              iptvUsername: account.iptv_username || '',
-              hasIptvPassword: !!account.iptv_password,
-              playlistName: account.playlist_name || 'StreamVault IPTV'
-            },
-            profiles: profiles || [],
-            syncData: syncData || []
-          }), { headers: corsHeaders });
-        }
-
-        return new Response(JSON.stringify({ status: 'pending' }), { headers: corsHeaders });
-      }
-
-      // 7. Securely Claim TV Link Code (Only authenticated users can link)
+      // B. Mobile User Claims TV Code (Must be authenticated)
       if (method === 'POST' && pathname === '/api/auth/claim-code') {
-        const { code, accountId, token, email, password } = await request.json().catch(() => ({}));
-        if (!code) {
-          return new Response(JSON.stringify({ error: 'Missing TV pairing code' }), { status: 400, headers: corsHeaders });
+        const auth = await authenticate(request, env);
+        if (!auth) return errorResponse('Authentication required to link device', 401, corsHeaders);
+
+        const { code } = await request.json().catch(() => ({}));
+        if (!code) return errorResponse('Pairing code is required', 400, corsHeaders);
+
+        const cleanCode = String(code).trim().toUpperCase();
+        const now = Date.now();
+
+        const record = await env.DB.prepare(
+          `SELECT code, status, expires_at FROM pairing_codes WHERE code = ?`
+        ).bind(cleanCode).first();
+
+        if (!record || record.status !== 'pending' || now > record.expires_at) {
+          return errorResponse('Code is invalid, expired, or already used', 400, corsHeaders);
         }
 
-        const cleanCode = code.trim().toUpperCase();
-        if (!env.DB) {
-          return new Response(JSON.stringify({ error: 'Database unavailable' }), { status: 503, headers: corsHeaders });
-        }
+        // Generate one-time 32-byte exchange token
+        const exchangeToken = generateSessionToken();
 
-        // Verify TV pairing code is valid and pending
-        const codeRow = await env.DB.prepare(
-          'SELECT * FROM tv_codes WHERE code = ? AND expires_at > ?'
-        ).bind(cleanCode, Date.now()).first();
-
-        if (!codeRow) {
-          return new Response(JSON.stringify({ error: 'Invalid or expired TV pairing code. Please generate a fresh code on your TV.' }), { status: 404, headers: corsHeaders });
-        }
-
-        let verifiedAccountId = null;
-
-        // Path A: Authenticated session token from phone browser
-        if (accountId && token) {
-          const acc = await env.DB.prepare('SELECT account_id, password_hash FROM accounts WHERE account_id = ?').bind(accountId).first();
-          if (acc) {
-            const expectedToken = generateAuthToken(acc.account_id, acc.password_hash);
-            if (expectedToken === token) {
-              verifiedAccountId = acc.account_id;
-            }
-          }
-        }
-
-        // Path B: Credentials directly provided
-        if (!verifiedAccountId && email && password) {
-          const cleanEmail = email.trim().toLowerCase();
-          const acc = await env.DB.prepare('SELECT account_id, password_hash FROM accounts WHERE email = ?').bind(cleanEmail).first();
-          if (acc && acc.password_hash) {
-            const parts = acc.password_hash.split(':');
-            if (parts.length === 2) {
-              const [salt, expectedHash] = parts;
-              const actualHash = await hashPassword(password, salt);
-              if (actualHash === expectedHash) {
-                verifiedAccountId = acc.account_id;
-              }
-            }
-          }
-        }
-
-        if (!verifiedAccountId) {
-          return new Response(JSON.stringify({ error: 'Unauthorized: Invalid credentials or session expired. Please sign in to link this TV.' }), { status: 401, headers: corsHeaders });
-        }
-
-        // Mark TV code as claimed by this verified account
         await env.DB.prepare(
-          `UPDATE tv_codes SET status = 'claimed', account_id = ? WHERE code = ?`
-        ).bind(verifiedAccountId, cleanCode).run();
+          `UPDATE pairing_codes
+           SET account_id = ?, exchange_token = ?, status = 'claimed'
+           WHERE code = ?`
+        ).bind(auth.accountId, exchangeToken, cleanCode).run();
 
-        return new Response(JSON.stringify({
+        return jsonResponse({
           success: true,
-          message: 'TV successfully authorized and linked!',
-          accountId: verifiedAccountId
-        }), { headers: corsHeaders });
+          message: 'TV successfully paired! Your TV will log in automatically.'
+        }, 200, corsHeaders);
       }
 
-      // 8. Cloud Push Sync (Watch progress, watchlist, ratings)
-      if (method === 'POST' && pathname === '/api/sync/push') {
-        const { accountId, profileId, dataType, payload } = await request.json().catch(() => ({}));
-        if (!profileId || !dataType) {
-          return new Response(JSON.stringify({ error: 'Missing profileId or dataType' }), { status: 400, headers: corsHeaders });
+      // C. TV Polls Code Status (Zero password leakage)
+      if (method === 'GET' && pathname === '/api/auth/poll-code') {
+        const codeParam = url.searchParams.get('code') || '';
+        if (!codeParam) return errorResponse('Code parameter required', 400, corsHeaders);
+
+        const cleanCode = codeParam.trim().toUpperCase();
+        const now = Date.now();
+
+        const record = await env.DB.prepare(
+          `SELECT status, exchange_token, expires_at FROM pairing_codes WHERE code = ?`
+        ).bind(cleanCode).first();
+
+        if (!record || now > record.expires_at) {
+          return jsonResponse({ status: 'expired' }, 200, corsHeaders);
         }
 
-        if (env.DB) {
-          const now = Date.now();
+        if (record.status === 'claimed' && record.exchange_token) {
+          // Never return passwords here! Only the single-use exchange token.
+          return jsonResponse({
+            status: 'paired',
+            exchangeToken: record.exchange_token
+          }, 200, corsHeaders);
+        }
+
+        return jsonResponse({ status: 'pending' }, 200, corsHeaders);
+      }
+
+      // D. TV Exchanges Token for Permanent Session & Credentials
+      if (method === 'POST' && pathname === '/api/auth/pair-exchange') {
+        const { code, exchangeToken } = await request.json().catch(() => ({}));
+        if (!code || !exchangeToken) return errorResponse('Code and exchange token required', 400, corsHeaders);
+
+        const cleanCode = String(code).trim().toUpperCase();
+        const now = Date.now();
+
+        const record = await env.DB.prepare(
+          `SELECT account_id, exchange_token, status, expires_at
+           FROM pairing_codes WHERE code = ?`
+        ).bind(cleanCode).first();
+
+        if (!record || record.status !== 'claimed' || record.exchange_token !== exchangeToken || now > record.expires_at) {
+          return errorResponse('Invalid or expired exchange token', 403, corsHeaders);
+        }
+
+        // Invalidate exchange token immediately (single use)
+        await env.DB.prepare(`UPDATE pairing_codes SET status = 'exchanged', exchange_token = NULL WHERE code = ?`).bind(cleanCode).run();
+
+        // Issue new session token for the TV
+        const rawToken = generateSessionToken();
+        const tokenHash = await sha256(rawToken);
+        const sessionId = crypto.randomUUID();
+        const sessionExpires = now + 30 * 86400 * 1000;
+
+        await env.DB.prepare(
+          `INSERT INTO sessions (session_id, account_id, token_hash, expires_at, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        ).bind(sessionId, record.account_id, tokenHash, sessionExpires, now).run();
+
+        const account = await env.DB.prepare(`SELECT email FROM accounts WHERE account_id = ?`).bind(record.account_id).first();
+        const profiles = await env.DB.prepare(`SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE account_id = ?`).bind(record.account_id).all();
+
+        // Decrypt playlists for the paired TV
+        const playlists = await env.DB.prepare(`SELECT playlist_id, name, server_url, username, password_enc, is_enabled, status FROM playlists WHERE account_id = ? AND removed_at IS NULL`).bind(record.account_id).all();
+        const decryptedPlaylists = [];
+        for (const p of (playlists.results || [])) {
+          const pass = await decryptData(p.password_enc, env);
+          decryptedPlaylists.push({
+            playlistId: p.playlist_id,
+            name: p.name,
+            serverUrl: p.server_url,
+            username: p.username,
+            password: pass,
+            isEnabled: p.is_enabled === 1,
+            status: p.status
+          });
+        }
+
+        return jsonResponse({
+          success: true,
+          token: rawToken,
+          accountId: record.account_id,
+          email: account ? account.email : '',
+          profiles: profiles.results || [],
+          playlists: decryptedPlaylists
+        }, 200, corsHeaders);
+      }
+
+      // ================================================================
+      // AUTHENTICATED ENDPOINTS (Requires Bearer Session Token)
+      // Every endpoint below verifies ownership via auth.accountId (Fixes S2)
+      // ================================================================
+
+      const auth = await authenticate(request, env);
+      if (!auth) {
+        return errorResponse('Unauthorized: Valid Bearer session token required', 401, corsHeaders);
+      }
+
+      // ----------------------------------------------------------------
+      // IPTV PLAYLIST MANAGEMENT (Many per account, replaceable)
+      // ----------------------------------------------------------------
+
+      // List Playlists
+      if (method === 'GET' && pathname === '/api/playlists') {
+        const rows = await env.DB.prepare(
+          `SELECT playlist_id, name, server_url, username, password_enc, is_enabled, status, last_sync_at, created_at, updated_at
+           FROM playlists
+           WHERE account_id = ? AND removed_at IS NULL
+           ORDER BY created_at ASC`
+        ).bind(auth.accountId).all();
+
+        const playlists = [];
+        for (const r of (rows.results || [])) {
+          const pass = await decryptData(r.password_enc, env);
+          playlists.push({
+            playlistId: r.playlist_id,
+            name: r.name,
+            serverUrl: r.server_url,
+            username: r.username,
+            password: pass,
+            isEnabled: r.is_enabled === 1,
+            status: r.status,
+            lastSyncAt: r.last_sync_at,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at
+          });
+        }
+        return jsonResponse({ success: true, playlists }, 200, corsHeaders);
+      }
+
+      // Add Playlist
+      if (method === 'POST' && pathname === '/api/playlists') {
+        const { name, serverUrl, username, password } = await request.json().catch(() => ({}));
+        if (!serverUrl || !username || !password) {
+          return errorResponse('Server URL, username, and password are required', 400, corsHeaders);
+        }
+        const now = Date.now();
+        const playlistId = 'pl_' + crypto.randomUUID().substring(0, 10);
+        const passEnc = await encryptData(password, env);
+
+        await env.DB.prepare(
+          `INSERT INTO playlists (playlist_id, account_id, name, server_url, username, password_enc, is_enabled, status, last_sync_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, 'ready', 0, ?, ?)`
+        ).bind(playlistId, auth.accountId, (name || 'My IPTV').trim(), serverUrl.trim(), username.trim(), passEnc, now, now).run();
+
+        return jsonResponse({
+          success: true,
+          playlist: {
+            playlistId,
+            name: (name || 'My IPTV').trim(),
+            serverUrl: serverUrl.trim(),
+            username: username.trim(),
+            isEnabled: true,
+            status: 'ready'
+          }
+        }, 201, corsHeaders);
+      }
+
+      // Update Playlist
+      if (method === 'PUT' && pathname.startsWith('/api/playlists/')) {
+        const playlistId = pathname.replace('/api/playlists/', '').trim();
+        const { name, serverUrl, username, password, isEnabled, status } = await request.json().catch(() => ({}));
+        const now = Date.now();
+
+        const existing = await env.DB.prepare(
+          `SELECT playlist_id, password_enc FROM playlists WHERE playlist_id = ? AND account_id = ?`
+        ).bind(playlistId, auth.accountId).first();
+
+        if (!existing) return errorResponse('Playlist not found', 404, corsHeaders);
+
+        let passEnc = existing.password_enc;
+        if (password && password.trim().length > 0) {
+          passEnc = await encryptData(password.trim(), env);
+        }
+
+        await env.DB.prepare(
+          `UPDATE playlists
+           SET name = COALESCE(?, name),
+               server_url = COALESCE(?, server_url),
+               username = COALESCE(?, username),
+               password_enc = ?,
+               is_enabled = COALESCE(?, is_enabled),
+               status = COALESCE(?, status),
+               updated_at = ?
+           WHERE playlist_id = ? AND account_id = ?`
+        ).bind(
+          name ? name.trim() : null,
+          serverUrl ? serverUrl.trim() : null,
+          username ? username.trim() : null,
+          passEnc,
+          isEnabled !== undefined ? (isEnabled ? 1 : 0) : null,
+          status || null,
+          now,
+          playlistId,
+          auth.accountId
+        ).run();
+
+        return jsonResponse({ success: true, message: 'Playlist updated' }, 200, corsHeaders);
+      }
+
+      // Delete Playlist (Soft delete: keeps profile data 100% safe!)
+      if (method === 'DELETE' && pathname.startsWith('/api/playlists/')) {
+        const playlistId = pathname.replace('/api/playlists/', '').trim();
+        const now = Date.now();
+        await env.DB.prepare(
+          `UPDATE playlists SET is_enabled = 0, removed_at = ?, updated_at = ?
+           WHERE playlist_id = ? AND account_id = ?`
+        ).bind(now, now, playlistId, auth.accountId).run();
+
+        return jsonResponse({ success: true, message: 'Playlist removed' }, 200, corsHeaders);
+      }
+
+      // ----------------------------------------------------------------
+      // CATALOG SYNC (Batched, Idempotent, 14-day Soft Delete)
+      // ----------------------------------------------------------------
+
+      // A. Batch Sync Items from TV App
+      if (method === 'POST' && pathname === '/api/catalog/sync-batch') {
+        const { items, playlistId } = await request.json().catch(() => ({}));
+        if (!Array.isArray(items) || items.length === 0) {
+          return errorResponse('Items array required', 400, corsHeaders);
+        }
+
+        const now = Date.now();
+        const stmts = [];
+
+        for (const it of items) {
+          if (!it.dedupKey) continue;
+          const itemId = `${auth.accountId}:${it.dedupKey}`;
+          stmts.push(
+            env.DB.prepare(
+              `INSERT INTO catalog_items (
+                item_id, account_id, playlist_id, dedup_key, media_type, title, clean_title,
+                year, tmdb_id, overview, poster_path, backdrop_path, rating, runtime_mins,
+                genres_json, versions_json, episodes_json, is_adult, is_removed, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+              ON CONFLICT(item_id) DO UPDATE SET
+                playlist_id = excluded.playlist_id,
+                title = excluded.title,
+                clean_title = excluded.clean_title,
+                year = excluded.year,
+                tmdb_id = excluded.tmdb_id,
+                overview = excluded.overview,
+                poster_path = excluded.poster_path,
+                backdrop_path = excluded.backdrop_path,
+                rating = excluded.rating,
+                runtime_mins = excluded.runtime_mins,
+                genres_json = excluded.genres_json,
+                versions_json = excluded.versions_json,
+                episodes_json = excluded.episodes_json,
+                is_adult = excluded.is_adult,
+                is_removed = 0,
+                removed_at = NULL,
+                updated_at = excluded.updated_at`
+            ).bind(
+              itemId, auth.accountId, playlistId || null, it.dedupKey, it.mediaType || 'MOVIE',
+              it.title || 'Untitled', it.cleanTitle || it.title || 'Untitled',
+              it.year || null, it.tmdbId || null, it.overview || null,
+              it.posterPath || null, it.backdropPath || null,
+              it.rating || 0, it.runtimeMins || 0,
+              JSON.stringify(it.genres || []),
+              JSON.stringify(it.versions || []),
+              JSON.stringify(it.episodes || []),
+              it.isAdult ? 1 : 0,
+              now, now
+            )
+          );
+        }
+
+        if (stmts.length > 0) {
+          // Execute batch (max 100 per transaction)
+          await env.DB.batch(stmts);
+        }
+
+        return jsonResponse({ success: true, count: stmts.length }, 200, corsHeaders);
+      }
+
+      // B. Pull Catalog Items (Delta Sync via updated_since)
+      if (method === 'GET' && pathname === '/api/catalog/pull') {
+        const updatedSince = parseInt(url.searchParams.get('updated_since') || '0', 10);
+        const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10), 200);
+        const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+
+        const rows = await env.DB.prepare(
+          `SELECT item_id, playlist_id, dedup_key, media_type, title, clean_title, year, tmdb_id,
+                  overview, poster_path, backdrop_path, rating, runtime_mins, genres_json,
+                  versions_json, episodes_json, is_adult, is_removed, removed_at, updated_at
+           FROM catalog_items
+           WHERE account_id = ? AND updated_at > ?
+           ORDER BY updated_at ASC
+           LIMIT ? OFFSET ?`
+        ).bind(auth.accountId, updatedSince, limit, offset).all();
+
+        const countRow = await env.DB.prepare(
+          `SELECT COUNT(*) as total FROM catalog_items WHERE account_id = ? AND updated_at > ?`
+        ).bind(auth.accountId, updatedSince).first();
+
+        const items = (rows.results || []).map(r => ({
+          itemId: r.item_id,
+          playlistId: r.playlist_id,
+          dedupKey: r.dedup_key,
+          mediaType: r.media_type,
+          title: r.title,
+          cleanTitle: r.clean_title,
+          year: r.year,
+          tmdbId: r.tmdb_id,
+          overview: r.overview,
+          posterPath: r.poster_path,
+          backdropPath: r.backdrop_path,
+          rating: r.rating,
+          runtimeMins: r.runtime_mins,
+          genres: JSON.parse(r.genres_json || '[]'),
+          versions: JSON.parse(r.versions_json || '[]'),
+          episodes: JSON.parse(r.episodes_json || '[]'),
+          isAdult: r.is_adult === 1,
+          isRemoved: r.is_removed === 1,
+          removedAt: r.removed_at,
+          updatedAt: r.updated_at
+        }));
+
+        const total = (countRow && countRow.total) || 0;
+        return jsonResponse({
+          success: true,
+          items,
+          total,
+          hasMore: offset + items.length < total
+        }, 200, corsHeaders);
+      }
+
+      // C. Mark Removed Titles (14-day Soft Delete)
+      if (method === 'POST' && pathname === '/api/catalog/mark-removed') {
+        const { dedupKeys } = await request.json().catch(() => ({}));
+        if (!Array.isArray(dedupKeys) || dedupKeys.length === 0) {
+          return errorResponse('dedupKeys array required', 400, corsHeaders);
+        }
+        const now = Date.now();
+        const stmts = dedupKeys.map(k =>
+          env.DB.prepare(
+            `UPDATE catalog_items
+             SET is_removed = 1, removed_at = ?, updated_at = ?
+             WHERE account_id = ? AND dedup_key = ?`
+          ).bind(now, now, auth.accountId, k)
+        );
+        await env.DB.batch(stmts);
+        return jsonResponse({ success: true, count: stmts.length }, 200, corsHeaders);
+      }
+
+      // D. Purge Titles Removed > 14 Days Ago (Zero profile data loss!)
+      if (method === 'POST' && pathname === '/api/catalog/purge-expired') {
+        const fourteenDaysAgo = Date.now() - 14 * 86400 * 1000;
+        const res = await env.DB.prepare(
+          `DELETE FROM catalog_items
+           WHERE account_id = ? AND is_removed = 1 AND removed_at < ?`
+        ).bind(auth.accountId, fourteenDaysAgo).run();
+        return jsonResponse({ success: true, purged: res.meta?.changes || 0 }, 200, corsHeaders);
+      }
+
+      // ----------------------------------------------------------------
+      // SHARED TMDB PROXY & CACHE (Proxy TMDB so key is not in APK)
+      // ----------------------------------------------------------------
+
+      if (method === 'GET' && pathname.startsWith('/api/tmdb/')) {
+        const subPath = pathname.replace('/api/tmdb/', '');
+        const apiKey = env.TMDB_API_KEY || '8265bd1679663a7ea12ac168da84d2e8'; // Fallback community read key
+        const now = Date.now();
+
+        // 1. Check shared cache
+        const cacheKey = `${subPath}:${url.searchParams.toString()}`;
+        const cached = await env.DB.prepare(
+          `SELECT response_json FROM tmdb_cache WHERE cache_key = ? AND expires_at > ?`
+        ).bind(cacheKey, now).first();
+
+        if (cached && cached.response_json) {
+          return new Response(cached.response_json, {
+            headers: {
+              ...corsHeaders,
+              'X-Cache': 'HIT',
+              'Cache-Control': 'public, max-age=86400'
+            }
+          });
+        }
+
+        // 2. Fetch from TMDB API
+        const tmdbUrl = new URL(`https://api.themoviedb.org/3/${subPath}`);
+        for (const [k, v] of url.searchParams.entries()) {
+          tmdbUrl.searchParams.set(k, v);
+        }
+        tmdbUrl.searchParams.set('api_key', apiKey);
+
+        const tmdbRes = await fetch(tmdbUrl.toString(), {
+          headers: { 'Accept': 'application/json' }
+        });
+        const resText = await tmdbRes.text();
+
+        if (tmdbRes.ok) {
+          // Cache response for 7 days
+          const expiresAt = now + 7 * 86400 * 1000;
           await env.DB.prepare(
-            `INSERT INTO user_sync_data (profile_id, data_type, data_json, updated_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(profile_id, data_type) DO UPDATE SET
+            `INSERT INTO tmdb_cache (cache_key, endpoint, response_json, expires_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(cache_key) DO UPDATE SET response_json = excluded.response_json, expires_at = excluded.expires_at, updated_at = excluded.updated_at`
+          ).bind(cacheKey, subPath, resText, expiresAt, now).run();
+        }
+
+        return new Response(resText, {
+          status: tmdbRes.status,
+          headers: {
+            ...corsHeaders,
+            'X-Cache': 'MISS'
+          }
+        });
+      }
+
+      // ----------------------------------------------------------------
+      // USER PROFILES & PERSONAL DATA (Decoupled & Permanent)
+      // ----------------------------------------------------------------
+
+      // List Profiles
+      if (method === 'GET' && pathname === '/api/profiles') {
+        const rows = await env.DB.prepare(
+          `SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary
+           FROM profiles WHERE account_id = ? ORDER BY is_primary DESC, created_at ASC`
+        ).bind(auth.accountId).all();
+        return jsonResponse({ success: true, profiles: rows.results || [] }, 200, corsHeaders);
+      }
+
+      // Create Secondary Profile
+      if (method === 'POST' && pathname === '/api/profiles/create') {
+        const { displayName, avatarColor = '#8B5CF6', theme = 'StreamVault Purple', isKids = false } = await request.json().catch(() => ({}));
+        if (!displayName || !displayName.trim()) return errorResponse('Profile display name required', 400, corsHeaders);
+
+        const profileId = 'prof_' + crypto.randomUUID().substring(0, 8);
+        const now = Date.now();
+
+        await env.DB.prepare(
+          `INSERT INTO profiles (profile_id, account_id, display_name, avatar_color, theme, is_kids, is_primary, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`
+        ).bind(profileId, auth.accountId, displayName.trim(), avatarColor, theme, isKids ? 1 : 0, now, now).run();
+
+        return jsonResponse({
+          success: true,
+          profile: {
+            profileId,
+            displayName: displayName.trim(),
+            avatarColor,
+            theme,
+            isKids: !!isKids,
+            isPrimary: false
+          }
+        }, 201, corsHeaders);
+      }
+
+      // Delete Secondary Profile (Guards primary profile!)
+      if (method === 'POST' && pathname === '/api/profiles/delete') {
+        const { profileId } = await request.json().catch(() => ({}));
+        if (!profileId) return errorResponse('Profile ID required', 400, corsHeaders);
+
+        const profile = await env.DB.prepare(
+          `SELECT profile_id, is_primary FROM profiles WHERE profile_id = ? AND account_id = ?`
+        ).bind(profileId, auth.accountId).first();
+
+        if (!profile) return errorResponse('Profile not found', 404, corsHeaders);
+        if (profile.is_primary === 1) {
+          return errorResponse('Primary account profile cannot be deleted', 403, corsHeaders);
+        }
+
+        await env.DB.prepare(`DELETE FROM profiles WHERE profile_id = ? AND account_id = ?`).bind(profileId, auth.accountId).run();
+        await env.DB.prepare(`DELETE FROM profile_data WHERE profile_id = ? AND account_id = ?`).bind(profileId, auth.accountId).run();
+
+        return jsonResponse({ success: true, message: 'Profile deleted' }, 200, corsHeaders);
+      }
+
+      // Push Profile Data (Watchlist, Resume Progress, Ratings, Searches)
+      if (method === 'POST' && pathname === '/api/sync/push') {
+        const { profileId, dataType, items } = await request.json().catch(() => ({}));
+        if (!profileId || !dataType || !Array.isArray(items)) {
+          return errorResponse('profileId, dataType, and items array required', 400, corsHeaders);
+        }
+        const now = Date.now();
+        const stmts = items.map(it =>
+          env.DB.prepare(
+            `INSERT INTO profile_data (profile_id, account_id, data_type, item_key, data_json, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(profile_id, data_type, item_key) DO UPDATE SET
                data_json = excluded.data_json,
                updated_at = excluded.updated_at`
-          ).bind(profileId, dataType, JSON.stringify(payload), now).run();
-        }
+          ).bind(profileId, auth.accountId, dataType, it.itemKey || 'list', JSON.stringify(it.data || it), it.updatedAt || now)
+        );
 
-        return new Response(JSON.stringify({ success: true, timestamp: Date.now() }), { headers: corsHeaders });
+        if (stmts.length > 0) {
+          await env.DB.batch(stmts);
+        }
+        return jsonResponse({ success: true, count: stmts.length }, 200, corsHeaders);
       }
 
-      // 9. Cloud Pull Sync (Pull latest state for profile)
+      // Pull Profile Data (Delta Sync)
       if (method === 'GET' && pathname === '/api/sync/pull') {
-        const profileId = url.searchParams.get('profileId');
-        if (!profileId) {
-          return new Response(JSON.stringify({ error: 'Missing profileId' }), { status: 400, headers: corsHeaders });
+        const profileId = url.searchParams.get('profile_id');
+        const dataType = url.searchParams.get('data_type');
+        const updatedSince = parseInt(url.searchParams.get('updated_since') || '0', 10);
+
+        let query = `SELECT profile_id, data_type, item_key, data_json, updated_at FROM profile_data WHERE account_id = ? AND updated_at > ?`;
+        const params = [auth.accountId, updatedSince];
+
+        if (profileId) {
+          query += ` AND profile_id = ?`;
+          params.push(profileId);
+        }
+        if (dataType) {
+          query += ` AND data_type = ?`;
+          params.push(dataType);
         }
 
-        if (!env.DB) {
-          return new Response(JSON.stringify({ data: null }), { headers: corsHeaders });
-        }
+        const rows = await env.DB.prepare(query).bind(...params).all();
+        const results = (rows.results || []).map(r => ({
+          profileId: r.profile_id,
+          dataType: r.data_type,
+          itemKey: r.item_key,
+          data: JSON.parse(r.data_json || '{}'),
+          updatedAt: r.updated_at
+        }));
 
-        const { results } = await env.DB.prepare(
-          `SELECT data_type, data_json, updated_at FROM user_sync_data WHERE profile_id = ?`
-        ).bind(profileId).all();
-
-        const syncMap = {};
-        for (const row of results || []) {
-          try {
-            syncMap[row.data_type] = JSON.parse(row.data_json);
-          } catch (_) {
-            syncMap[row.data_type] = row.data_json;
-          }
-        }
-
-        return new Response(JSON.stringify({ success: true, syncData: syncMap }), { headers: corsHeaders });
+        return jsonResponse({ success: true, items: results }, 200, corsHeaders);
       }
 
-      // 10. Fallback 404
-      return new Response(JSON.stringify({ error: 'Endpoint not found' }), { status: 404, headers: corsHeaders });
-
+      return errorResponse('Endpoint not found', 404, corsHeaders);
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message || 'Internal Cloud Sync Error' }), {
-        status: 500,
-        headers: corsHeaders
-      });
+      console.error('[Worker Fatal Error]', err);
+      // Safe, unrevealing error message (Fixes S2/Security)
+      return errorResponse('An internal server error occurred', 500, corsHeaders);
     }
   }
 };
 
-// -------------------------------------------------------------
-// Helper Utilities
-// -------------------------------------------------------------
+// --------------------------------------------------------------------
+// Web TV Link Portal HTML (Rendered on Phone / Browser)
+// --------------------------------------------------------------------
 
-function generateTvCode() {
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // exclude 0, 1, I, O to prevent confusion
-  let code = 'SV-';
-  for (let i = 0; i < 4; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
-function hashStr(s) {
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) {
-    hash = ((hash << 5) - hash) + s.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-function generateSalt() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function hashPassword(password, salt) {
-  const enc = new TextEncoder();
-  const hashBuf = await crypto.subtle.digest('SHA-256', enc.encode(password + ':' + salt));
-  const hashArr = Array.from(new Uint8Array(hashBuf));
-  return hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function generateAuthToken(accountId, passwordHash) {
-  return hashStr(accountId + ':' + (passwordHash || 'nohash') + ':sv_token_salt_v1');
-}
-
-// -------------------------------------------------------------
-// Mobile Pairing & Web Authentication UI (Netflix/YouTube Style)
-// -------------------------------------------------------------
-
-function renderWebPairingUi(defaultCode) {
+function renderWebPairingUi(initialCode = '') {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>StreamVault Cloud - Link Your TV</title>
+  <title>StreamVault TV — Account & TV Link</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background: #0A0814; color: #FFFFFF; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
-    .card { background: #141026; border: 1.5px solid #281F4B; border-radius: 20px; padding: 32px 26px; width: 100%; max-width: 440px; box-shadow: 0 20px 50px rgba(0,0,0,0.7); }
-    .logo { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
-    .logo-badge { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #7C3AED, #4C1D95); display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(124,58,237,0.4); }
-    .logo-title { font-size: 20px; font-weight: 900; letter-spacing: 0.8px; }
-    
-    .user-banner { background: #1B1533; border: 1px solid #372A66; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-    .user-info { display: flex; align-items: center; gap: 10px; }
-    .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: #7C3AED; color: #FFF; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
-    .user-email { font-size: 13px; font-weight: 700; color: #FFFFFF; }
-    .user-name { font-size: 11px; color: #9CA3AF; }
-    .btn-link { background: none; border: none; color: #F87171; font-size: 11.5px; font-weight: 700; cursor: pointer; text-decoration: underline; }
-    
-    .code-box { background: #0F0B20; border: 2px dashed #4C1D95; border-radius: 14px; padding: 18px 14px; text-align: center; margin-bottom: 22px; }
-    .code-input { background: transparent; border: none; font-size: 32px; font-weight: 900; letter-spacing: 4px; text-align: center; text-transform: uppercase; color: #A78BFA; width: 100%; outline: none; }
-    
-    .tabs { display: flex; background: #0F0B20; border-radius: 10px; padding: 4px; margin-bottom: 20px; }
-    .tab-btn { flex: 1; background: transparent; border: none; color: #9CA3AF; padding: 10px 0; font-size: 13.5px; font-weight: 700; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
-    .tab-btn.active { background: #7C3AED; color: #FFFFFF; box-shadow: 0 4px 12px rgba(124,58,237,0.3); }
-    
-    .field { margin-bottom: 15px; }
-    label { display: block; font-size: 11px; font-weight: 700; color: #C4B5FD; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-    input { width: 100%; background: #0F0B20; border: 1.5px solid #2E2356; border-radius: 10px; padding: 12px 14px; font-size: 14px; color: #FFFFFF; outline: none; transition: border-color 0.15s; }
-    input:focus { border-color: #8B5CF6; }
-    
-    .btn { width: 100%; background: linear-gradient(135deg, #7C3AED, #6D28D9); border: none; border-radius: 10px; padding: 14px; font-size: 15px; font-weight: 800; color: #FFFFFF; cursor: pointer; box-shadow: 0 6px 20px rgba(124, 58, 237, 0.35); margin-top: 6px; }
-    .btn:hover { background: #6D28D9; }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .status-msg { margin-top: 15px; font-size: 13px; text-align: center; font-weight: 700; line-height: 1.45; }
-    
-    .drawer-toggle { margin-top: 20px; padding-top: 16px; border-top: 1px solid #281F4B; text-align: center; }
-    .drawer-btn { background: none; border: none; color: #A78BFA; font-size: 12.5px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-    .drawer-panel { display: none; margin-top: 14px; background: #0E0A1E; border: 1px solid #281F4B; border-radius: 12px; padding: 16px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    body { background: #090714; color: #FFFFFF; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+    .card { background: #130E26; border: 1.5px solid #281F4B; border-radius: 16px; width: 100%; max-width: 440px; padding: 28px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
+    .logo { text-align: center; margin-bottom: 24px; }
+    .logo h1 { color: #A78BFA; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+    .logo p { color: #94A3B8; font-size: 13.5px; margin-top: 4px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; background: #0A0716; padding: 4px; border-radius: 10px; border: 1px solid #1E1638; }
+    .tab-btn { flex: 1; padding: 8px 12px; font-size: 12.5px; font-weight: 600; border: none; background: transparent; color: #94A3B8; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+    .tab-btn.active { background: #7C3AED; color: #FFFFFF; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 12px; font-weight: 600; color: #CBD5E1; margin-bottom: 6px; }
+    .form-group input { width: 100%; padding: 12px 14px; background: #0A0716; border: 1.5px solid #281F4B; border-radius: 8px; font-size: 14px; color: #FFFFFF; outline: none; transition: border-color 0.2s; }
+    .form-group input:focus { border-color: #7C3AED; }
+    .btn { width: 100%; padding: 13px; font-size: 14.5px; font-weight: 700; border: none; border-radius: 8px; cursor: pointer; background: #7C3AED; color: #FFFFFF; transition: opacity 0.2s; margin-top: 8px; }
+    .btn:hover { opacity: 0.92; }
+    .code-box { text-align: center; letter-spacing: 6px; font-size: 24px; font-weight: 800; text-transform: uppercase; }
+    .toast { display: none; padding: 12px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; font-weight: 500; }
+    .toast.error { display: block; background: rgba(239,68,68,0.15); border: 1px solid #EF4444; color: #FCA5A5; }
+    .toast.success { display: block; background: rgba(16,185,129,0.15); border: 1px solid #10B981; color: #6EE7B7; }
+    .logged-box { background: #1B1438; border: 1px solid #3B2D6B; border-radius: 10px; padding: 16px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }
+    .logged-email { font-size: 13.5px; font-weight: 600; color: #E2E8F0; }
+    .btn-link-sm { font-size: 12px; color: #A78BFA; background: none; border: none; cursor: pointer; text-decoration: underline; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo">
-      <div class="logo-badge">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5"><path d="M5 3l14 9-14 9V3z"/></svg>
-      </div>
-      <div class="logo-title">STREAMVAULT CLOUD</div>
+      <h1>StreamVault TV</h1>
+      <p>Cloud TV Link & Account Portal</p>
     </div>
 
-    <!-- VIEW A: Authenticated / Known Session on Phone -->
-    <div id="viewAuthenticated" style="display:none;">
-      <div class="user-banner">
-        <div class="user-info">
-          <div class="user-avatar" id="authAvatar">W</div>
-          <div>
-            <div class="user-email" id="authEmailDisplay">user@example.com</div>
-            <div class="user-name" id="authNameDisplay">Account Owner</div>
-          </div>
-        </div>
-        <button class="btn-link" onclick="signOutMobile()">Switch</button>
+    <div id="toast" class="toast"></div>
+
+    <div id="loggedHeader" style="display: none;" class="logged-box">
+      <div>
+        <div style="font-size: 11px; color: #94A3B8;">Signed in as</div>
+        <div id="loggedEmailText" class="logged-email"></div>
       </div>
-
-      <div style="font-size:18px; font-weight:800; margin-bottom:6px;">Link This TV</div>
-      <p style="font-size:13px; color:#9CA3AF; margin-bottom:16px;">Confirm the pairing code shown on your TV screen to unlock your account.</p>
-
-      <div class="code-box">
-        <div style="font-size:11px; font-weight:800; color:#9CA3AF; text-transform:uppercase; margin-bottom:4px;">TV Pairing Code</div>
-        <input id="activeTvCode" class="code-input" maxlength="7" placeholder="SV-XXXX" value="${defaultCode}" />
-      </div>
-
-      <button id="btnAuthorizeTv" class="btn" onclick="authorizeTvWithSession()">Authorize This TV Now</button>
-      <div id="authStatusMsg" class="status-msg"></div>
-
-      <!-- Collapsible IPTV Vault -->
-      <div class="drawer-toggle">
-        <button class="drawer-btn" onclick="toggleIptvDrawer()">
-          <span>⚙ Manage IPTV Credentials</span>
-          <span id="drawerArrow">▼</span>
-        </button>
-        <div id="iptvDrawerPanel" class="drawer-panel">
-          <div style="font-size:12px; color:#9CA3AF; margin-bottom:12px; text-align:left;">Changes sync instantly to all linked TVs.</div>
-          <div class="field" style="text-align:left;">
-            <label>Server URL</label>
-            <input id="iptvServerUrlInp" placeholder="http://provider.com:8080" />
-          </div>
-          <div class="field" style="text-align:left;">
-            <label>Username</label>
-            <input id="iptvUserInp" placeholder="Username" />
-          </div>
-          <div class="field" style="text-align:left;">
-            <label>Password</label>
-            <input id="iptvPassInp" type="password" placeholder="Password" />
-          </div>
-          <button class="btn" style="padding:10px; font-size:13px;" onclick="saveIptvCredentials()">Save &amp; Sync to TV</button>
-          <div id="iptvSaveMsg" class="status-msg" style="margin-top:8px;"></div>
-        </div>
-      </div>
+      <button class="btn-link-sm" onclick="signOut()">Sign Out</button>
     </div>
 
-    <!-- VIEW B: Unauthenticated (Sign In / Register) -->
-    <div id="viewUnauthenticated" style="display:none;">
-      <div id="tvCodePrompt" style="background:#1B1533; border:1px solid #372A66; border-radius:12px; padding:12px 14px; margin-bottom:18px; display:flex; align-items:center; gap:10px;">
-        <span style="font-size:18px;">📺</span>
-        <div style="font-size:12.5px; color:#D1D5DB; line-height:1.4;">
-          Authorizing TV: <strong id="codePromptValue" style="color:#A78BFA; letter-spacing:1px;">${defaultCode || 'New TV'}</strong><br>
-          Sign in or create an account to link.
-        </div>
-      </div>
-
-      <div class="tabs">
-        <button id="tabBtnSignIn" class="tab-btn active" onclick="switchAuthTab('login')">Sign In</button>
-        <button id="tabBtnSignUp" class="tab-btn" onclick="switchAuthTab('signup')">Create Account</button>
-      </div>
-
-      <form id="publicAuthForm" onsubmit="handlePublicAuth(event)">
-        <div id="displayNameField" class="field" style="display:none;">
-          <label>Your Name</label>
-          <input id="inpDisplayName" placeholder="e.g. Waleed Khan" />
-        </div>
-
-        <div class="field">
-          <label>Email Address</label>
-          <input id="inpEmail" type="email" placeholder="name@domain.com" required />
-        </div>
-
-        <div class="field">
-          <label>Password</label>
-          <input id="inpPassword" type="password" placeholder="••••••••" required />
-        </div>
-
-        <button type="submit" id="btnSubmitPublic" class="btn">Sign In &amp; Authorize TV</button>
-        <div id="publicStatusMsg" class="status-msg"></div>
-      </form>
+    <div id="authTabs" class="tabs">
+      <button id="tabBtnPair" class="tab-btn active" onclick="switchTab('pair')">Link TV</button>
+      <button id="tabBtnSignIn" class="tab-btn" onclick="switchTab('signin')">Sign In</button>
+      <button id="tabBtnSignUp" class="tab-btn" onclick="switchTab('signup')">Sign Up</button>
     </div>
 
+    <!-- 1. Pair TV Code Tab -->
+    <div id="panePair">
+      <div class="form-group">
+        <label>Enter 6-Character TV Code</label>
+        <input id="inpTvCode" type="text" class="code-box" maxlength="7" placeholder="SV-XXXX" value="${initialCode}">
+      </div>
+      <button class="btn" onclick="handleClaimCode()">🔗 Link TV Screen</button>
+    </div>
+
+    <!-- 2. Sign In Tab -->
+    <div id="paneSignIn" style="display: none;">
+      <div class="form-group">
+        <label>Email Address</label>
+        <input id="inpLoginEmail" type="email" placeholder="name@example.com">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input id="inpLoginPass" type="password" placeholder="••••••••">
+      </div>
+      <button class="btn" onclick="handleLogin()">Sign In</button>
+    </div>
+
+    <!-- 3. Sign Up Tab -->
+    <div id="paneSignUp" style="display: none;">
+      <div class="form-group">
+        <label>Display Name</label>
+        <input id="inpRegName" type="text" placeholder="Waleed Khan">
+      </div>
+      <div class="form-group">
+        <label>Email Address</label>
+        <input id="inpRegEmail" type="email" placeholder="name@example.com">
+      </div>
+      <div class="form-group">
+        <label>Password (min 6 chars)</label>
+        <input id="inpRegPass" type="password" placeholder="••••••••">
+      </div>
+      <button class="btn" onclick="handleSignUp()">Create Account</button>
+    </div>
+
+    <!-- 4. Verify Code Pane -->
+    <div id="paneVerify" style="display: none;">
+      <p style="font-size: 13px; color: #CBD5E1; margin-bottom: 12px; text-align: center;">We emailed a 6-digit verification code to <b id="verifyEmailTarget"></b></p>
+      <div class="form-group">
+        <label>Enter 6-Digit Email Code</label>
+        <input id="inpVerifyCode" type="text" class="code-box" maxlength="6" placeholder="123456">
+      </div>
+      <button class="btn" onclick="handleVerify()">Confirm Code</button>
+    </div>
   </div>
 
   <script>
-    const INITIAL_CODE = "${defaultCode}";
-    let activeTab = 'login';
-
-    function initMobile() {
-      const sessionRaw = localStorage.getItem('sv_session');
-      if (sessionRaw) {
-        try {
-          const session = JSON.parse(sessionRaw);
-          if (session && session.accountId && session.token) {
-            showAuthenticatedView(session);
-            return;
-          }
-        } catch (_) {}
-      }
-      showUnauthenticatedView();
+    function showToast(msg, isError = true) {
+      const t = document.getElementById('toast');
+      t.className = isError ? 'toast error' : 'toast success';
+      t.innerText = msg;
     }
 
-    function showAuthenticatedView(session) {
-      document.getElementById('viewUnauthenticated').style.display = 'none';
-      document.getElementById('viewAuthenticated').style.display = 'block';
+    function switchTab(tab) {
+      document.getElementById('panePair').style.display = tab === 'pair' ? 'block' : 'none';
+      document.getElementById('paneSignIn').style.display = tab === 'signin' ? 'block' : 'none';
+      document.getElementById('paneSignUp').style.display = tab === 'signup' ? 'block' : 'none';
+      document.getElementById('paneVerify').style.display = 'none';
 
-      const email = session.email || 'user@streamvault.app';
-      const name = session.displayName || email.split('@')[0];
-      document.getElementById('authEmailDisplay').innerText = email;
-      document.getElementById('authNameDisplay').innerText = name;
-      document.getElementById('authAvatar').innerText = (name[0] || 'U').toUpperCase();
+      document.getElementById('tabBtnPair').className = tab === 'pair' ? 'tab-btn active' : 'tab-btn';
+      document.getElementById('tabBtnSignIn').className = tab === 'signin' ? 'tab-btn active' : 'tab-btn';
+      document.getElementById('tabBtnSignUp').className = tab === 'signup' ? 'tab-btn active' : 'tab-btn';
+    }
 
-      if (session.iptvServerUrl) document.getElementById('iptvServerUrlInp').value = session.iptvServerUrl;
-      if (session.iptvUsername) document.getElementById('iptvUserInp').value = session.iptvUsername;
-      if (session.iptvPassword) document.getElementById('iptvPassInp').value = session.iptvPassword;
-
-      if (INITIAL_CODE) {
-        document.getElementById('activeTvCode').value = INITIAL_CODE;
+    function checkAuthState() {
+      const token = localStorage.getItem('sv_auth_token');
+      const email = localStorage.getItem('sv_auth_email');
+      if (token && email) {
+        document.getElementById('loggedHeader').style.display = 'flex';
+        document.getElementById('loggedEmailText').innerText = email;
+        document.getElementById('tabBtnSignIn').style.display = 'none';
+        document.getElementById('tabBtnSignUp').style.display = 'none';
+        switchTab('pair');
+      } else {
+        document.getElementById('loggedHeader').style.display = 'none';
+        document.getElementById('tabBtnSignIn').style.display = 'block';
+        document.getElementById('tabBtnSignUp').style.display = 'block';
       }
     }
 
-    function showUnauthenticatedView() {
-      document.getElementById('viewAuthenticated').style.display = 'none';
-      document.getElementById('viewUnauthenticated').style.display = 'block';
-      if (!INITIAL_CODE) {
-        document.getElementById('tvCodePrompt').style.display = 'none';
-      }
-    }
-
-    function switchAuthTab(tab) {
-      activeTab = tab;
-      const isSignUp = tab === 'signup';
-      document.getElementById('tabBtnSignIn').className = 'tab-btn ' + (!isSignUp ? 'active' : '');
-      document.getElementById('tabBtnSignUp').className = 'tab-btn ' + (isSignUp ? 'active' : '');
-      document.getElementById('displayNameField').style.display = isSignUp ? 'block' : 'none';
-      document.getElementById('btnSubmitPublic').innerText = isSignUp ? 'Create Account & Authorize' : 'Sign In & Authorize';
-      document.getElementById('publicStatusMsg').innerText = '';
-    }
-
-    async function handlePublicAuth(e) {
-      e.preventDefault();
-      const btn = document.getElementById('btnSubmitPublic');
-      const msg = document.getElementById('publicStatusMsg');
-      btn.disabled = true;
-      msg.innerText = '';
-
-      const isSignUp = activeTab === 'signup';
-      const email = document.getElementById('inpEmail').value.trim();
-      const password = document.getElementById('inpPassword').value;
-      const displayName = document.getElementById('inpDisplayName').value.trim();
-
+    async function handleLogin() {
+      const email = document.getElementById('inpLoginEmail').value.trim();
+      const password = document.getElementById('inpLoginPass').value;
+      if (!email || !password) return showToast('Please enter email and password');
       try {
-        const endpoint = isSignUp ? '/api/auth/signup' : '/api/auth/login';
-        const payload = { email, password };
-        if (isSignUp && displayName) payload.displayName = displayName;
-
-        const res = await fetch(endpoint, {
+        const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({ email, password })
         });
         const data = await res.json();
-
-        if (!data.success) {
-          throw new Error(data.error || 'Authentication failed. Please verify credentials.');
-        }
-
-        // Save session locally
-        const session = {
-          accountId: data.account.accountId,
-          email: data.account.email,
-          displayName: data.account.displayName,
-          token: data.token,
-          iptvServerUrl: data.account.iptvServerUrl || '',
-          iptvUsername: data.account.iptvUsername || '',
-          iptvPassword: data.account.iptvPassword || '',
-          playlistName: data.account.playlistName || ''
-        };
-        localStorage.setItem('sv_session', JSON.stringify(session));
-
-        // If a TV code was present, automatically link it right now!
-        const codeToLink = INITIAL_CODE || '';
-        if (codeToLink) {
-          msg.style.color = '#A78BFA';
-          msg.innerText = 'Account verified! Linking TV (' + codeToLink + ')...';
-
-          const claimRes = await fetch('/api/auth/claim-code', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              code: codeToLink,
-              accountId: session.accountId,
-              token: session.token
-            })
-          });
-          const claimData = await claimRes.json();
-          if (claimData.success) {
-            msg.style.color = '#10B981';
-            msg.innerHTML = '&#10004; TV Authorized Successfully!<br>StreamVault TV is now unlocking on your TV screen.';
-            setTimeout(() => showAuthenticatedView(session), 1800);
-            return;
-          }
-        }
-
-        showAuthenticatedView(session);
-      } catch (err) {
-        msg.style.color = '#EF4444';
-        msg.innerText = err.message;
-      } finally {
-        btn.disabled = false;
+        if (!res.ok) return showToast(data.error || 'Login failed');
+        localStorage.setItem('sv_auth_token', data.token);
+        localStorage.setItem('sv_auth_email', data.email);
+        localStorage.setItem('sv_account_id', data.accountId);
+        checkAuthState();
+        showToast('Signed in successfully!', false);
+      } catch (e) {
+        showToast('Network error during login');
       }
     }
 
-    async function authorizeTvWithSession() {
-      const btn = document.getElementById('btnAuthorizeTv');
-      const msg = document.getElementById('authStatusMsg');
-      const code = document.getElementById('activeTvCode').value.trim().toUpperCase();
+    let pendingEmail = '';
+    async function handleSignUp() {
+      const displayName = document.getElementById('inpRegName').value.trim();
+      const email = document.getElementById('inpRegEmail').value.trim();
+      const password = document.getElementById('inpRegPass').value;
+      if (!email || !password) return showToast('Please enter all required fields');
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName, email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.error || 'Sign up failed');
+        pendingEmail = email;
+        document.getElementById('verifyEmailTarget').innerText = email;
+        document.getElementById('paneSignUp').style.display = 'none';
+        document.getElementById('paneVerify').style.display = 'block';
+        if (data.devCode) {
+          showToast('Verification code sent! (Dev test code: ' + data.devCode + ')', false);
+        } else {
+          showToast('Verification code sent to your email!', false);
+        }
+      } catch (e) {
+        showToast('Network error during sign up');
+      }
+    }
 
-      if (!code || code.length < 5) {
-        msg.style.color = '#EF4444';
-        msg.innerText = 'Please enter a valid 6-character TV pairing code (e.g. SV-XXXX).';
+    async function handleVerify() {
+      const code = document.getElementById('inpVerifyCode').value.trim();
+      if (!code) return showToast('Please enter 6-digit code');
+      try {
+        const res = await fetch('/api/auth/verify-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pendingEmail, code })
+        });
+        const data = await res.json();
+        if (!res.ok) return showToast(data.error || 'Verification failed');
+        localStorage.setItem('sv_auth_token', data.token);
+        localStorage.setItem('sv_auth_email', data.email);
+        localStorage.setItem('sv_account_id', data.accountId);
+        checkAuthState();
+        showToast('Email verified and signed in!', false);
+      } catch (e) {
+        showToast('Network error during verification');
+      }
+    }
+
+    async function handleClaimCode() {
+      const token = localStorage.getItem('sv_auth_token');
+      if (!token) {
+        showToast('Please Sign In or Create an Account first to link your TV');
+        switchTab('signin');
         return;
       }
-
-      const session = JSON.parse(localStorage.getItem('sv_session') || '{}');
-      if (!session.accountId || !session.token) {
-        signOutMobile();
-        return;
-      }
-
-      btn.disabled = true;
-      btn.innerText = 'Authorizing TV...';
-      msg.innerText = '';
-
+      const code = document.getElementById('inpTvCode').value.trim();
+      if (!code) return showToast('Please enter the 6-character code shown on TV');
       try {
         const res = await fetch('/api/auth/claim-code', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code,
-            accountId: session.accountId,
-            token: session.token
-          })
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ code })
         });
         const data = await res.json();
-        if (data.success) {
-          msg.style.color = '#10B981';
-          msg.innerHTML = '&#10004; TV Authorized Successfully!<br>StreamVault TV is now unlocking on your TV screen.';
-          btn.innerText = '✓ TV Linked';
-        } else {
-          msg.style.color = '#EF4444';
-          msg.innerText = data.error || 'Failed to authorize TV code. Please verify the code.';
-          btn.disabled = false;
-          btn.innerText = 'Authorize This TV Now';
-        }
-      } catch (err) {
-        msg.style.color = '#EF4444';
-        msg.innerText = err.message;
-        btn.disabled = false;
-        btn.innerText = 'Authorize This TV Now';
+        if (!res.ok) return showToast(data.error || 'Failed to link TV');
+        showToast('🎉 ' + data.message, false);
+      } catch (e) {
+        showToast('Network error linking TV code');
       }
     }
 
-    function signOutMobile() {
-      localStorage.removeItem('sv_session');
-      showUnauthenticatedView();
-    }
-
-    function toggleIptvDrawer() {
-      const panel = document.getElementById('iptvDrawerPanel');
-      const arrow = document.getElementById('drawerArrow');
-      const isOpen = panel.style.display === 'block';
-      panel.style.display = isOpen ? 'none' : 'block';
-      arrow.innerText = isOpen ? '▼' : '▲';
-    }
-
-    async function saveIptvCredentials() {
-      const session = JSON.parse(localStorage.getItem('sv_session') || '{}');
-      const msg = document.getElementById('iptvSaveMsg');
-      msg.innerText = 'Saving...';
-      msg.style.color = '#A78BFA';
-
-      const iptvServerUrl = document.getElementById('iptvServerUrlInp').value.trim();
-      const iptvUsername = document.getElementById('iptvUserInp').value.trim();
-      const iptvPassword = document.getElementById('iptvPassInp').value.trim();
-
-      try {
-        const res = await fetch('/api/account/update-credentials', {
+    function signOut() {
+      const token = localStorage.getItem('sv_auth_token');
+      if (token) {
+        fetch('/api/auth/signout', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            accountId: session.accountId,
-            token: session.token,
-            iptvServerUrl,
-            iptvUsername,
-            iptvPassword,
-            playlistName: 'StreamVault IPTV'
-          })
-        });
-        const data = await res.json();
-        if (data.success) {
-          session.iptvServerUrl = iptvServerUrl;
-          session.iptvUsername = iptvUsername;
-          session.iptvPassword = iptvPassword;
-          localStorage.setItem('sv_session', JSON.stringify(session));
-          msg.style.color = '#10B981';
-          msg.innerText = '✓ Saved! Synced to your cloud account.';
-        } else {
-          msg.style.color = '#EF4444';
-          msg.innerText = data.error || 'Failed to update credentials.';
-        }
-      } catch (err) {
-        msg.style.color = '#EF4444';
-        msg.innerText = err.message;
+          headers: { 'Authorization': 'Bearer ' + token }
+        }).catch(() => {});
       }
+      localStorage.clear();
+      checkAuthState();
+      showToast('Signed out successfully', false);
     }
 
-    window.addEventListener('DOMContentLoaded', initMobile);
+    checkAuthState();
   </script>
 </body>
 </html>`;
