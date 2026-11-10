@@ -4,9 +4,10 @@
 - **Goal**: Native, ultra-smooth, premium Android TV IPTV client tailored for **TCL 55P635 LED TV** (Android TV OS 11, Kernel `4.14.187+`, 2GB RAM) replacing *IPTV Pro Stream Player*.
 - **Project Directory**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv`
 - **GitHub Repository**: [`waheedkhan10001/streamvault-tv`](https://github.com/waheedkhan10001/streamvault-tv)
-- **Ready Release APK**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\StreamVault-TV.apk` (14.56 MB)
+- **Ready Release APK**: `C:\\Users\\wkhan\\.gemini\\antigravity\\scratch\\streamvault-tv\\StreamVault-TV.apk` (3.9 MB, Version 2.7.0, versionCode 2, R8 Minified)
 - **Wi-Fi Install Script**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\Push-To-TCL-TV.bat`
-- **Host Companion Server**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\pc-runner\server.js` (port 8765, serving `http://192.168.100.66:8765/tv`)
+- **Host Companion Server**: Optional PC Simulator (`pc-runner/server.js`); Android TV app is 100% standalone and does not require PC runner.
+- **Cloud Backend**: Cloudflare Workers + D1 (`cloud-sync/`) with PBKDF2 authentication, sessions, and multi-device sync.
 - **TCL 55P635 Android TV**: Connected wirelessly via ADB at `192.168.100.42:5555`.
 
 ---
