@@ -1072,6 +1072,8 @@ function queryCatalogServerSide(f = {}, limit = 100, offset = 0) {
 
   const isAdultLocked = !state.parentalControl || state.parentalControl.isLocked || !state.parentalControl.showAdult;
   const isAdultVaultTab = Boolean(f.adultOnly);
+  const activeProf = (state.profiles || []).find((p) => p.isActive) || (state.profiles || [])[0];
+  const isKidsActive = Boolean(activeProf && activeProf.isKids);
   const matched = [];
   const matchAllGenres = f.matchAllIncludedGenres !== undefined ? Boolean(f.matchAllIncludedGenres) : true;
 
@@ -1085,6 +1087,15 @@ function queryCatalogServerSide(f = {}, limit = 100, offset = 0) {
       if (!isAdult) continue; // 18+ Vault tab ONLY shows adult content
     } else if (isAdult) {
       continue; // NEVER leak adult content into general browse tabs or general search!
+    }
+
+    // Kids Mode: Strictly filter out mature/adult content and retain family-friendly titles
+    if (isKidsActive) {
+      if (isAdult) continue;
+      const itemGenres = item.genres || [];
+      const isMature = itemGenres.some((g) => ['Horror', 'Crime', 'War'].includes(g)) || Boolean(item.isAdult);
+      const isFamily = itemGenres.some((g) => ['Animation', 'Family', 'Children', 'Comedy', 'Adventure', 'Fantasy'].includes(g));
+      if (isMature && !isFamily) continue;
     }
 
     if (f.mediaTypeFilter && item.mediaType !== f.mediaTypeFilter) continue;
@@ -1362,9 +1373,7 @@ function buildHomePayload() {
       items: suggestedForYou
     });
   }
-  if (watchlist.length > 0) {
-    rows.push({ title: 'My List', subtitle: '', items: watchlist });
-  }
+  // Note: 'My List' has its own dedicated tab in the left sidebar and is excluded from Home per UX standard
   if (trendingTop10.length > 0) {
     rows.push({ title: 'Top 10 Trending Today', subtitle: '', items: trendingTop10 });
   }

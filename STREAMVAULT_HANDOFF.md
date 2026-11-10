@@ -288,6 +288,25 @@
 
 ---
 
+### G. StreamVault TV v2.6.0 Polish & Cloud Auth Hardening (Verified Live on TCL TV)
+- **Cloudflare Edge D1 Authentication**: Strict enforcement of password hashing. Unhashed records or blank passwords reject with 401 Unauthorized.
+- **Industry Standard 2:3 Cinema Posters**: Uniform `154px` card with `146x219px` image container across all tabs (Home, Movies, Series, More Like This).
+- **Zero Edge Clipping**: 2px subtle theme border (`#A78BFA`) + soft ambient glow with `scale(1.05) translateY(-4px)` and `overflow: visible;` on all rails, eliminating left/right/top/bottom clipping.
+- **Series Season Pill Clamping**: Compact single-pill season formatting (`S1`, `3 SEASONS`, `SERIES`) with titles clamped cleanly to 2 lines with ellipsis.
+- **My List Cleanup**: Excluded "My List" from Home catalog rows to prevent duplicate display (dedicated tab already exists in sidebar).
+- **Watch Now / More Like This (MLT)**:
+  - Replaced cluttered multi-text cards with a single clean "Show More" card.
+  - Added D-pad focus memory (`lastMltFocusedCard`) so navigating Up to filter chips and Down back to the rail preserves exact card position instead of resetting to the start.
+- **Zero-Scroll User Profiles & Settings**:
+  - Strict 1080p fit with zero vertical and zero horizontal scrolling.
+  - Large bedside QR code with generous spacing for effortless scanning from 8-10 feet away.
+  - 4 Streaming UI Themes per profile: HBO Purple (`#7C3AED`), Netflix Red (`#E50914`), Disney+ Blue (`#1E40AF`), Prime Cyan (`#0284C7`). Avatars dynamically adopt active theme colors.
+  - 4-digit Master PIN security gate before deleting secondary user profiles.
+  - Settings screen arranged in 4 equal balanced quadrants (IPTV Provider, Playback Engine, Parental PIN, Maintenance) with 2x2 D-pad spatial flow.
+- **Sidebar Spatial Navigation**: Pressing Left from any catalog card or input jumps directly to the active tab in the sidebar rather than defaulting to the user pill.
+- **Native Voice Search Modal**: Handles runtime `RECORD_AUDIO` permission on Android 11 with dark modal UI and graceful remote fallback.
+- **ExoPlayer Subtitle Contrast**: Subtitles styled with `CaptionStyleCompat` high-contrast drop shadow (`Color.WHITE`, black drop shadow, 22sp) for effortless legibility on resume.
+
 ## 5. Live TV Verification on TCL 55P635
 - **Latest GitHub Commit**: [`6efd7a1`](https://github.com/waheedkhan10001/streamvault-tv/commit/6efd7a1c7a9aebb0afcce31efcd76062da9d137a) on branch `main` (20 files, +9,799 insertions).
 - Built and signed release APK: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\StreamVault-TV.apk` (15.27 MB).
@@ -302,6 +321,43 @@
    - `tv_home_scaled.png`: Verified ~195px Netflix-standard Home carousel posters with edge-peek horizontal scroll.
    - `tv_movies_5col.png`: Verified 5-column cinematic grid displaying 10 complete posters ($5 \times 2$) with zero vertical clipping below the filter bar.
   - `tv_search_hist.png`: Verified Search History popup displaying recent searches with TV remote soft keyboard active.
+  - `live_welcome_final2.png`: Verified full-screen Welcome Screen on fresh boot with live bedside pairing QR code (`SV-6ZAL`), cloud account sign-in/up modals, and guest bypass.
+  - `after_guest_enter.png` & `save_connect_clicked.png`: Verified Settings & System 2x2 quadrant grid fitting completely inside 540 CSS px with zero vertical scroll, ~60px clearance, and all bottom borders 100% visible.
+  - `user_profile_opened.png`: Verified User Profiles & Cloud Sync screen fitting inside 540 CSS px with zero scroll, ~80px bottom clearance, and all action buttons visible.
+  - `cloud_auth_modal_open.png` & `modal_closed.png`: Verified Cloud Auth modal popup, auto-focus on email, remote D-pad trapping, and instant Back-key dismissal.
+  - `home_catalog_rendered.png`: Verified end-to-end IPTV save & connect flow immediately loading, synchronizing with Cloudflare D1, and rendering full catalog on Home.
+
+---
+
+### K. Fresh Install Welcome Screen, Cloudflare D1 Pairing & Onboarding Flow
+- **First-Run OOBE Routing (`checkAuthAndRoute`)**:
+  - Gated boot routing so fresh downloads immediately show the full-screen cinematic Welcome Screen before attempting `/api/state` or catalog fetches.
+  - Generates live bedside TV pairing code (`SV-XXXX`) directly from Cloudflare D1 Worker (`https://streamvault-sync.streamvault-app.workers.dev/api/auth/request-code`).
+  - Mobile QR link points to `streamvault-app.workers.dev/link` for 1-tap instant TV sign-in.
+  - Native TV options: "Sign In with Email", "Create New Cloud Account", and "Enter IPTV Credentials Directly ->".
+- **Intelligent Account Routing**:
+  - If a user signs into their cloud account (via phone QR scan or on-screen TV login) and the account already has IPTV credentials, it routes immediately to `HOME`.
+  - If the account does not yet have IPTV credentials, it prompts the user with a helpful toast and routes directly to `SETTINGS` with focus set on the Server URL field.
+- **Save & Connect Catalog Pipeline (`saveAccountCredentials`)**:
+  - Validates required inputs with on-screen error labels without altering card geometry.
+  - Synchronizes IPTV credentials to Cloudflare D1 (`POST /api/account/update-credentials`) to persist across all user devices.
+  - Posts to companion runner (`POST /api/save-credentials`) to connect the IPTV stream provider, load and categorize the catalog, enrich with TMDB metadata, and smoothly transition into `HOME`.
+
+### L. 540 CSS px Android TV Viewport Calibration (Zero Scroll, No Bottom Border Clipping)
+- **Viewport Metrics**: Physical 1080p (1920x1080) at 320 dpi yields an exact CSS viewport of 960x540px (`window.innerHeight = 540`).
+- **Settings Screen Grid**:
+  - Container padding trimmed to `8px 24px 22px 24px` with `max-height: 100vh; overflow: hidden;`.
+  - Card paddings tightened to `10px 14px` and grid gap to `10px`.
+  - Total content height reduced to ~410px, leaving >100px breathing space above the bezel.
+  - Quadrant 3 ("Parental Controls & PIN") and Quadrant 4 ("Privacy & Maintenance") bottom borders and action buttons are 100% visible with zero vertical scroll.
+- **User Profiles Screen Layout**:
+  - Rescaled outer container padding to `8px 24px 22px 24px`.
+  - Who's Watching header tiles scaled to 42px height.
+  - Profile Customization (left) and Cloud TV Link & QR (right) cards scaled to ~340px height with 110px QR image and 22px code badge.
+  - Total height reduced to ~390px, leaving ~80px bottom clearance. All cards and borders are 100% visible with zero vertical scroll.
+- **Air-Tight D-Pad Trapping**:
+  - `navigateSpatial()` updated to recognize `welcomeScreenOverlay` and `cloudAuthModal` containers, preventing focus from escaping to background elements.
+  - `fastNavigate()` provides dedicated 1:1 remote navigation across Welcome buttons (`welcomeBtnSignIn`, `welcomeBtnSignUp`, `welcomeBtnGuest`), Cloud Auth form inputs, and Profile card action buttons (`btnOpenCloudSignIn`, `btnReqNewTvCode`, `btnSyncNow`, `btnSaveProfile`).
 
 ---
 

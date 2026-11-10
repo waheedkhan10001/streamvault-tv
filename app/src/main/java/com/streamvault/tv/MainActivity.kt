@@ -39,6 +39,8 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.CaptionStyleCompat
+import android.util.TypedValue
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
@@ -198,8 +200,13 @@ class MainActivity : Activity() {
     }
 
     private val VOICE_SEARCH_REQUEST_CODE = 1001
+    private val RECORD_AUDIO_PERMISSION_CODE = 1002
 
     fun launchVoiceSearch() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), RECORD_AUDIO_PERMISSION_CODE)
+            return
+        }
         try {
             val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -208,7 +215,16 @@ class MainActivity : Activity() {
             startActivityForResult(intent, VOICE_SEARCH_REQUEST_CODE)
         } catch (e: Exception) {
             Log.e("StreamVault", "Voice search not available: ${e.message}")
-            webView.evaluateJavascript("if(window.onVoiceSearchError){ window.onVoiceSearchError('Voice search not supported'); }", null)
+            runOnUiThread {
+                webView.evaluateJavascript("if(window.onVoiceSearchError){ window.onVoiceSearchError('Voice search not available on this remote'); }", null)
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == RECORD_AUDIO_PERMISSION_CODE && grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            launchVoiceSearch()
         }
     }
 
@@ -386,6 +402,20 @@ class MainActivity : Activity() {
         playerView = PlayerView(this).apply {
             useController = false // Custom Netflix-standard OSD
             setBackgroundColor(Color.BLACK)
+            subtitleView?.apply {
+                val style = CaptionStyleCompat(
+                    Color.WHITE,
+                    Color.TRANSPARENT,
+                    Color.TRANSPARENT,
+                    CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
+                    Color.BLACK,
+                    Typeface.DEFAULT_BOLD
+                )
+                setStyle(style)
+                setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                setApplyEmbeddedStyles(true)
+                setApplyEmbeddedFontSizes(false)
+            }
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
