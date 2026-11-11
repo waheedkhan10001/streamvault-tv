@@ -24,7 +24,7 @@ async function newApp(browser) {
     const base = { rating: 7, posterUrl: '', backdropUrl: '', qualityBadges: ['HD'], language: 'English', genres: ['Drama'], plot: 'p', certification: 'PG', isAdult: false, isWatched: false, resumePositionMs: 0, durationMs: 0, year: 2020 };
     const vers = [1, 2, 3].map(i => ({ streamId: 'v' + i, containerExtension: 'mkv', rawTitle: 'Film v' + i, languageTag: 'English', qualityTag: '1080p' }));
     const movie = { ...base, dedupKey: 'm1', id: 'm1', primaryStreamId: 'v1', cleanTitle: 'Film', mediaType: 'MOVIE', versions: vers, episodes: [] };
-    const rel = [1, 2, 3, 4].map(i => ({ ...base, dedupKey: 'r' + i, id: 'r' + i, primaryStreamId: 'r' + i, cleanTitle: 'Related ' + i, mediaType: 'MOVIE', versions: [], episodes: [] }));
+    const rel = [1, 2, 3, 4, 5, 6, 7, 8].map(i => ({ ...base, dedupKey: 'r' + i, id: 'r' + i, primaryStreamId: 'r' + i, cleanTitle: 'Related ' + i, mediaType: 'MOVIE', versions: [], episodes: [] }));
     window.__slowDetail = false;
     window.AndroidApp = {
       handleApiRequest: (m, p, b) => window.AndroidApp.handleApiRequestWithAuth(m, p, b, null),
@@ -37,6 +37,11 @@ async function newApp(browser) {
         if (p === '/api/playlists') return J({ ok: true, playlists: [] });
         if (p === '/api/home') return J({ hero: movie, rows: [{ title: 'Featured', items: [movie] }] });
         if (p === '/api/detail') return J({ ok: true, item: movie, related: window.__noRelated ? [] : rel });
+        if (p === '/api/related') {
+          const q = new URLSearchParams(path.split('?')[1] || ''); const off = +q.get('offset') || 0, lim = +q.get('limit') || 24; window.__relCalls = (window.__relCalls || []); window.__relCalls.push(path);
+          const all = Array.from({ length: 30 }, (_, i) => ({ ...rel[0], dedupKey: 'x' + i, id: 'x' + i, cleanTitle: 'Match ' + i }));
+          return J({ ok: true, items: all.slice(off, off + lim), hasMore: off + lim < all.length, offset: off });
+        }
         if (p === '/api/probe-versions') return J({ ok: true, versions: vers.map(v => ({ ...v, fileSizeStr: '2.1 GB' })) });
         if (p === '/api/query') return J({ items: [movie], totalMatched: 1, hasMore: false });
         return J({ ok: true, items: [] });
@@ -92,6 +97,19 @@ async function run() {
     check('no JavaScript errors', page.errors.length === 0, page.errors.join(' | '));
     await page.close();
   }
+  console.log('Show more page');
+  const sp = await newApp(browser);
+  await sp.evaluate(() => window.openDetailModal('m1')); await sleep(600);
+  await sp.evaluate(() => document.querySelector('#mltPosterStrip .show-more-card').focus());
+  await press(sp, 'Enter'); await sleep(500);
+  check('Show more opens a page with the first 24 matches and a Show more card', await sp.evaluate(() => document.querySelectorAll('#filterResultsGrid .poster-card:not(.mlt-more-card)').length) === 24 && await sp.evaluate(() => !!document.querySelector('.mlt-more-card')));
+  check('the remote lands on the first match', await sp.evaluate(() => !!document.activeElement.closest('#filterResultsGrid')));
+  await sp.evaluate(() => document.querySelector('.mlt-more-card').focus()); await press(sp, 'Enter'); await sleep(400);
+  check('Show more adds the remaining 6 and the card goes away', await sp.evaluate(() => document.querySelectorAll('#filterResultsGrid .poster-card:not(.mlt-more-card)').length) === 30 && await sp.evaluate(() => !document.querySelector('.mlt-more-card')));
+  check('focus moves to the first new title', await sp.evaluate(() => { const c = [...document.querySelectorAll('#filterResultsGrid .poster-card')]; return c.indexOf(document.activeElement) === 24; }));
+  await sp.evaluate(() => document.getElementById('mltPageBack').click()); await sleep(600);
+  check('Back returns to the detail screen', await sp.evaluate(() => !!document.querySelector('#detailActionButtonsContainer')));
+  check('no JavaScript errors (Show more)', sp.errors.length === 0, sp.errors.join(' | '));
   await browser.close();
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

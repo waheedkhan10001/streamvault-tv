@@ -69,6 +69,7 @@ class AppApiRouter(
                 // 8. Media Details (Movie / Series + Episodes + More Like This)
                 method == "GET" && path == "/api/detail" -> handleGetDetail(queryParams)
                 method == "GET" && path == "/api/probe-versions" -> handleProbeVersions(queryParams)
+                method == "GET" && path == "/api/related" -> handleGetRelated(queryParams)
 
                 // 9. Live TV
                 method == "GET" && path == "/api/live" -> handleGetLive(queryParams)
@@ -475,7 +476,7 @@ class AppApiRouter(
         val mlt = db.getMoreLikeThis(
             item,
             isKids = activeProf.isKids,
-            limit = 12,
+            limit = 8,          // only the best few on the detail screen; "Show more" pages through the rest
             matchMode = queryParams["matchMode"] ?: "everything",
             hideWatched = queryParams["hideWatched"] == "true",
             profileId = activeProf.id
@@ -518,6 +519,26 @@ class AppApiRouter(
             put("episodes", epArr)
             put("related", relatedArr)
             put("moreLikeThis", relatedArr)
+        }.toString()
+    }
+
+    // Paged "More Like This": offset/limit, best matches first; hasMore tells the screen whether another page exists
+    private fun handleGetRelated(queryParams: Map<String, String>): String {
+        val activeProf = getActiveUserProfile()
+        val dedupKey = queryParams["dedupKey"] ?: ""
+        val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
+        val offset = (queryParams["offset"]?.toIntOrNull() ?: 0).coerceAtLeast(0)
+        val limit = (queryParams["limit"]?.toIntOrNull() ?: 24).coerceIn(1, 60)
+        val rows = db.getMoreLikeThis(
+            item, isKids = activeProf.isKids, limit = limit + 1, offset = offset,
+            matchMode = queryParams["matchMode"] ?: "everything",
+            hideWatched = queryParams["hideWatched"] == "true", profileId = activeProf.id
+        )
+        return JSONObject().apply {
+            put("ok", true)
+            put("items", mediaListToJsonArray(rows.take(limit)))
+            put("hasMore", rows.size > limit)
+            put("offset", offset)
         }.toString()
     }
 

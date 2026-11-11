@@ -1029,18 +1029,21 @@ class StreamVaultDatabase(context: Context) :
         limit: Int = 12,
         matchMode: String = "everything",
         hideWatched: Boolean = false,
-        profileId: String = ""
+        profileId: String = "",
+        offset: Int = 0
     ): List<MediaItem> {
         if (item.genres.isEmpty() && item.director.isBlank() && item.cast.isEmpty()) return emptyList()
         val db = readableDatabase
         val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("m.certification") else ""
 
+        // Each condition is 1 when it matches; summing them lets the BEST matches fill the candidate pool
+        // (not just the 300 highest-rated titles that share one genre).
         val conds = mutableListOf<String>()
         val condArgs = mutableListOf<String>()
-        item.genres.take(3).forEach { conds.add("('|' || m.genres_text || '|' LIKE ?)"); condArgs.add("%|$it|%") }
+        item.genres.take(4).forEach { conds.add("('|' || m.genres_text || '|' LIKE ?)"); condArgs.add("%|$it|%") }
         if (item.director.isNotBlank()) { conds.add("(m.director != '' AND m.director = ?)"); condArgs.add(item.director) }
-        item.cast.take(3).forEach { conds.add("m.cast_text LIKE ?"); condArgs.add("%$it%") }
-        if (matchMode == "setting" && item.language.isNotBlank()) { conds.add("m.language = ?"); condArgs.add(item.language) }
+        item.cast.take(3).forEach { conds.add("(m.cast_text LIKE ?)"); condArgs.add("%$it%") }
+        if (matchMode == "setting" && item.language.isNotBlank()) { conds.add("(m.language = ?)"); condArgs.add(item.language) }
         if (conds.isEmpty()) return emptyList()
 
         val hasProfile = profileId.isNotBlank()
@@ -1054,42 +1057,25 @@ class StreamVaultDatabase(context: Context) :
         } else "media_items m"
         val args = mutableListOf<String>()
         if (hasProfile) args.add(profileId)
+        args.add(item.mediaType.name)
         args.add(item.dedupKey)
-        args.addAll(condArgs)
+        args.addAll(condArgs)         // WHERE ... OR-list
+        args.addAll(condArgs)         // ORDER BY match count
 
+        val matchCount = conds.joinToString(" + ")
         val cursor = db.rawQuery(
-            "SELECT $selectSql FROM $fromSql WHERE m.dedup_key != ? AND m.is_adult = 0 AND m.is_extra = 0 $kidsClause " +
-                "AND (" + conds.joinToString(" OR ") + ") ORDER BY m.rating DESC, m.year DESC LIMIT 300",
+            "SELECT $selectSql FROM $fromSql WHERE m.media_type = ? AND m.dedup_key != ? AND m.is_adult = 0 AND m.is_extra = 0 $kidsClause " +
+                "AND (" + conds.joinToString(" OR ") + ") ORDER BY ($matchCount) DESC, m.rating DESC, m.year DESC LIMIT 900",
             args.toTypedArray()
         )
         val candidates = readMediaList(cursor)
-
-        fun words(t: String): Set<String> = t.lowercase(Locale.ROOT).split(Regex("[^a-z]+")).filter { it.length > 4 }.toSet()
-        val itemGenres = item.genres.toSet()
-        val itemCast = item.cast.toSet()
-        val itemWords = words(item.plot)
-
         data class Scored(val m: MediaItem, val score: Int)
         val scored = candidates.mapNotNull { cand ->
             if (hideWatched && cand.isWatched) return@mapNotNull null
-            val sharedGenres = cand.genres.intersect(itemGenres).size
-            val sameDir = item.director.isNotBlank() && cand.director == item.director
-            val sharedCast = cand.cast.intersect(itemCast).size
-            val plotOverlap = if (matchMode == "story") words(cand.plot).intersect(itemWords).size else 0
-            val sameLang = cand.language == item.language
-            val eraClose = item.year > 0 && cand.year > 0 && Math.abs(cand.year - item.year) <= 10
-            val sameCert = item.certification.isNotBlank() && cand.certification == item.certification
-            when (matchMode) {
-                "story" -> if (sharedGenres == 0 && plotOverlap < 2) null
-                           else Scored(cand, sharedGenres * 3 + minOf(plotOverlap, 6) * 2 + (if (sameCert) 2 else 0))
-                "setting" -> if (!sameLang) null
-                             else Scored(cand, 6 + (if (eraClose) 4 else 0) + sharedGenres)
-                "cast_director" -> if (!sameDir && sharedCast == 0) null
-                                   else Scored(cand, (if (sameDir) 5 else 0) + sharedCast * 3)
-                else -> Scored(cand, sharedGenres * 3 + (if (sameDir) 5 else 0) + sharedCast * 2)
-            }
+            RelatedScoring.score(item, cand, matchMode)?.let { Scored(cand, it) }
         }
-        return scored.sortedByDescending { it.score * 10 + it.m.rating.toInt() }.take(limit).map { it.m }
+        return scored.sortedByDescending { RelatedScoring.sortKey(it.score, it.m.rating) }
+            .drop(offset).take(limit).map { it.m }
     }
 
     fun getAllDistinctGenres(): List<String> {

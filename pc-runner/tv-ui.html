@@ -7623,6 +7623,7 @@ function renderRelatedStripHtml(related, item) {
   if (!related || related.length === 0) {
     return '<div style="color:var(--muted);font-size:13px;padding:12px 0;">No matching titles found under current criteria.</div>';
   }
+  if (related.length < 8) return related.map((r) => renderPosterCard(r)).join('');   // fewer than a full row: nothing more to show
   return related.map((r) => renderPosterCard(r)).join('') + `
     <div tabindex="0" class="poster-card show-more-card tv-focusable" onclick="openFullMltCatalog('${item.dedupKey}')" onfocus="playNavSound()">
       <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(124,58,237,0.36) 0%, #100C1F 100%);border:1px solid rgba(167,139,250,0.35);border-radius:10px;">
@@ -8038,38 +8039,79 @@ async function refreshMltStrip(dedupKey) {
     const res = await fetch(`/api/detail?dedupKey=${encodeURIComponent(dedupKey)}&matchMode=${currentMltMode}&hideWatched=${currentMltHideWatched}`);
     const data = await res.json();
     const related = data.related || [];
-    strip.innerHTML = related.length > 0
-      ? (related.map((r) => renderPosterCard(r)).join('') + `
-          <div tabindex="0" class="poster-card show-more-card tv-focusable" onclick="openFullMltCatalog('${dedupKey}')" onfocus="playNavSound()">
-            <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(124,58,237,0.36) 0%, #100C1F 100%);border:1px solid rgba(167,139,250,0.35);border-radius:10px;">
-              <div style="width:44px;height:44px;border-radius:50%;background:rgba(124,58,237,0.35);display:flex;align-items:center;justify-content:center;margin-bottom:10px;border:1.5px solid #A78BFA;box-shadow:0 4px 14px rgba(124,58,237,0.4);">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-              </div>
-              <div style="font-size:12px;font-weight:900;color:#FFFFFF;letter-spacing:0.2px;">Explore All</div>
-              <div style="font-size:10px;font-weight:700;color:#C4B5FD;margin-top:2px;">Full Catalog →</div>
-            </div>
-            <div class="card-title" style="text-align:center;color:#C4B5FD;font-weight:700;">More Like This</div>
-          </div>
-        `)
-      : '<div style="color:var(--muted);font-size:13px;padding:16px 0;">No matching titles found under current criteria.</div>';
+    strip.innerHTML = renderRelatedStripHtml(related, selectedDetailItem || { dedupKey });
   } catch (_) {
   } finally {
     strip.style.opacity = '1';
   }
 }
 
-function openFullMltCatalog(dedupKey) {
+// "Show more" on the detail screen: a full page of the next-best matches (24 at a time), best first.
+const mltPageState = { key: '', title: '', offset: 0, hasMore: false, busy: false };
+
+async function openFullMltCatalog(dedupKey) {
   playNavSound();
-  closeDetailModal();
   const item = selectedDetailItem;
-  const genre = (item && item.genres && item.genres.length > 0) ? item.genres[0] : null;
-  const mediaType = (item && item.mediaType) ? item.mediaType : null;
-  navigateToTab('SEARCH', {
-    includedGenres: genre ? [genre] : [],
-    mediaTypeFilter: mediaType,
-    searchQuery: '',
-    sortBy: 'NEWLY_ADDED'
-  }, true);
+  mltPageState.key = dedupKey;
+  mltPageState.title = (item && item.cleanTitle) || 'this title';
+  mltPageState.offset = 0;
+  mltPageState.hasMore = false;
+  closeDetailModal();
+  const vp = document.getElementById('mainViewport');
+  if (!vp) return;
+  vp.innerHTML = `
+    <div style="padding:0 0 6px 0;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+        <button tabindex="0" id="mltPageBack" class="btn tv-focusable" style="padding:7px 14px;font-size:12px;" onclick="openDetailModal('${dedupKey}')">← Back</button>
+        <div style="font-size:18px;font-weight:900;color:#fff;">More like ${escapeHtml(mltPageState.title)}</div>
+      </div>
+      <div id="mltPageNote" style="font-size:11px;color:#9CA3AF;margin-bottom:10px;">Closest matches first.</div>
+      <div class="results-grid" id="filterResultsGrid"></div>
+    </div>`;
+  await loadMltPage(true);
+}
+
+async function loadMltPage(first) {
+  if (mltPageState.busy) return;
+  mltPageState.busy = true;
+  const grid = document.getElementById('filterResultsGrid');
+  try {
+    const res = await fetch(`/api/related?dedupKey=${encodeURIComponent(mltPageState.key)}&offset=${mltPageState.offset}&limit=24&matchMode=${currentMltMode}&hideWatched=${currentMltHideWatched}`);
+    const data = await res.json();
+    const items = data.items || [];
+    if (!grid) return;
+    const old = grid.querySelector('.mlt-more-card');
+    const hadFocusOnMore = old && document.activeElement === old;
+    if (old) old.remove();
+    const before = grid.querySelectorAll('.poster-card').length;
+    grid.insertAdjacentHTML('beforeend', items.map((m) => renderPosterCard(m)).join(''));
+    mltPageState.offset += items.length;
+    mltPageState.hasMore = Boolean(data.hasMore);
+    if (mltPageState.hasMore) {
+      grid.insertAdjacentHTML('beforeend', `
+        <div tabindex="0" class="poster-card mlt-more-card tv-focusable" onfocus="playNavSound()" onclick="loadMltPage(false)">
+          <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(124,58,237,0.36) 0%, #100C1F 100%);border:1px solid rgba(167,139,250,0.35);border-radius:10px;">
+            <div style="font-size:14px;font-weight:900;color:#FFFFFF;">Show more</div>
+          </div>
+        </div>`);
+    }
+    if (first && items.length === 0) {
+      grid.outerHTML = '<div style="padding:40px;color:var(--muted);text-align:center;">No close matches found for this title.</div>';
+      return;
+    }
+    // after loading more, put the remote on the first NEW title so the user can keep going from there
+    if (!first && hadFocusOnMore) {
+      const cards = grid.querySelectorAll('.poster-card:not(.mlt-more-card)');
+      const target = cards[before];
+      if (target) target.focus();
+    } else if (first) {
+      setTimeout(() => { const c = document.querySelector('#filterResultsGrid .poster-card'); if (c) c.focus(); }, 120);
+    }
+  } catch (_) {
+    showToast('Could not load more titles. Please try again.');
+  } finally {
+    mltPageState.busy = false;
+  }
 }
 
 async function playHeroMovie(dedupKey) {

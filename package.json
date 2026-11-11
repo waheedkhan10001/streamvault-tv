@@ -4,7 +4,7 @@
   "description": "StreamVault TV IPTV Client for Android TV (TCL 55P635, Android 11)",
   "type": "module",
   "scripts": {
-    "test": "node tests/phaseA.test.mjs && node tests/phaseB.test.mjs && node tests/phaseC.test.mjs && node tests/phaseD.test.mjs && node tests/phaseE.test.mjs && node --no-warnings tests/round2.test.mjs && node tests/round2ui.test.mjs && node tests/welcomeSignup.test.mjs && node tests/popupFocus.test.mjs && node tests/screenSweep.test.mjs && node tests/filters.test.mjs && node --no-warnings tests/pairing.test.mjs && node --no-warnings tests/playlists.test.mjs && node tests/vaults.test.mjs && node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs && node tests/contract.test.mjs && node tests/playback.test.mjs && node tests/strip.test.mjs && npm run test:sidebar && npm run test:series",
+    "test": "node tests/phaseA.test.mjs && node tests/phaseB.test.mjs && node tests/phaseC.test.mjs && node tests/phaseD.test.mjs && node tests/phaseE.test.mjs && node --no-warnings tests/round2.test.mjs && node tests/round2ui.test.mjs && node tests/welcomeSignup.test.mjs && node tests/popupFocus.test.mjs && node tests/screenSweep.test.mjs && node tests/filters.test.mjs && node --no-warnings tests/pairing.test.mjs && node --no-warnings tests/playlists.test.mjs && node tests/vaults.test.mjs && node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs && node tests/contract.test.mjs && node tests/playback.test.mjs && node tests/strip.test.mjs && npm run test:sidebar && npm run test:series && npm run test:detailfocus",
     "test:tmdbcache": "node --no-warnings tests/tmdbcache.test.mjs",
     "test:latest": "node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs",
     "test:vaults": "node tests/vaults.test.mjs && node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs",
@@ -24,7 +24,8 @@
     "test:contract": "node tests/contract.test.mjs",
     "test:playback": "node tests/playback.test.mjs && node tests/strip.test.mjs",
     "test:sidebar": "node tests/sidebar.test.mjs",
-    "test:series": "node tests/series.test.mjs"
+    "test:series": "node tests/series.test.mjs",
+    "test:detailfocus": "node tests/detailfocus.test.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^22.0.0"
