@@ -39,7 +39,13 @@ async function newApp(browser, kids = false) {
         if (p === '/api/playlists') return J({ ok: true, playlists: [] });
         if (p === '/api/home') return window.__empty ? J({ hero: null, rows: [] }) : J({ hero: catalog[0], rows: [{ title: 'Featured', items: catalog }] });
         if (p === '/api/query') { S.queries.push(JSON.parse(body || '{}')); return window.__empty ? J({ items: [], totalMatched: 0, hasMore: false }) : J({ items: catalog, totalMatched: 12, hasMore: false }); }
-        if (p === '/api/latest') { const k = (n, s) => Array.from({ length: n }, (_, i) => ({ ...mk(i, s), cleanTitle: (s ? 'New Series ' : 'New Movie ') + i })); return J({ ok: true, movies: k(5, false), series: k(3, true), live: KIDS ? [] : [{ streamId: '9', name: 'New Channel', categoryName: 'X' }], days: 14 }); }
+        if (p === '/api/latest') {
+          const k = (n, s, t) => Array.from({ length: n }, (_, i) => ({ ...mk(i, s), cleanTitle: (t || (s ? 'New Series ' : 'New Movie ')) + i }));
+          const out = { ok: true, movies: k(5, false), series: k(3, true), live: KIDS ? [] : [{ streamId: '9', name: 'New Channel', categoryName: 'X' }], days: 14 };
+          if (!KIDS && S.adult) out.adult = { movies: k(2, false, 'Adult Movie '), series: k(1, true, 'Adult Series '), live: [{ streamId: '77', name: 'Adult Channel', categoryName: 'XXX' }] };
+          if (!KIDS && S.extras) out.extras = { movies: k(4, false, 'Extra Movie '), series: [], live: [] };
+          return J(out);
+        }
         if (p === '/api/live') { S.lives.push(path); return J({ ok: true, tabs: [{ id: 'ALL', label: 'All' }], channels: [{ streamId: '1', name: 'Chan', categoryName: 'X' }] }); }
         if (p === '/api/search-history') { if (method === 'POST') S.history.push(body); return J({ ok: true, history: [], items: [] }); }
         if (p === '/api/parental-pin') {
@@ -82,6 +88,30 @@ async function run() {
   check('panel bar survives switching', await page.evaluate(() => !!document.getElementById('latestPanelBar')));
   check('no JavaScript errors', page.errors.length === 0, page.errors.join(' | '));
   await page.close();
+
+  console.log('\nAdult and Extras panels inside Latest');
+  const ap = await newApp(browser);
+  await go(ap, 'LATEST');
+  let abar = await ap.evaluate(() => [...document.querySelectorAll('#latestPanelBar button')].map(b => b.innerText.trim()));
+  check('locked: no 18+ or Extras panel, and no adult title anywhere', abar.join() === 'Movies (5),Series (3),Live TV (1)' && !(await ap.evaluate(() => /Adult /.test(document.body.innerText))), abar.join());
+  await ap.evaluate(() => { window.__s.adult = true; window.__s.extras = true; appStatus.parentalControl.showAdult = true; appStatus.parentalControl.showExtras = true; appStatus.parentalControl.isLocked = false; });
+  await go(ap, 'HOME'); await go(ap, 'LATEST');
+  abar = await ap.evaluate(() => [...document.querySelectorAll('#latestPanelBar button')].map(b => b.innerText.trim()));
+  check('unlocked: 18+ (4) and Extras (4) panels appear', abar.join() === 'Movies (5),Series (3),Live TV (1),18+ (4),Extras (4)', abar.join());
+  await ap.evaluate(() => document.getElementById('latestPanelADULT').click()); await sleep(300);
+  let atxt = await ap.evaluate(() => document.getElementById('mainViewport').innerText);
+  check('18+ panel shows its movies, series and live channel', /Adult Movie 0/.test(atxt) && /Adult Series 0/.test(atxt) && /Adult Channel/.test(atxt), atxt.slice(0, 200));
+  check('18+ panel does not show Extras or normal titles', !/Extra Movie/.test(atxt) && !/New Movie/.test(atxt));
+  await ap.evaluate(() => document.getElementById('latestPanelEXTRAS').click()); await sleep(300);
+  atxt = await ap.evaluate(() => document.getElementById('mainViewport').innerText);
+  check('Extras panel shows only extras titles', /Extra Movie 0/.test(atxt) && !/Adult /.test(atxt));
+  const nm = await ap.evaluate(() => { document.getElementById('latestPanelMOVIES').click(); return document.getElementById('mainViewport').innerText; }); await sleep(300);
+  check('normal Movies panel never contains adult or extras titles', !/Adult |Extra Movie/.test(await ap.evaluate(() => document.getElementById('mainViewport').innerText)));
+  await ap.evaluate(() => { appStatus.parentalControl.showAdult = false; appStatus.parentalControl.showExtras = false; window.__s.adult = false; window.__s.extras = false; renderLatest(document.getElementById('mainViewport')); });
+  abar = await ap.evaluate(() => [...document.querySelectorAll('#latestPanelBar button')].map(b => b.innerText.trim()));
+  check('locking again removes both panels at once', abar.join() === 'Movies (5),Series (3),Live TV (1)', abar.join());
+  check('no JavaScript errors (adult/extras)', ap.errors.length === 0, ap.errors.join(' | '));
+  await ap.close();
 
   const kp = await newApp(browser, true);
   await go(kp, 'LATEST');

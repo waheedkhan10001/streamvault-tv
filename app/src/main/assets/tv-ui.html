@@ -4330,20 +4330,8 @@ async function loadLatest(vp, focusFirst = false) {
   renderLatest(vp, focusFirst);
 }
 
-function renderLatest(vp, focusFirst = false) {
-  const kids = Boolean(currentActiveProfile && currentActiveProfile.isKids);
-  const d = latestData || {};
-  const lists = { MOVIES: d.movies || [], SERIES: d.series || [], LIVE: kids ? [] : (d.live || []) };
-  const mk = (id, label) => {
-    const on = latestPanel === id;
-    return `<button tabindex="0" id="latestPanel${id}" class="filter-pill-btn tv-focusable ${on ? 'active' : ''}" style="flex-shrink:0;${on ? 'background:rgba(139,92,246,0.35);border-color:#8B5CF6;color:#fff;' : ''}" onclick="selectLatestPanel('${id}')">${label} (${lists[id].length})</button>`;
-  };
-  const items = lists[latestPanel];
-  let body;
-  if (items.length === 0) {
-    body = '<div style="padding:40px;color:var(--muted);text-align:center;">Nothing new yet. New titles from your provider show up here for 14 days.</div>';
-  } else if (latestPanel === 'LIVE') {
-    body = `<div class="live-grid" id="latestLiveGrid">${items.map((ch) => `
+function latestLiveCards(items) {
+  return `<div class="live-grid" id="latestLiveGrid">${items.map((ch) => `
       <div class="live-channel-card">
         <div class="channel-left">
           ${renderChannelBadge(ch)}
@@ -4357,14 +4345,47 @@ function renderLatest(vp, focusFirst = false) {
         </div>
         <button tabindex="0" class="btn btn-primary tv-focusable" style="padding:7px 14px;font-size:12px;" onclick="startLivePlayback('${ch.streamId}', '${escapeHtml(ch.name)}')">Watch</button>
       </div>`).join('')}</div>`;
+}
+
+function renderLatest(vp, focusFirst = false) {
+  const kids = Boolean(currentActiveProfile && currentActiveProfile.isKids);
+  const d = latestData || {};
+  const lists = { MOVIES: d.movies || [], SERIES: d.series || [], LIVE: kids ? [] : (d.live || []) };
+  // Adult / Extras panels exist only while that area is unlocked (the engine leaves them out otherwise)
+  const groups = {};
+  const pcs = (appStatus && appStatus.parentalControl) || {};
+  if (!kids && d.adult && pcs.showAdult) groups.ADULT = d.adult;      // also checked here so a lock hides it at once
+  if (!kids && d.extras && pcs.showExtras) groups.EXTRAS = d.extras;
+  const groupLabel = { ADULT: '18+', EXTRAS: 'Extras' };
+  const groupCount = (g) => (g.movies || []).length + (g.series || []).length + (g.live || []).length;
+  if ((latestPanel === 'ADULT' || latestPanel === 'EXTRAS') && !groups[latestPanel]) latestPanel = 'MOVIES';
+  const mk = (id, label, n) => {
+    const on = latestPanel === id;
+    return `<button tabindex="0" id="latestPanel${id}" class="filter-pill-btn tv-focusable ${on ? 'active' : ''}" style="flex-shrink:0;${on ? 'background:rgba(139,92,246,0.35);border-color:#8B5CF6;color:#fff;' : ''}" onclick="selectLatestPanel('${id}')">${label} (${n})</button>`;
+  };
+  const empty = '<div style="padding:40px;color:var(--muted);text-align:center;">Nothing new yet. New titles from your provider show up here for 14 days.</div>';
+  const cards = (arr) => `<div class="results-grid" id="filterResultsGrid">${arr.map((m) => renderPosterCard(m)).join('')}</div>`;
+  let body;
+  if (groups[latestPanel]) {
+    const g = groups[latestPanel];
+    const parts = [];
+    if ((g.movies || []).length) parts.push(`<div style="font-size:12px;font-weight:800;color:#9CA3AF;margin:4px 0 8px;">Movies</div>${cards(g.movies)}`);
+    if ((g.series || []).length) parts.push(`<div style="font-size:12px;font-weight:800;color:#9CA3AF;margin:12px 0 8px;">Series</div><div class="results-grid">${g.series.map((m) => renderPosterCard(m)).join('')}</div>`);
+    if ((g.live || []).length) parts.push(`<div style="font-size:12px;font-weight:800;color:#9CA3AF;margin:12px 0 8px;">Live TV</div>${latestLiveCards(g.live)}`);
+    body = parts.length ? parts.join('') : empty;
+  } else if (lists[latestPanel].length === 0) {
+    body = empty;
+  } else if (latestPanel === 'LIVE') {
+    body = latestLiveCards(lists.LIVE);
   } else {
-    body = `<div class="results-grid" id="filterResultsGrid">${items.map((m) => renderPosterCard(m)).join('')}</div>`;
+    body = cards(lists[latestPanel]);
   }
+  const extraBtns = Object.keys(groups).map((id) => mk(id, groupLabel[id], groupCount(groups[id]))).join('');
   vp.innerHTML = `
     <div style="padding:0 0 6px 0;">
       <div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:4px;">Latest added</div>
       <div style="font-size:11px;color:#9CA3AF;margin-bottom:10px;">Added by your provider in the last 14 days, newest first.</div>
-      <div id="latestPanelBar" class="filter-pill-row" style="margin:0 0 12px 0;gap:8px;">${mk('MOVIES', 'Movies')}${mk('SERIES', 'Series')}${kids ? '' : mk('LIVE', 'Live TV')}</div>
+      <div id="latestPanelBar" class="filter-pill-row" style="margin:0 0 12px 0;gap:8px;">${mk('MOVIES', 'Movies', lists.MOVIES.length)}${mk('SERIES', 'Series', lists.SERIES.length)}${kids ? '' : mk('LIVE', 'Live TV', lists.LIVE.length)}${extraBtns}</div>
       ${body}
     </div>`;
   if (focusFirst) {

@@ -1609,13 +1609,18 @@ class StreamVaultDatabase(context: Context) :
     }
 
     /** Latest added titles: last [days] days, newest first, at most [maxItems]; if fewer than [minItems], the newest [fillTo]. */
-    fun getLatestAdded(mediaType: String, isKids: Boolean, days: Int = 14, maxItems: Int = 50, minItems: Int = 10, fillTo: Int = 30): List<MediaItem> {
+    fun getLatestAdded(mediaType: String, isKids: Boolean, days: Int = 14, maxItems: Int = 50, minItems: Int = 10, fillTo: Int = 30, group: String = "normal"): List<MediaItem> {
         val db = readableDatabase
         val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
         val cutoff = System.currentTimeMillis() / 1000 - days * 86400L
+        val groupWhere = when (group) {
+            "adult" -> "is_adult = 1"
+            "extras" -> "is_extra = 1 AND is_adult = 0"
+            else -> "is_adult = 0 AND is_extra = 0"
+        }
         fun run(extra: String, args: Array<String>, limit: Int): List<MediaItem> =
             db.rawQuery(
-                "SELECT * FROM media_items WHERE media_type = ? AND is_adult = 0 AND is_extra = 0 $kidsClause $extra " +
+                "SELECT * FROM media_items WHERE media_type = ? AND $groupWhere $kidsClause $extra " +
                     "ORDER BY added_timestamp DESC, rating DESC LIMIT $limit",
                 arrayOf(mediaType) + args
             ).use { readMediaList(it) }
@@ -1623,13 +1628,14 @@ class StreamVaultDatabase(context: Context) :
         return if (recent.size >= minItems) recent else run("AND added_timestamp > 0", emptyArray(), fillTo)
     }
 
-    fun getLatestLiveChannels(days: Int = 14, maxItems: Int = 50, minItems: Int = 10, fillTo: Int = 30): List<LiveChannel> {
+    fun getLatestLiveChannels(days: Int = 14, maxItems: Int = 50, minItems: Int = 10, fillTo: Int = 30, group: String = "normal"): List<LiveChannel> {
         val db = readableDatabase
         val cutoff = System.currentTimeMillis() / 1000 - days * 86400L
+        val nameGuard = if (group == "normal") "AND lc.name NOT LIKE '%xxx%' AND lc.name NOT LIKE '%18+%'" else ""
         fun run(extra: String, args: Array<String>, limit: Int): List<LiveChannel> {
             val out = mutableListOf<LiveChannel>()
             db.rawQuery(
-                "SELECT lc.* FROM live_channels lc WHERE ${liveGroupClause("normal")} AND lc.name NOT LIKE '%xxx%' AND lc.name NOT LIKE '%18+%' $extra " +
+                "SELECT lc.* FROM live_channels lc WHERE ${liveGroupClause(group)} $nameGuard $extra " +
                     "ORDER BY lc.added_timestamp DESC, lc.name ASC LIMIT $limit",
                 args
             ).use { c ->

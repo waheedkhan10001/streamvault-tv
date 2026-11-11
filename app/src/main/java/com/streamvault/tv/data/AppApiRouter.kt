@@ -756,15 +756,10 @@ class AppApiRouter(
     }
 
     // "Latest added": last 14 days, newest first, max 50 per list (Movies, Series, Live TV)
-    private fun handleGetLatest(): String {
-        val activeProf = getActiveUserProfile()
-        val kids = activeProf.isKids
-        val movies = db.getLatestAdded("MOVIE", kids)
-        val series = db.getLatestAdded("SERIES", kids)
-        val live = if (kids) emptyList() else db.getLatestLiveChannels()
-        val liveArr = JSONArray()
+    private fun liveToJson(live: List<LiveChannel>): JSONArray {
+        val arr = JSONArray()
         for (ch in live) {
-            liveArr.put(JSONObject().apply {
+            arr.put(JSONObject().apply {
                 put("streamId", ch.streamId)
                 put("name", ch.name)
                 put("logoUrl", ch.logoUrl)
@@ -772,12 +767,30 @@ class AppApiRouter(
                 put("addedTimestamp", ch.addedTimestamp)
             })
         }
+        return arr
+    }
+
+    // Adult / Extras lists are only included while that area is unlocked (and never for Kids profiles)
+    private fun latestGroupJson(group: String): JSONObject = JSONObject().apply {
+        put("movies", mediaListToJsonArray(db.getLatestAdded("MOVIE", false, group = group)))
+        put("series", mediaListToJsonArray(db.getLatestAdded("SERIES", false, group = group)))
+        put("live", liveToJson(db.getLatestLiveChannels(group = group)))
+    }
+
+    private fun handleGetLatest(): String {
+        val activeProf = getActiveUserProfile()
+        val kids = activeProf.isKids
+        val movies = db.getLatestAdded("MOVIE", kids)
+        val series = db.getLatestAdded("SERIES", kids)
+        val live = if (kids) emptyList() else db.getLatestLiveChannels()
         return JSONObject().apply {
             put("ok", true)
             put("movies", mediaListToJsonArray(movies))
             put("series", mediaListToJsonArray(series))
-            put("live", liveArr)
+            put("live", liveToJson(live))
             put("days", 14)
+            if (!kids && prefs.isAdultVaultUnlocked()) put("adult", latestGroupJson("adult"))
+            if (!kids && prefs.isExtrasUnlocked()) put("extras", latestGroupJson("extras"))
         }.toString()
     }
 
