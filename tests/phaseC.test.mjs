@@ -162,7 +162,14 @@ async function runPhaseCTests() {
   await page.evaluate(async () => {
     await window.navigateToTab('SETTINGS');
   });
-  await page.waitForFunction(() => document.getElementById('btnAddPlaylistBtn') !== null);
+  try {
+    await page.waitForFunction(() => document.getElementById('btnAddPlaylistBtn') !== null, { timeout: 15000 });
+  } catch (e) {
+    const diag = await page.evaluate(() => (document.getElementById('mainViewport') || {}).innerText || 'no viewport');
+    console.log('DIAG page errors:', JSON.stringify(pageErrors));
+    console.log('DIAG viewport text:', String(diag).slice(0, 600));
+    throw e;
+  }
   await new Promise(r => setTimeout(r, 100));
 
   // Assert expected focusables exist in Settings
