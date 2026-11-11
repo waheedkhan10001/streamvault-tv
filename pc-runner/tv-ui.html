@@ -1331,6 +1331,7 @@
       Enter your Xtream Codes or M3U provider credentials. Titles will enrich in the background without affecting your watch history.
     </div>
 
+    <div id="playlistReplaceNote" style="display:none;font-size:11.5px;color:#FCD34D;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4;"></div>
     <form onsubmit="handleSavePlaylistSubmit(event)">
       <input type="hidden" id="playlistModalEditId" value="" />
       <div style="margin-bottom:10px;">
@@ -5883,7 +5884,6 @@ async function loadSettings(vp) {
             ` : `
               <div style="display:flex;flex-direction:column;gap:6px;max-height:145px;overflow-y:auto;">
                 ${playlists.map((pl, idx) => {
-                  const isEnabled = pl.is_enabled !== 0;
                   const live = playlistLiveStatus(pl);
                   const badge = playlistBadge(live);
                   const statusClass = badge.cls;
@@ -5901,9 +5901,6 @@ async function loadSettings(vp) {
                         <div data-pl-reason="${escapeHtml(pl.playlist_id)}" style="display:${live.error ? 'block' : 'none'};font-size:9.5px;color:#FCA5A5;margin-top:2px;">${escapeHtml(live.error)}</div>
                       </div>
                       <div style="display:flex;gap:5px;align-items:center;">
-                        <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;${isEnabled ? 'color:#10B981;' : 'color:#6B7280;'}" onclick="togglePlaylistEnabled('${pl.playlist_id}', ${isEnabled ? 1 : 0})">
-                          ${isEnabled ? 'Active' : 'Disabled'}
-                        </button>
                         <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;" onclick="openEditPlaylistModal('${pl.playlist_id}')">Edit</button>
                         <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;color:#F87171;" onclick="deletePlaylist('${pl.playlist_id}')">✕</button>
                       </div>
@@ -6013,7 +6010,7 @@ let cachedPlaylists = [];
 
 // Cloud and TV describe a playlist with different field names; the screen only ever sees this one shape.
 function normalizePlaylist(p) {
-  const enabled = p.isEnabled !== undefined ? !!p.isEnabled : p.is_enabled !== 0;
+  const enabled = true;   // there is no On/Off any more: a playlist that is listed is the one in use
   return {
     playlist_id: p.playlist_id || p.playlistId || '',
     name: p.name || '',
@@ -6111,7 +6108,15 @@ function openAddPlaylistModal() {
   playNavSound();
   const modal = document.getElementById('playlistModal');
   if (!modal) return;
-  document.getElementById('playlistModalTitle').innerText = 'Add IPTV Playlist';
+  const current = cachedPlaylists[0];
+  document.getElementById('playlistModalTitle').innerText = current ? 'Replace current playlist?' : 'Add IPTV Playlist';
+  const note = document.getElementById('playlistReplaceNote');
+  if (note) {
+    note.style.display = current ? 'block' : 'none';
+    note.innerText = current ? `StreamVault uses one playlist at a time. Saving this one removes "${current.name || 'your current playlist'}" and loads the new one.` : '';
+  }
+  const saveBtn = document.getElementById('btnSavePlaylist');
+  if (saveBtn) saveBtn.innerText = current ? 'Replace & Connect' : 'Save & Connect';
   document.getElementById('playlistModalEditId').value = '';
   document.getElementById('inpPlaylistName').value = 'Primary IPTV';
   document.getElementById('inpPlaylistServer').value = '';
@@ -6132,6 +6137,8 @@ function openEditPlaylistModal(playlistId) {
   const modal = document.getElementById('playlistModal');
   if (!modal) return;
   document.getElementById('playlistModalTitle').innerText = 'Edit IPTV Playlist';
+  const note = document.getElementById('playlistReplaceNote'); if (note) note.style.display = 'none';
+  const saveBtn = document.getElementById('btnSavePlaylist'); if (saveBtn) saveBtn.innerText = 'Save & Connect';
   document.getElementById('playlistModalEditId').value = playlistId;
   document.getElementById('inpPlaylistName').value = pl.name || 'Primary IPTV';
   document.getElementById('inpPlaylistServer').value = pl.server_url || pl.serverUrl || '';
@@ -6181,6 +6188,14 @@ async function handleSavePlaylistSubmit(e) {
   }
 
   try {
+    if (!editId && cachedPlaylists.length) {
+      // one playlist at a time: the old one goes first (cloud record + this TV's copy)
+      for (const old of cachedPlaylists.slice()) {
+        await fetch(`/api/playlists/${encodeURIComponent(old.playlist_id)}`, { method: 'DELETE' }).catch(() => {});
+      }
+      await fetch('/api/clear-playlist', { method: 'POST' }).catch(() => {});
+      cachedPlaylists = [];
+    }
     const method = editId ? 'PUT' : 'POST';
     const url = editId ? `/api/playlists/${encodeURIComponent(editId)}` : '/api/playlists';
     const payload = { name, serverUrl, username };
@@ -6217,34 +6232,6 @@ async function handleSavePlaylistSubmit(e) {
       statusMsg.style.color = '#EF4444';
       statusMsg.innerText = err.message || 'Connection failed';
     }
-  }
-}
-
-async function togglePlaylistEnabled(playlistId, currentEnabled) {
-  playNavSound();
-  const pl = cachedPlaylists.find(p => p.playlist_id === playlistId);
-  try {
-    const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isEnabled: !currentEnabled })
-    });
-    const d = await res.json();
-    if (d.success || d.ok) {
-      if (pl) {
-        const onThisTv = playlistLiveStatus(pl).status !== 'waiting' && playlistLiveStatus(pl).status !== 'disabled';
-        if (currentEnabled && onThisTv) { await fetch('/api/clear-playlist', { method: 'POST' }).catch(() => {}); }
-        else if (!currentEnabled && pl.password) { await sendPlaylistToTv(pl).catch(() => {}); }
-      }
-      showToast(currentEnabled ? 'Playlist turned off' : 'Playlist turned on. Loading your catalog…');
-      await refreshAppStatus();
-      const vp = document.getElementById('mainViewport');
-      if (vp && currentTab === 'SETTINGS') await loadSettings(vp);
-    } else {
-      showToast(d.error || 'Could not change the playlist');
-    }
-  } catch (err) {
-    showToast('Error: ' + err.message);
   }
 }
 

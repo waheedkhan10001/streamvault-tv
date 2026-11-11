@@ -139,14 +139,17 @@ async function run() {
   const sv2 = await lastSave(tv);
   check('TV got the new username AND the old password (left blank in the form)', sv2.username === 'newuser' && sv2.password === 'p@ss word#1', JSON.stringify(sv2));
 
-  console.log('\n5. Switch off / on, and remove');
+  console.log('\n5. No On/Off switch; adding another playlist replaces the current one; remove');
   await openSettings(tv);
-  await tv.evaluate(() => [...document.querySelectorAll('#mainViewport button')].find(b => /Active/.test(b.textContent)).click()); await sleep(1000);
-  check('turning off: cloud record disabled and the TV stops using it', sqlite.prepare('SELECT is_enabled FROM playlists').get().is_enabled === 0 && (await calls(tv)).includes('clear'));
-  rt = await rowText(tv);
-  check('row reads "Off"', /Off/.test(rt), rt);
-  await tv.evaluate(() => [...document.querySelectorAll('#mainViewport button')].find(b => /Disabled/.test(b.textContent)).click()); await sleep(1000);
-  check('turning on: cloud record enabled and the TV is given the login again', sqlite.prepare('SELECT is_enabled FROM playlists').get().is_enabled === 1 && (await lastSave(tv)).username === 'newuser');
+  check('there is no Active / Disabled / Off button any more', !(await tv.evaluate(() => [...document.querySelectorAll('#mainViewport button')].some(b => /^(Active|Disabled|Off)$/.test(b.textContent.trim())))));
+  await tv.evaluate(() => document.getElementById('btnAddPlaylistBtn').click()); await sleep(300);
+  const rp = await tv.evaluate(() => ({ title: document.getElementById('playlistModalTitle').innerText, note: document.getElementById('playlistReplaceNote').innerText, shown: document.getElementById('playlistReplaceNote').style.display, btn: document.getElementById('btnSavePlaylist').innerText }));
+  check('adding a second one asks "Replace current playlist?" and says what will happen', /Replace current playlist/.test(rp.title) && rp.shown === 'block' && /one playlist at a time/.test(rp.note) && /Replace/.test(rp.btn), JSON.stringify(rp));
+  await tv.evaluate(() => { for (const [id, v] of [['inpPlaylistName', 'Second'], ['inpPlaylistServer', 'http://other.example.com:8080'], ['inpPlaylistUser', 'u2'], ['inpPlaylistPass', 'pw2']]) { const i = document.getElementById(id); i.removeAttribute('readonly'); i.value = v; } });
+  await tv.evaluate(() => document.getElementById('btnSavePlaylist').click()); await sleep(1500);
+  const live = sqlite.prepare('SELECT username FROM playlists WHERE removed_at = 0 OR removed_at IS NULL').all();
+  check('the old playlist is gone from the cloud and only the new one is kept', live.length === 1 && live[0].username === 'u2', JSON.stringify(live));
+  check('the TV was given the new login', (await lastSave(tv)).username === 'u2');
   await openSettings(tv);
   await tv.evaluate(() => [...document.querySelectorAll('#mainViewport button')].find(b => b.textContent.trim() === '✕').click()); await sleep(1000);
   check('remove: cloud record removed and the TV forgets it', sqlite.prepare('SELECT removed_at FROM playlists').get().removed_at > 0);
