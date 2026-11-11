@@ -24,7 +24,7 @@ Serverless backend for standalone StreamVault TV accounts, multi-playlist sync, 
    npx wrangler secret put BREVO_API_KEY
    # Paste your Brevo key when prompted
    ```
-4. Optional custom sender (defaults to `noreply@streamvault.tv` / `StreamVault TV`):
+4. Optional custom sender (defaults to `noreply@tv.truehats.com` / `StreamVault TV`, so you normally do not need to set these):
    ```bash
    npx wrangler secret put BREVO_SENDER_EMAIL # e.g. verify@yourdomain.com
    npx wrangler secret put BREVO_SENDER_NAME  # e.g. StreamVault TV
@@ -44,10 +44,12 @@ npx wrangler secret put TMDB_API_KEY
 
 ## Deploying to Cloudflare
 
-1. Apply the D1 Schema:
-   ```bash
-   npx wrangler d1 execute streamvault-db --file=./schema.sql
-   ```
+1. Prepare the D1 database:
+   - **Brand-new database:** apply the full schema:
+     ```bash
+     npx wrangler d1 execute streamvault-db --file=./schema.sql
+     ```
+   - **Already-deployed database (the usual case now):** do NOT re-run `schema.sql`. Follow `MIGRATIONS.md` instead, and do it BEFORE deploying the Worker.
 2. Deploy the Worker:
    ```bash
    npx wrangler deploy

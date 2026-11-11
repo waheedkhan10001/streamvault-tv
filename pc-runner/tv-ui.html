@@ -997,7 +997,7 @@
       <button class="pin-btn tv-focusable" onclick="closeParentalPinModal()">✕</button>
     </div>
     <div style="text-align:center;margin-top:10px;">
-      <button tabindex="0" class="btn tv-focusable" style="background:transparent;border:1px solid #4B5563;color:#9CA3AF;font-size:10px;padding:3px 10px;" onclick="openResetPinModal()">Forgot PIN? Reset via Account Password</button>
+      <button tabindex="0" class="btn tv-focusable" style="background:transparent;border:1px solid #4B5563;color:#9CA3AF;font-size:10px;padding:3px 10px;" onclick="openResetPinModal()">Forgot PIN? Reset via Password or Email Code</button>
     </div>
   </div>
 </div>
@@ -1006,14 +1006,25 @@
 <div id="resetPinModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100010;align-items:center;justify-content:center;">
   <div style="background:#120E24;border:1.5px solid var(--theme-border, #A78BFA);border-radius:16px;max-width:440px;width:90%;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
     <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Reset Master PIN</div>
-    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Verify your StreamVault Cloud Account password or enter an emailed 6-digit code.</div>
-    
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Enter your StreamVault account password, or choose "Email me a code" and type the 6-digit code we send you.</div>
+
     <div style="margin-bottom:10px;text-align:left;">
       <label style="display:block;font-size:10px;font-weight:700;color:#D1D5DB;margin-bottom:4px;">Account Password</label>
       <input id="resetPinPasswordInput" type="password" class="search-field tv-focusable"
              readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
              onkeydown="onInputKeyDown(this, event)"
              placeholder="Account password" style="width:100%;font-size:13px;padding:6px 10px;box-sizing:border-box;" />
+    </div>
+
+    <div style="margin-bottom:10px;text-align:left;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <label style="font-size:10px;font-weight:700;color:#D1D5DB;">Or: 6-Digit Email Code</label>
+        <button tabindex="0" id="btnRequestPinResetCode" class="btn tv-focusable" style="padding:2px 10px;font-size:10px;" onclick="requestPinResetCode()">Email me a code</button>
+      </div>
+      <input id="resetPinCodeInput" type="text" inputmode="numeric" maxlength="6" class="search-field tv-focusable"
+             readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
+             oninput="onPinInput(this)" onkeydown="onInputKeyDown(this, event)"
+             placeholder="6-digit code" style="width:100%;font-size:13px;letter-spacing:3px;text-align:center;padding:6px 10px;box-sizing:border-box;" />
     </div>
 
     <div style="margin-bottom:10px;text-align:left;">
@@ -1738,6 +1749,19 @@ function startTvPairingPolling(code) {
   }, 3000);
 }
 
+// Pushes the Master PIN (salted hash + its salt) to the cloud copy so a second TV can restore it.
+// The PIN itself never leaves the TV. When CHANGING an existing PIN the cloud demands proof,
+// so pass { currentPin } for a change; leave it empty for the very first PIN.
+function syncPinToCloud(nativeResult, proof) {
+  const token = getStoredAuthToken();
+  if (!token || !nativeResult || !nativeResult.pinHash || !nativeResult.pinSalt) return;
+  fetch(CLOUD_SYNC_BASE + '/api/account/pin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify(Object.assign({ pinHash: nativeResult.pinHash, pinSalt: nativeResult.pinSalt }, proof || {}))
+  }).catch(() => {});
+}
+
 async function handleSuccessfulAuth(data) {
   localStorage.setItem('sv_auth_token', data.token);
   localStorage.setItem('streamvault_session_token', data.token);
@@ -1753,7 +1777,7 @@ async function handleSuccessfulAuth(data) {
       await fetch('/api/parental-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'restore', pinHash: data.pinHash })
+        body: JSON.stringify({ action: 'restore', pinHash: data.pinHash, pinSalt: data.pinSalt || '' })
       }).catch(() => {});
     } catch (_) {}
   }
@@ -3354,6 +3378,19 @@ async function loadSettings(vp) {
           </div>
         </div>
       </div>
+
+      <!-- About & Credits: TMDB attribution (required by the TMDB API terms of use).
+           The card itself is focusable so the TV remote (D-pad) can reach and scroll to it. -->
+      <div id="settingsAboutCard" tabindex="0" class="settings-card tv-focusable" onfocus="playNavSound()"
+           style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;box-sizing:border-box;display:flex;align-items:center;gap:14px;">
+        <div id="tmdbLogoSlot" style="flex-shrink:0;display:flex;align-items:center;justify-content:center;min-width:56px;height:26px;">
+          <span style="font-size:12px;font-weight:900;letter-spacing:1px;color:#01B4E4;">TMDB</span>
+        </div>
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:800;margin-bottom:2px;">About &amp; Credits</div>
+          <div id="tmdbAttributionText" style="font-size:10.5px;color:#D1D5DB;line-height:1.4;">This product uses the TMDB API but is not endorsed or certified by TMDB.</div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -3659,6 +3696,7 @@ async function changeParentalPin() {
     });
     const d = await res.json();
     if (d.success) {
+      syncPinToCloud(d, { currentPin: cur }); // changing a PIN: cloud wants proof of the old one
       if (statusLbl) { statusLbl.innerText = 'PIN updated successfully!'; statusLbl.style.color = '#10B981'; }
       document.getElementById('setCurPin').value = '';
       document.getElementById('setNewPin').value = '';
@@ -5996,14 +6034,7 @@ async function verifyParentalPin() {
       });
       const d = await res.json();
       if (d.success) {
-        const token = getStoredAuthToken();
-        if (token && d.pinHash) {
-          fetch(CLOUD_SYNC_BASE + '/api/account/pin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ pinHash: d.pinHash })
-          }).catch(() => {});
-        }
+        syncPinToCloud(d); // first PIN for this account: no proof needed
         showToast('✓ Master PIN created!');
         isCreatingPinMode = false;
         const pinUsed = enteredPin;
@@ -6078,6 +6109,8 @@ function openResetPinModal() {
   const m = document.getElementById('resetPinModal');
   if (m) {
     document.getElementById('resetPinPasswordInput').value = '';
+    const codeBox = document.getElementById('resetPinCodeInput');
+    if (codeBox) codeBox.value = '';
     document.getElementById('resetPinNewInput').value = '';
     document.getElementById('resetPinErrorMessage').innerText = '';
     m.style.display = 'flex';
@@ -6093,14 +6126,49 @@ function closeResetPinModal() {
   if (m) m.style.display = 'none';
 }
 
+// Asks the cloud server to email a 6-digit PIN-reset code to the signed-in account's own address.
+async function requestPinResetCode() {
+  playNavSound();
+  const errLbl = document.getElementById('resetPinErrorMessage');
+  const token = getStoredAuthToken();
+  if (!token) {
+    if (errLbl) { errLbl.innerText = 'Please sign in to your StreamVault account first'; errLbl.style.color = '#EF4444'; }
+    return;
+  }
+  if (errLbl) { errLbl.innerText = 'Sending code...'; errLbl.style.color = '#A78BFA'; }
+  try {
+    const res = await fetch(CLOUD_SYNC_BASE + '/api/account/request-pin-reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: '{}'
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok && d.success) {
+      if (errLbl) { errLbl.innerText = 'Code sent to ' + (d.sentTo || 'your email') + '. Enter it below.'; errLbl.style.color = '#10B981'; }
+      const box = document.getElementById('resetPinCodeInput');
+      if (box) { box.removeAttribute('readonly'); box.focus(); playNavSound(); }
+    } else if (errLbl) {
+      errLbl.innerText = d.error || 'Could not send the code';
+      errLbl.style.color = '#EF4444';
+    }
+  } catch (err) {
+    if (errLbl) { errLbl.innerText = 'Network error: ' + err.message; errLbl.style.color = '#EF4444'; }
+  }
+}
+
 async function submitResetPin() {
   playNavSound();
   const pwd = (document.getElementById('resetPinPasswordInput')?.value || '').trim();
+  const code = (document.getElementById('resetPinCodeInput')?.value || '').trim();
   const newPin = (document.getElementById('resetPinNewInput')?.value || '').trim();
   const errLbl = document.getElementById('resetPinErrorMessage');
 
-  if (!pwd) {
-    if (errLbl) errLbl.innerText = 'Account password is required';
+  if (!pwd && !code) {
+    if (errLbl) errLbl.innerText = 'Enter your account password or the 6-digit code from your email';
+    return;
+  }
+  if (!pwd && !/^\d{6}$/.test(code)) {
+    if (errLbl) errLbl.innerText = 'The email code is exactly 6 digits';
     return;
   }
   if (newPin.length !== 4 || isNaN(newPin)) {
@@ -6117,7 +6185,9 @@ async function submitResetPin() {
     const res = await fetch('/api/parental-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'reset_pin', password: pwd, newPin: newPin })
+      body: JSON.stringify(pwd
+        ? { action: 'reset_pin', password: pwd, newPin: newPin }
+        : { action: 'reset_pin', code: code, newPin: newPin })
     });
     const d = await res.json();
     if (d.success) {

@@ -694,6 +694,7 @@ class AppApiRouter(
                     put("hasPin", prefs.hasCustomParentalPin())
                     put("isLockedOut", System.currentTimeMillis() < prefs.getPinLockoutUntil())
                     put("pinHash", prefs.getPinHash() ?: "")
+                    put("pinSalt", if (prefs.hasCustomParentalPin()) prefs.getPinSalt() else "")
                 }.toString()
             }
             "lock" -> {
@@ -757,6 +758,7 @@ class AppApiRouter(
                         put("success", true)
                         put("message", "PIN updated")
                         put("pinHash", prefs.getPinHash() ?: "")
+                        put("pinSalt", prefs.getPinSalt())
                         put("hasCustomPin", true)
                     }.toString()
                 } else {
@@ -774,6 +776,7 @@ class AppApiRouter(
                         put("success", true)
                         put("message", msg)
                         put("pinHash", prefs.getPinHash() ?: "")
+                        put("pinSalt", prefs.getPinSalt())
                     }.toString()
                 } else {
                     JSONObject().apply {

@@ -5,9 +5,11 @@
  * ====================================================================
  */
 
-// Rate limiting via D1 table (key, count, reset_at)
-async function checkRateLimit(db, key, maxRequests = 15, windowSeconds = 60) {
-  if (!db) return true;
+// Rate limiting via D1 table (key, count, reset_at).
+// Returns 'ok' | 'limited' | 'error'. With consume=false it only looks at the
+// counter and never increments it (used to check a failure counter first).
+async function rateLimit(db, key, maxRequests, windowSeconds, consume = true) {
+  if (!db) return 'error';
   const now = Date.now();
   try {
     const record = await db.prepare(
@@ -15,26 +17,91 @@ async function checkRateLimit(db, key, maxRequests = 15, windowSeconds = 60) {
     ).bind(key).first();
 
     if (!record || now > record.reset_at) {
+      if (!consume) return 'ok';
       const resetAt = now + windowSeconds * 1000;
       await db.prepare(
         `INSERT INTO rate_limits (key, count, reset_at) VALUES (?, 1, ?)
          ON CONFLICT(key) DO UPDATE SET count = 1, reset_at = ?`
       ).bind(key, resetAt, resetAt).run();
-      return true;
+      return 'ok';
     }
 
     if (record.count >= maxRequests) {
-      return false;
+      return 'limited';
     }
 
-    await db.prepare(
-      `UPDATE rate_limits SET count = count + 1 WHERE key = ?`
-    ).bind(key).run();
-    return true;
+    if (consume) {
+      await db.prepare(
+        `UPDATE rate_limits SET count = count + 1 WHERE key = ?`
+      ).bind(key).run();
+    }
+    return 'ok';
   } catch (err) {
     console.error('[RateLimit Error]', err);
-    return true;
+    return 'error';
   }
+}
+
+// Standard limiter used by the sign-up / login / verify routes.
+// Fails OPEN: if the rate_limits table is unavailable the request is allowed.
+async function checkRateLimit(db, key, maxRequests = 15, windowSeconds = 60) {
+  return (await rateLimit(db, key, maxRequests, windowSeconds)) !== 'limited';
+}
+
+// Strict limiter used on every PIN / password-guessable route.
+// Fails CLOSED: if the limiter itself is broken (for example the migration was
+// not run), the route refuses with 503 instead of allowing unlimited guessing.
+// Returns a Response when the request must stop, or null when it may continue.
+async function enforceLimit(db, key, maxRequests, windowSeconds, message, corsHeaders, consume = true) {
+  const state = await rateLimit(db, key, maxRequests, windowSeconds, consume);
+  if (state === 'ok') return null;
+  if (state === 'limited') return errorResponse(message, 429, corsHeaders);
+  return errorResponse('Service temporarily unavailable. Please try again later.', 503, corsHeaders);
+}
+
+// Counts one failed attempt against a key (starts a fresh window if needed).
+async function recordFailure(db, key, windowSeconds) {
+  await rateLimit(db, key, Number.MAX_SAFE_INTEGER, windowSeconds, true);
+}
+
+// --------------------------------------------------------------------
+// Small security helpers (codes, constant-time compare, PIN hashing)
+// --------------------------------------------------------------------
+
+// 6-digit code from the crypto RNG (rejection sampling, so no modulo bias).
+function generateSixDigitCode() {
+  const limit = Math.floor(0x100000000 / 900000) * 900000;
+  const buf = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(buf);
+  } while (buf[0] >= limit);
+  return String(100000 + (buf[0] % 900000));
+}
+
+function safeEqual(a, b) {
+  const x = String(a);
+  const y = String(b);
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return diff === 0;
+}
+
+function maskEmail(email) {
+  const [name, domain] = String(email).split('@');
+  if (!domain) return '';
+  return `${name.slice(0, 1)}***@${domain}`;
+}
+
+// The TV app stores the Master PIN as SHA-256("<pin>:<salt>") in lowercase hex
+// (see PreferencesManager.hashPin). The Worker uses the identical scheme so a
+// PIN created on one TV verifies on another once hash AND salt are restored.
+const PIN_RE = /^\d{4}$/;
+const PIN_HASH_RE = /^[0-9a-f]{64}$/;
+const PIN_SALT_RE = /^[A-Za-z0-9-]{8,64}$/;
+
+async function hashPinWithSalt(pin, salt) {
+  return sha256(`${pin}:${salt}`);
 }
 
 // Security: Standard CORS Headers
@@ -231,22 +298,35 @@ async function authenticate(request, env) {
 // Brevo Transactional Email Integration (Send-Only, No Contact Lists)
 // --------------------------------------------------------------------
 
-async function sendVerificationEmail(email, code, env) {
+// Default sender: the domain authenticated in Brevo (tv.truehats.com).
+// Override with the BREVO_SENDER_EMAIL / BREVO_SENDER_NAME Worker variables.
+const DEFAULT_SENDER_EMAIL = 'noreply@tv.truehats.com';
+const DEFAULT_SENDER_NAME = 'StreamVault TV';
+
+// purpose: 'verify_email' (sign-up / resend) or 'reset_pin' (Master PIN reset)
+async function sendVerificationEmail(email, code, env, purpose = 'verify_email') {
   const brevoApiKey = env.BREVO_API_KEY;
   const resendApiKey = env.RESEND_API_KEY;
 
-  const senderEmail = env.BREVO_SENDER_EMAIL || env.EMAIL_FROM_ADDRESS || 'noreply@streamvault.tv';
-  const senderName = env.BREVO_SENDER_NAME || env.EMAIL_FROM_NAME || 'StreamVault TV';
-  const subject = `${code} is your StreamVault TV verification code`;
+  const senderEmail = env.BREVO_SENDER_EMAIL || env.EMAIL_FROM_ADDRESS || DEFAULT_SENDER_EMAIL;
+  const senderName = env.BREVO_SENDER_NAME || env.EMAIL_FROM_NAME || DEFAULT_SENDER_NAME;
+  const isPinReset = purpose === 'reset_pin';
+  const subject = isPinReset
+    ? `${code} is your StreamVault TV PIN reset code`
+    : `${code} is your StreamVault TV verification code`;
+  const subtitle = isPinReset ? 'Master PIN Reset' : 'Standalone Cloud Account Verification';
+  const instruction = isPinReset
+    ? 'Enter this 6-digit code on your TV to reset your Master PIN:'
+    : 'Enter this 6-digit code on your TV or mobile pairing screen:';
 
   const htmlContent = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; background: #090714; color: #FFFFFF; border-radius: 12px;">
       <div style="text-align: center; margin-bottom: 24px;">
         <h1 style="color: #A78BFA; font-size: 24px; margin: 0 0 8px;">StreamVault TV</h1>
-        <p style="color: #94A3B8; font-size: 14px; margin: 0;">Standalone Cloud Account Verification</p>
+        <p style="color: #94A3B8; font-size: 14px; margin: 0;">${subtitle}</p>
       </div>
       <div style="background: #15102A; border: 1px solid #2E2356; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
-        <p style="color: #E2E8F0; font-size: 14px; margin-top: 0;">Enter this 6-digit code on your TV or mobile pairing screen:</p>
+        <p style="color: #E2E8F0; font-size: 14px; margin-top: 0;">${instruction}</p>
         <div style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #8B5CF6; margin: 16px 0;">${code}</div>
         <p style="color: #64748B; font-size: 12px; margin-bottom: 0;">Valid for 10 minutes. Never share this code.</p>
       </div>
@@ -391,9 +471,8 @@ export default {
           ).bind(passwordHash, now, accountId).run();
         }
 
-        // Generate 6-digit confirmation code
-        const codeNum = Math.floor(100000 + Math.random() * 900000);
-        const codeStr = String(codeNum);
+        // Generate 6-digit confirmation code (crypto RNG)
+        const codeStr = generateSixDigitCode();
         const codeId = crypto.randomUUID();
         const expiresAt = now + 10 * 60 * 1000; // 10 minutes
 
@@ -434,17 +513,19 @@ export default {
         }
         const now = Date.now();
 
+        // Only sign-up codes work here. PIN-reset codes (purpose 'reset_pin') must
+        // never be usable as a sign-in code.
         const codeRecord = await env.DB.prepare(
           `SELECT code_id, attempts, is_used, expires_at
            FROM email_codes
-           WHERE email = ? AND code = ? AND is_used = 0
+           WHERE email = ? AND code = ? AND is_used = 0 AND purpose = 'verify_email'
            ORDER BY created_at DESC LIMIT 1`
         ).bind(cleanEmail, cleanCode).first();
 
         if (!codeRecord) {
-          // Increment attempts on recent codes for this email
+          // Increment attempts on recent sign-up codes for this email
           await env.DB.prepare(
-            `UPDATE email_codes SET attempts = attempts + 1 WHERE email = ? AND is_used = 0`
+            `UPDATE email_codes SET attempts = attempts + 1 WHERE email = ? AND is_used = 0 AND purpose = 'verify_email'`
           ).bind(cleanEmail).run();
           return errorResponse('Invalid or expired verification code', 401, corsHeaders);
         }
@@ -460,7 +541,7 @@ export default {
         await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(codeRecord.code_id).run();
         await env.DB.prepare(`UPDATE accounts SET is_verified = 1, updated_at = ? WHERE email = ?`).bind(now, cleanEmail).run();
 
-        const account = await env.DB.prepare(`SELECT account_id, pin_hash FROM accounts WHERE email = ?`).bind(cleanEmail).first();
+        const account = await env.DB.prepare(`SELECT account_id, pin_hash, pin_salt FROM accounts WHERE email = ?`).bind(cleanEmail).first();
 
         // Issue 32-byte crypto session token
         const rawToken = generateSessionToken();
@@ -484,6 +565,7 @@ export default {
           token: rawToken,
           email: cleanEmail,
           pinHash: (account && account.pin_hash) || '',
+          pinSalt: (account && account.pin_salt) || '',
           profiles: profiles.results || []
         }, 200, corsHeaders);
       }
@@ -517,8 +599,7 @@ export default {
         }
 
         const now = Date.now();
-        const codeNum = Math.floor(100000 + Math.random() * 900000);
-        const codeStr = String(codeNum);
+        const codeStr = generateSixDigitCode();
         const codeId = crypto.randomUUID();
         const expiresAt = now + 10 * 60 * 1000; // 10 minutes
 
@@ -555,7 +636,7 @@ export default {
           return errorResponse('Too many login attempts for this email. Please wait 1 minute.', 429, corsHeaders);
         }
         const account = await env.DB.prepare(
-          `SELECT account_id, email, password_hash, pin_hash, is_verified FROM accounts WHERE email = ?`
+          `SELECT account_id, email, password_hash, pin_hash, pin_salt, is_verified FROM accounts WHERE email = ?`
         ).bind(cleanEmail).first();
 
         if (!account) return errorResponse('Invalid email or password', 401, corsHeaders);
@@ -591,6 +672,7 @@ export default {
           email: account.email,
           isVerified: account.is_verified === 1,
           pinHash: account.pin_hash || '',
+          pinSalt: account.pin_salt || '',
           profiles: profiles.results || [],
           playlists: playlists.results || []
         }, 200, corsHeaders);
@@ -747,7 +829,7 @@ export default {
            VALUES (?, ?, ?, ?, ?)`
         ).bind(sessionId, record.account_id, tokenHash, sessionExpires, now).run();
 
-        const account = await env.DB.prepare(`SELECT email, pin_hash FROM accounts WHERE account_id = ?`).bind(record.account_id).first();
+        const account = await env.DB.prepare(`SELECT email, pin_hash, pin_salt FROM accounts WHERE account_id = ?`).bind(record.account_id).first();
         const profiles = await env.DB.prepare(`SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE account_id = ?`).bind(record.account_id).all();
 
         // Decrypt playlists for the paired TV
@@ -772,58 +854,15 @@ export default {
           accountId: record.account_id,
           email: account ? account.email : '',
           pinHash: (account && account.pin_hash) || '',
+          pinSalt: (account && account.pin_salt) || '',
           profiles: profiles.results || [],
           playlists: decryptedPlaylists
         }, 200, corsHeaders);
       }
 
-      // Reset PIN (via Account Password or 6-digit Email Code)
-      if (method === 'POST' && pathname === '/api/account/reset-pin') {
-        const authHeader = request.headers.get('Authorization') || '';
-        let account = null;
-        if (authHeader.startsWith('Bearer ')) {
-          const sessionAuth = await authenticate(request, env);
-          if (sessionAuth) {
-            account = await env.DB.prepare(
-              `SELECT account_id, email, password_hash FROM accounts WHERE account_id = ?`
-            ).bind(sessionAuth.accountId).first();
-          }
-        }
-        const { email, password, code, newPin, newPinHash } = await request.json().catch(() => ({}));
-        if (!account && email) {
-          account = await env.DB.prepare(
-            `SELECT account_id, email, password_hash FROM accounts WHERE email = ?`
-          ).bind(email.trim().toLowerCase()).first();
-        }
-        if (!account) {
-          return errorResponse('Account not found or session invalid', 404, corsHeaders);
-        }
-
-        if (password) {
-          const ok = await verifyPassword(password, account.password_hash);
-          if (!ok) return errorResponse('Incorrect account password', 403, corsHeaders);
-        } else if (code) {
-          const cleanCode = String(code).trim();
-          const codeRecord = await env.DB.prepare(
-            `SELECT code_id, expires_at FROM email_codes WHERE email = ? AND code = ? AND is_used = 0 ORDER BY created_at DESC LIMIT 1`
-          ).bind(account.email, cleanCode).first();
-          if (!codeRecord || Date.now() > codeRecord.expires_at) {
-            return errorResponse('Invalid or expired 6-digit verification code', 401, corsHeaders);
-          }
-          await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(codeRecord.code_id).run();
-        } else {
-          return errorResponse('Account password or 6-digit email code required', 400, corsHeaders);
-        }
-
-        const now = Date.now();
-        const pinToSave = newPinHash || (newPin ? await sha256(newPin) : null);
-        if (pinToSave) {
-          await env.DB.prepare(
-            `UPDATE accounts SET pin_hash = ?, updated_at = ? WHERE account_id = ?`
-          ).bind(pinToSave, now, account.account_id).run();
-        }
-        return jsonResponse({ success: true, message: 'Master PIN reset successfully verified' }, 200, corsHeaders);
-      }
+      // NOTE: /api/account/reset-pin and /api/account/request-pin-reset live in the
+      // authenticated section below. A signed-in session is required for both, so
+      // there is no public route where passwords or reset codes can be guessed.
 
       // ================================================================
       // AUTHENTICATED ENDPOINTS (Requires Bearer Session Token)
@@ -835,17 +874,182 @@ export default {
         return errorResponse('Unauthorized: Valid Bearer session token required', 401, corsHeaders);
       }
 
-      // Sync / Update Master PIN Hash
+      // ----------------------------------------------------------------
+      // MASTER PIN (parental control) — cloud copy so a second TV can restore it.
+      // The cloud holds the salted hash + salt, never the PIN itself.
+      // ----------------------------------------------------------------
+
+      // Sync / Update Master PIN (hash + salt).
+      //  - First PIN for the account: any signed-in session may store it.
+      //  - Changing an existing PIN: caller must prove who they are by sending
+      //    `currentPin` (the current 4-digit PIN) or `password` (account password).
       if (method === 'POST' && pathname === '/api/account/pin') {
-        const { pinHash } = await request.json().catch(() => ({}));
-        if (!pinHash || typeof pinHash !== 'string') {
-          return errorResponse('pinHash is required', 400, corsHeaders);
+        const blocked = await enforceLimit(env.DB, `ip:accpin:${clientIp}`, 10, 60,
+          'Too many requests. Please wait 1 minute.', corsHeaders);
+        if (blocked) return blocked;
+
+        // Stop early if this account already failed too many proofs recently.
+        const failKey = `fail:accpin:${auth.accountId}`;
+        const locked = await enforceLimit(env.DB, failKey, 5, 900,
+          'Too many incorrect attempts. Please wait 15 minutes.', corsHeaders, false);
+        if (locked) return locked;
+
+        const { pinHash, pinSalt, currentPin, password } = await request.json().catch(() => ({}));
+        const cleanHash = typeof pinHash === 'string' ? pinHash.trim().toLowerCase() : '';
+        const cleanSalt = typeof pinSalt === 'string' ? pinSalt.trim() : '';
+        if (!PIN_HASH_RE.test(cleanHash) || !PIN_SALT_RE.test(cleanSalt)) {
+          return errorResponse('A valid pinHash and pinSalt are required', 400, corsHeaders);
         }
-        const now = Date.now();
+
+        const row = await env.DB.prepare(
+          `SELECT password_hash, pin_hash, pin_salt FROM accounts WHERE account_id = ?`
+        ).bind(auth.accountId).first();
+        if (!row) return errorResponse('Account not found', 404, corsHeaders);
+
+        if (row.pin_hash) {
+          let proven = false;
+          if (typeof password === 'string' && password) {
+            proven = await verifyPassword(password, row.password_hash);
+          } else if (typeof currentPin === 'string' && PIN_RE.test(currentPin.trim()) && row.pin_salt) {
+            const check = await hashPinWithSalt(currentPin.trim(), row.pin_salt);
+            proven = safeEqual(check, row.pin_hash);
+          } else {
+            return jsonResponse({
+              success: false,
+              requireReauth: true,
+              error: 'Re-authentication required: send the current PIN or the account password'
+            }, 403, corsHeaders);
+          }
+          if (!proven) {
+            await recordFailure(env.DB, failKey, 900);
+            return jsonResponse({
+              success: false,
+              requireReauth: true,
+              error: 'Incorrect current PIN or account password'
+            }, 403, corsHeaders);
+          }
+        }
+
         await env.DB.prepare(
-          `UPDATE accounts SET pin_hash = ?, updated_at = ? WHERE account_id = ?`
-        ).bind(pinHash.trim(), now, auth.accountId).run();
-        return jsonResponse({ success: true, message: 'PIN hash synced' }, 200, corsHeaders);
+          `UPDATE accounts SET pin_hash = ?, pin_salt = ?, updated_at = ? WHERE account_id = ?`
+        ).bind(cleanHash, cleanSalt, Date.now(), auth.accountId).run();
+        return jsonResponse({ success: true, message: 'PIN synced' }, 200, corsHeaders);
+      }
+
+      // Request a 6-digit email code to reset the Master PIN.
+      // Works for signed-in, email-verified accounts only; the code always goes to
+      // the account's own email address, never to an address supplied by the caller.
+      if (method === 'POST' && pathname === '/api/account/request-pin-reset') {
+        const blockedIp = await enforceLimit(env.DB, `ip:pinresetcode:${clientIp}`, 5, 60,
+          'Too many requests. Please wait 1 minute.', corsHeaders);
+        if (blockedIp) return blockedIp;
+        const blockedMin = await enforceLimit(env.DB, `email:pinresetcode:${auth.email}`, 3, 60,
+          'Too many reset-code requests for this account. Please wait 1 minute.', corsHeaders);
+        if (blockedMin) return blockedMin;
+        const blockedHour = await enforceLimit(env.DB, `email:pinresetcode:hour:${auth.email}`, 5, 3600,
+          'Too many reset-code requests for this account. Please try again in an hour.', corsHeaders);
+        if (blockedHour) return blockedHour;
+
+        if (!auth.isVerified) {
+          return errorResponse('Please verify your email address before resetting the PIN.', 400, corsHeaders);
+        }
+
+        const now = Date.now();
+        const codeStr = generateSixDigitCode();
+        // Only one live reset code at a time (keeps the guessing space small).
+        await env.DB.prepare(
+          `UPDATE email_codes SET is_used = 1 WHERE email = ? AND purpose = 'reset_pin' AND is_used = 0`
+        ).bind(auth.email).run();
+        await env.DB.prepare(
+          `INSERT INTO email_codes (code_id, email, code, purpose, attempts, is_used, expires_at, created_at)
+           VALUES (?, ?, ?, 'reset_pin', 0, 0, ?, ?)`
+        ).bind(crypto.randomUUID(), auth.email, codeStr, now + 10 * 60 * 1000, now).run();
+
+        const emailResult = await sendVerificationEmail(auth.email, codeStr, env, 'reset_pin');
+        const isDevMode = env.DEV_MODE === true || env.DEV_MODE === 'true' || env.DEV_MODE === '1';
+        if (!emailResult.sent && !isDevMode) {
+          return errorResponse('Could not send the email right now. Please try again shortly.', 502, corsHeaders);
+        }
+
+        const resData = {
+          success: true,
+          sentTo: maskEmail(auth.email),
+          message: 'PIN reset code sent to your account email'
+        };
+        if (isDevMode) resData.devCode = codeStr;
+        return jsonResponse(resData, 200, corsHeaders);
+      }
+
+      // Reset the Master PIN using the ACCOUNT password or a 6-digit email code.
+      // (IPTV credentials are never accepted.) Body: { password | code, newPin }
+      if (method === 'POST' && pathname === '/api/account/reset-pin') {
+        const blockedIp = await enforceLimit(env.DB, `ip:resetpin:${clientIp}`, 8, 60,
+          'Too many PIN reset attempts. Please wait 1 minute.', corsHeaders);
+        if (blockedIp) return blockedIp;
+        const blockedEmail = await enforceLimit(env.DB, `email:resetpin:${auth.email}`, 5, 60,
+          'Too many PIN reset attempts for this account. Please wait 1 minute.', corsHeaders);
+        if (blockedEmail) return blockedEmail;
+
+        const { password, code, newPin, newPinHash, newPinSalt } = await request.json().catch(() => ({}));
+
+        // New PIN material: plain 4-digit PIN (Worker salts it) or a ready hash+salt.
+        let saveHash = '';
+        let saveSalt = '';
+        if (typeof newPin === 'string' && PIN_RE.test(newPin.trim())) {
+          saveSalt = crypto.randomUUID();
+          saveHash = await hashPinWithSalt(newPin.trim(), saveSalt);
+        } else if (typeof newPinHash === 'string' && typeof newPinSalt === 'string'
+                   && PIN_HASH_RE.test(newPinHash.trim().toLowerCase()) && PIN_SALT_RE.test(newPinSalt.trim())) {
+          saveHash = newPinHash.trim().toLowerCase();
+          saveSalt = newPinSalt.trim();
+        } else {
+          return errorResponse('New PIN must be exactly 4 digits', 400, corsHeaders);
+        }
+
+        const account = await env.DB.prepare(
+          `SELECT account_id, email, password_hash FROM accounts WHERE account_id = ?`
+        ).bind(auth.accountId).first();
+        if (!account) return errorResponse('Account not found', 404, corsHeaders);
+
+        if (typeof password === 'string' && password) {
+          // Slow-drip guessing guard: 10 wrong passwords per hour per account.
+          // (The email-code path below stays available while this is locked.)
+          const pwFailKey = `fail:resetpin:${account.account_id}`;
+          const pwLocked = await enforceLimit(env.DB, pwFailKey, 10, 3600,
+            'Too many incorrect passwords. Use an email code instead, or wait an hour.', corsHeaders, false);
+          if (pwLocked) return pwLocked;
+          const ok = await verifyPassword(password, account.password_hash);
+          if (!ok) {
+            await recordFailure(env.DB, pwFailKey, 3600);
+            return errorResponse('Incorrect account password', 403, corsHeaders);
+          }
+        } else if (typeof code === 'string' && code.trim()) {
+          const record = await env.DB.prepare(
+            `SELECT code_id, code, attempts, expires_at FROM email_codes
+             WHERE email = ? AND purpose = 'reset_pin' AND is_used = 0
+             ORDER BY created_at DESC LIMIT 1`
+          ).bind(account.email).first();
+          if (!record || Date.now() > record.expires_at) {
+            return errorResponse('Invalid or expired 6-digit verification code', 401, corsHeaders);
+          }
+          if (record.attempts >= 5) {
+            return errorResponse('Too many incorrect codes. Please request a new code.', 429, corsHeaders);
+          }
+          if (!safeEqual(record.code, code.trim())) {
+            await env.DB.prepare(
+              `UPDATE email_codes SET attempts = attempts + 1 WHERE code_id = ?`
+            ).bind(record.code_id).run();
+            return errorResponse('Invalid or expired 6-digit verification code', 401, corsHeaders);
+          }
+          await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(record.code_id).run();
+        } else {
+          return errorResponse('Account password or 6-digit email code required', 400, corsHeaders);
+        }
+
+        await env.DB.prepare(
+          `UPDATE accounts SET pin_hash = ?, pin_salt = ?, updated_at = ? WHERE account_id = ?`
+        ).bind(saveHash, saveSalt, Date.now(), account.account_id).run();
+        return jsonResponse({ success: true, message: 'Master PIN reset successfully verified' }, 200, corsHeaders);
       }
 
       // ----------------------------------------------------------------
@@ -1128,7 +1332,11 @@ export default {
 
       if (method === 'GET' && pathname.startsWith('/api/tmdb/')) {
         const subPath = pathname.replace('/api/tmdb/', '');
-        const apiKey = env.TMDB_API_KEY || '8265bd1679663a7ea12ac168da84d2e8'; // Fallback community read key
+        // No built-in fallback key: the key is a Worker secret and must be configured.
+        const apiKey = env.TMDB_API_KEY;
+        if (!apiKey) {
+          return errorResponse('TMDB_API_KEY is not configured on the server', 500, corsHeaders);
+        }
         const now = Date.now();
 
         // 1. Check shared cache

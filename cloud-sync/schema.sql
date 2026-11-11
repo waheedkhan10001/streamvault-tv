@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   account_id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
-  pin_hash TEXT,
+  pin_hash TEXT,   -- Master PIN: SHA-256("<pin>:<salt>") hex, same scheme as the TV app
+  pin_salt TEXT,   -- salt for pin_hash (needed so a PIN created on one TV verifies on another)
   is_verified INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL

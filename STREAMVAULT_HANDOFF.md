@@ -127,7 +127,7 @@
    - Settings tab features dedicated "Search & Privacy" card with `Clear Search History` button that clears all search history without wiping Continue Watching, ratings, or watchlist bookmarks.
 6. **Parental Controls (Adult Content Locked by Default & Auto-Lock on Standby)**:
    - All 593 live adult channels and 667 VOD adult items are hidden by default from search, autoChips, catalog queries, and live TV channels.
-   - Unlocked via Master 4-digit PIN dialog (default `0000`, customizable in Settings).
+   - Unlocked via Master 4-digit PIN dialog (no default PIN: the owner must create one before first use).
    - Android `onPause()` and `onStop()` in `MainActivity.kt` plus `visibilitychange` in `tv-ui.html` automatically re-lock parental controls immediately when the TV goes into standby or app is backgrounded.
 7. **Hero Billboard Smooth Scroll-Back**:
    - In `tv-ui.html`, pressing ArrowUp from the top movie row scrolls `#mainViewport` back to `top: 0` and focuses the hero billboard action button with `{ preventScroll: true }`, ensuring the full hero poster and synopsis are never cut off.

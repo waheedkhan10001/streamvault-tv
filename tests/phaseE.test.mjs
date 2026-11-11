@@ -63,9 +63,9 @@ function createMockD1() {
                 const existing = tables.rate_limits.find(r => r.key === key);
                 if (existing) existing.count++;
               } else if (normalized.startsWith('UPDATE accounts SET pin_hash =')) {
-                const [pinHash, updatedAt, accountId] = args;
+                const [pinHash, pinSalt, updatedAt, accountId] = args;
                 const a = tables.accounts.find(x => x.account_id === accountId);
-                if (a) { a.pin_hash = pinHash; a.updated_at = updatedAt; }
+                if (a) { a.pin_hash = pinHash; a.pin_salt = pinSalt; a.updated_at = updatedAt; }
               } else if (normalized.startsWith('INSERT INTO playlists')) {
                 tables.playlists.push({
                   playlist_id: args[0],
@@ -307,7 +307,7 @@ async function runPhaseETests() {
   }
 
   // --- Test 5: Default Brevo Sender Fallback ---
-  console.log('[Test 5] Asserting Brevo defaults sender to noreply@streamvault.tv if unspecified...');
+  console.log('[Test 5] Asserting Brevo defaults sender to noreply@tv.truehats.com if unspecified...');
   {
     const db = createMockD1();
     const env = {
@@ -339,7 +339,7 @@ async function runPhaseETests() {
 
       await worker.fetch(req, env);
       assert.ok(brevoCall);
-      assert.equal(brevoCall.body.sender.email, 'noreply@streamvault.tv', 'Default sender email must be noreply@streamvault.tv');
+      assert.equal(brevoCall.body.sender.email, 'noreply@tv.truehats.com', 'Default sender email must be noreply@tv.truehats.com');
       assert.equal(brevoCall.body.sender.name, 'StreamVault TV', 'Default sender name must be StreamVault TV');
       console.log('  ✓ PASS: Brevo sender default fallback verified.\n');
     } finally {

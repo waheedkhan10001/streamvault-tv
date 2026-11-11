@@ -22,7 +22,7 @@
 
 ### How to Run the Tests
 ```bash
-# Run complete test suite (43/43 assertions across all phases):
+# Run complete test suite (59/59 assertions across all suites):
 npm test
 
 # Run Robolectric unit tests (9/9 assertions: kids cert filter, adult progress rejection, PIN lockout):
@@ -43,7 +43,6 @@ npm test
 - `BREVO_API_KEY`: Brevo v3 API key (`xkeysib-...`) for sending 6-digit verification codes.
 - `AES_SECRET`: 32+ character random key for encrypting IPTV passwords in D1.
 - `TMDB_API_KEY`: TMDB v3 API key for worker metadata enrichment and D1 caching.
-- `JWT_SECRET`: Secret for signing session tokens and verification payloads.
 - `DEV_MODE`: Set to `"true"` ONLY during local automated testing to expose `devCode`.
 
 ---
@@ -188,7 +187,7 @@ npm test
 | **Phase C** | Spatial navigation, element reachability, Leanback Back key | `node tests/phaseC.test.mjs` | **8/8 PASSED** |
 | **Phase D** | TMDB proxy, catalog up/down, profile sync, dedup re-link | `node tests/phaseD.test.mjs` | **8/8 PASSED** |
 | **Phase E** | `devCode` omission, Brevo email, D1 rate limits, AES_SECRET 500, PIN reset, probe-versions, Compose removal | `node tests/phaseE.test.mjs` | **13/13 PASSED** |
-| **Full Puppeteer Run** | Complete UI regression suite (Phases A through E) | `npm test` | **43/43 PASSED** |
+| **Full Puppeteer Run** | Complete regression suite (Phases A-E + Round 2) | `npm test` | **59/59 PASSED** |
 | **Robolectric JVM Tests**| Kids cert filter, adult progress rejection, PIN lockout lifecycle | `.\gradlew.bat testReleaseUnitTest` | **9/9 PASSED** |
 
 ---
@@ -221,29 +220,48 @@ npm test
 | :--- | :--- | :--- | :--- |
 | `BREVO_API_KEY` | Secret | **Yes** | Brevo API key (`xkeysib-...`) for sending 6-digit verification codes |
 | `AES_SECRET` | Secret | **Yes** | 32+ character random key for encrypting IPTV passwords at rest |
-| `TMDB_API_KEY` | Secret | **Yes** | TMDB API v3 key for worker-level metadata enrichment |
-| `JWT_SECRET` | Secret | **Yes** | Secret for signing session tokens and verification payloads |
-| `BREVO_SENDER_EMAIL`| Var / Secret | Optional | Verified sender address (default: `noreply@streamvault.tv`) |
+| `TMDB_API_KEY` | Secret | **Yes** | TMDB API v3 key. No built-in fallback: if missing, `/api/tmdb/*` returns HTTP 500 |
+| `BREVO_SENDER_EMAIL`| Var / Secret | Optional | Verified sender address (default: `noreply@tv.truehats.com`) |
 | `BREVO_SENDER_NAME` | Var / Secret | Optional | Sender display name (default: `StreamVault TV`) |
 | `DEV_MODE` | Var | Optional | Set to `"true"` ONLY in automated local tests to expose `devCode` |
 
 ---
 
-## 8. Owner's Remaining Steps (Max 3 Steps)
+## 8. Owner's Remaining Steps (in this order)
 
-1. **Install v2.8.0 Release APK to TCL TV**:
-   ```bash
-   adb connect 192.168.100.42:5555
-   adb -s 192.168.100.42:5555 install -r app/build/outputs/apk/release/app-release.apk
-   ```
+1. **Run the D1 migration FIRST** (see `cloud-sync/MIGRATIONS.md`): adds `rate_limits`, `accounts.pin_hash`, `accounts.pin_salt` to the already-deployed database. Do this before deploying the new Worker.
+2. **Set secrets and deploy the Worker** (`BREVO_API_KEY`, `TMDB_API_KEY`, `AES_SECRET`; `JWT_SECRET` is not used), then `npx wrangler deploy`.
+3. **Rebuild the APK** (Kotlin changed, see section 9), run `.\gradlew.bat testReleaseUnitTest`, then `assembleRelease` and install on the TV.
+4. **Perform Phase F Verification** using the table above.
 
-2. **Configure Brevo Secret & Deploy Worker**:
-   ```bash
-   cd cloud-sync
-   npx wrangler secret put BREVO_API_KEY
-   # Paste your Brevo key when prompted
-   npx wrangler deploy
-   ```
+---
 
-3. **Perform Phase F Verification**:
-   - Use the Phase F table above with the TCL remote to complete final visual sign-off.
+## 9. Round 2 Fixes (on top of 6def1e5)
+
+| # | Fix | Where |
+| :--- | :--- | :--- |
+| 1 | Default email sender `noreply@tv.truehats.com` / "StreamVault TV" (env vars still override) | `worker.js` |
+| 2 | Hard-coded TMDB fallback key removed; missing `TMDB_API_KEY` -> HTTP 500 | `worker.js` |
+| 3 | TMDB attribution in Settings > About (exact required sentence, D-pad focusable card). **Official TMDB logo file still to be supplied**: a plain "TMDB" text mark stands in the `#tmdbLogoSlot` until then | `tv-ui.html` (both copies) |
+| 4 | `reset-pin` rate limits: per-IP 8/min, per-account 5/min, 10 wrong passwords/hour lock; emailed code dies after 5 wrong tries | `worker.js` |
+| 5 | New `POST /api/account/request-pin-reset` (signed-in, email-verified accounts; code goes only to the account's own email; 3/min + 5/hour per account, 5/min per IP). Reset screen has "Email me a code" | `worker.js`, `tv-ui.html` |
+| 6 | `POST /api/account/pin` needs `currentPin` or `password` to CHANGE an existing PIN (first PIN needs none); 5 wrong proofs / 15 min lock | `worker.js` |
+| 7 | D1 migration files + instructions | `cloud-sync/migrations/`, `cloud-sync/MIGRATIONS.md` |
+| 8 | Documented deviation, see below | this file |
+
+### Item 8 - accepted deviation (needs owner sign-off)
+The native `/api/parental-pin` status call returns the **salted PIN hash and its salt** (never the PIN) to the WebView so the TV can sync them to the cloud. The original rule was "the PIN is never returned". A 4-digit PIN has only 10,000 possibilities, so anyone with access to the cloud database could brute-force it from hash + salt. This is a parental control, not bank-grade security.
+
+### Extra changes made while doing the above (not in the original list)
+- **PIN salt was never synced.** The TV hashes the PIN as SHA-256("pin:salt") with a random per-device salt, but only the hash reached the cloud, so a PIN restored on a second TV could never match. The cloud now stores `pin_salt` too; sign-in returns `pinHash` + `pinSalt`; `restore` passes both. `reset-pin` previously stored an UNSALTED hash (different format); the Worker now stores `SHA-256("pin:salt")` with its own salt, the same scheme as the TV.
+- `reset-pin` and `request-pin-reset` now **require a signed-in session** (the old `reset-pin` also accepted a bare email with no session).
+- `verify-code` now accepts only sign-up codes (`purpose='verify_email'`), so a PIN-reset code can never be used as a sign-in code.
+- PIN routes **fail closed** (HTTP 503) if the `rate_limits` table is missing; sign-up/login keep the old fail-open behaviour.
+- 6-digit codes now come from the crypto RNG (were `Math.random`).
+- `JWT_SECRET` removed from the docs: the Worker never used it.
+
+### Kotlin changes (NOT compiled or run by the person who wrote them)
+Three lines in `AppApiRouter.kt` add `put("pinSalt", ...)` to the status, `set_pin` and `reset_pin` responses. No Android SDK was available, so `gradlew testReleaseUnitTest` / `assembleRelease` must be run before installing.
+
+### Tests
+`npm test` now runs 59 Puppeteer/Worker assertions: A 7, B 7, C 8, D 8, E 13, `round2` 10 (real SQLite, runs the actual `schema.sql` + Worker SQL), `round2ui` 6. `round2` needs Node 22.13+ (it skips with a message on older Node).
