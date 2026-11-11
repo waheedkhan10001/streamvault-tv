@@ -166,6 +166,8 @@ async function runPhaseCTests() {
     await page.waitForFunction(() => document.getElementById('btnAddPlaylistBtn') !== null, { timeout: 15000 });
   } catch (e) {
     const diag = await page.evaluate(() => (document.getElementById('mainViewport') || {}).innerText || 'no viewport');
+    const more = await page.evaluate(() => ({ tab: typeof currentTab !== 'undefined' ? currentTab : '?', token: typeof getStoredAuthToken === 'function' ? !!getStoredAuthToken() : '?', locked: typeof isAppLockedForPlaylist === 'function' ? isAppLockedForPlaylist() : '?', body: document.body.innerText.slice(0, 400), url: location.href }));
+    console.log('DIAG state:', JSON.stringify(more));
     console.log('DIAG page errors:', JSON.stringify(pageErrors));
     console.log('DIAG viewport text:', String(diag).slice(0, 600));
     throw e;
