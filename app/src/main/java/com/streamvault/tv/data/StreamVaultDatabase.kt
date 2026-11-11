@@ -1415,6 +1415,22 @@ class StreamVaultDatabase(context: Context) :
         }
     }
 
+    /** Season counts for many series in ONE query (poster cards show "3 Seasons" instead of a bare "SERIES"). */
+    fun seasonCountsFor(seriesIds: Collection<String>): Map<String, Int> {
+        val ids = seriesIds.filter { it.isNotBlank() }.distinct()
+        if (ids.isEmpty()) return emptyMap()
+        val out = HashMap<String, Int>()
+        val db = readableDatabase
+        for (chunk in ids.chunked(500)) {
+            val marks = chunk.joinToString(",") { "?" }
+            db.rawQuery(
+                "SELECT series_id, COUNT(DISTINCT season_num) FROM series_episodes WHERE series_id IN ($marks) AND season_num > 0 GROUP BY series_id",
+                chunk.toTypedArray()
+            ).use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getInt(1) }
+        }
+        return out
+    }
+
     fun getSeriesEpisodes(seriesId: String): List<SeriesEpisode> {
         val db = readableDatabase
         val list = mutableListOf<SeriesEpisode>()

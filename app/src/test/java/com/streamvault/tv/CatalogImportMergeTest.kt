@@ -121,4 +121,16 @@ class CatalogImportMergeTest {
         assertEquals(1, db.countMediaOfType(MediaType.MOVIE))
         assertEquals(setOf("11", "12"), db.getItemByDedupKey("tmdb:949")!!.versions.map { it.streamId }.toSet())
     }
+
+    @Test
+    fun seasonCountsCountDistinctSeasonsPerSeries() {
+        fun ep(id: String, series: String, season: Int, n: Int) =
+            com.streamvault.tv.data.SeriesEpisode(episodeId = id, seriesId = series, seasonNumber = season, episodeNumber = n, title = "E$id")
+        db.saveSeriesEpisodes("900", listOf(ep("1", "900", 1, 1), ep("2", "900", 1, 2), ep("3", "900", 2, 1), ep("4", "900", 3, 1)))
+        db.saveSeriesEpisodes("901", listOf(ep("5", "901", 1, 1)))
+        val counts = db.seasonCountsFor(listOf("900", "901", "902"))
+        assertEquals(3, counts["900"])
+        assertEquals(1, counts["901"])
+        assertNull(counts["902"])
+    }
 }

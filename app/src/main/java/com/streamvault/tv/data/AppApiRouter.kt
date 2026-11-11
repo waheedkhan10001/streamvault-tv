@@ -480,8 +480,18 @@ class AppApiRouter(
             hideWatched = queryParams["hideWatched"] == "true",
             profileId = activeProf.id
         )
+        // A series is checked against the provider every time it is opened, so new seasons/episodes always show.
+        // First time (nothing saved yet): wait for the list. Otherwise show what is saved now and refresh in the background.
         val episodes = if (item.mediaType == MediaType.SERIES) {
-            db.getSeriesEpisodes(item.primaryStreamId)
+            val saved = db.getSeriesEpisodes(item.primaryStreamId)
+            if (saved.isEmpty()) {
+                runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(item) } }.getOrDefault(saved)
+            } else {
+                kotlin.concurrent.thread(isDaemon = true) {
+                    runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(item) } }
+                }
+                saved
+            }
         } else emptyList()
 
         val epArr = JSONArray()
@@ -1366,8 +1376,12 @@ class AppApiRouter(
 
     private fun mediaListToJsonArray(items: List<MediaItem>): JSONArray {
         val arr = JSONArray()
+        val seasonCounts = db.seasonCountsFor(items.filter { it.mediaType == MediaType.SERIES }.map { it.primaryStreamId })
         for (item in items) {
-            arr.put(mediaItemToJson(item))
+            val json = mediaItemToJson(item)
+            val n = seasonCounts[item.primaryStreamId] ?: 0
+            if (item.mediaType == MediaType.SERIES && n > 0) json.put("seasonTag", if (n == 1) "S1" else "$n Seasons")
+            arr.put(json)
         }
         return arr
     }
