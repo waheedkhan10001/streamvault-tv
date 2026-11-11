@@ -30,6 +30,7 @@ class AppApiRouter(
         val isProtected = path.startsWith("/api/playlists") ||
                 path == "/api/save-credentials" ||
                 path == "/api/sync-now" ||
+                path == "/api/clear-playlist" ||
                 path.startsWith("/api/profiles")
 
         if (isProtected && !hasSession) {
@@ -87,6 +88,8 @@ class AppApiRouter(
 
                 // 13. Trigger Sync Now
                 method == "POST" && path == "/api/sync-now" -> handleSyncNow()
+                method == "POST" && path == "/api/clear-playlist" -> handleClearPlaylist()
+                method == "POST" && path == "/api/clear-crash" -> { prefs.lastCrash = null; """{"ok":true}""" }
                 method == "POST" && path == "/api/catalog/pull-cloud" -> handlePullCloudCatalog()
                 method == "GET" && path == "/api/sync/status" -> handleGetSyncStatus()
 
@@ -153,6 +156,8 @@ class AppApiRouter(
             put("totalSeries", 0)
             put("enrichedCount", enriched)
             put("percentComplete", if (total > 0) (enriched * 100) / total else 100)
+            put("error", syncState.errorMessage ?: JSONObject.NULL)
+            put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
         }
 
         val smartRowsArr = JSONArray()
@@ -175,6 +180,7 @@ class AppApiRouter(
             put("remoteSearchQuery", prefs.remoteSearchCommand.value ?: "")
             put("pinnedSmartRows", smartRowsArr)
             put("totalCatalogCount", total)
+            put("lastCrash", prefs.lastCrash ?: JSONObject.NULL)
             put("totalLiveCount", db.getLiveChannels().size)
             put("localIpUrl", "http://127.0.0.1:8765/phone")
             put("activeProfile", activeProf.toJson())
@@ -1005,7 +1011,7 @@ class AppApiRouter(
         val serverUrl = obj.optString("serverUrl")
         val username = obj.optString("username")
         val password = obj.optString("password")
-        val playlistName = obj.optString("playlistName", "My IPTV")
+        val playlistName = obj.optString("playlistName", obj.optString("name", "My IPTV"))
 
         val current = prefs.loadCredentials()
         val updated = current.copy(
@@ -1020,6 +1026,12 @@ class AppApiRouter(
     }
 
     private fun handleSyncNow(): String {
+        if (!prefs.loadCredentials().isConfigured) {
+            return JSONObject().apply {
+                put("ok", false)
+                put("error", "No working IPTV playlist to refresh. Add one under IPTV Playlists first.")
+            }.toString()
+        }
         syncEngine.triggerSync(isManual = true)
         return """{"ok":true}"""
     }
@@ -1118,6 +1130,11 @@ class AppApiRouter(
     }
 
     private fun handleUpdatePlaylist(bodyStr: String): String {
+        val obj = JSONObject(bodyStr.ifBlank { "{}" })
+        // Switching a playlist on/off only changes the cloud record: nothing to re-download
+        if (obj.has("isEnabled") && !obj.has("serverUrl")) {
+            return JSONObject().apply { put("success", true); put("message", "Playlist updated") }.toString()
+        }
         handleSaveCredentials(bodyStr)
         return JSONObject().apply {
             put("success", true)
@@ -1125,14 +1142,19 @@ class AppApiRouter(
         }.toString()
     }
 
-    private fun handleDeletePlaylist(@Suppress("UNUSED_PARAMETER") path: String): String {
+    /** Stops using the playlist on this TV: forgets the login and removes its titles. Watch progress is kept. */
+    private fun handleClearPlaylist(): String {
         val current = prefs.loadCredentials()
         prefs.saveCredentials(current.copy(serverUrl = "", username = "", password = ""))
+        db.clearTitlesOnly()
+        prefs.lastFullSyncTimestamp = 0L
         return JSONObject().apply {
             put("success", true)
             put("message", "Playlist removed")
         }.toString()
     }
+
+    private fun handleDeletePlaylist(@Suppress("UNUSED_PARAMETER") path: String): String = handleClearPlaylist()
 
     // --- Helpers ---
 

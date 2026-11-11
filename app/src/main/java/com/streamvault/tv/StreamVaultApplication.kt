@@ -17,6 +17,20 @@ import java.util.concurrent.TimeUnit
  */
 class StreamVaultApplication : Application(), ImageLoaderFactory {
 
+    override fun onCreate() {
+        super.onCreate()
+        // Remember WHY the app closed by itself, so Settings can show it and we can fix it without a cable
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val where = error.stackTrace.take(6).joinToString(" < ") { "${it.fileName}:${it.lineNumber}" }
+                com.streamvault.tv.data.PreferencesManager(this).lastCrash =
+                    "${java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.US).format(java.util.Date())} on ${thread.name}: ${error.javaClass.simpleName}: ${error.message ?: ""} @ $where".take(600)
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
     override fun newImageLoader(): ImageLoader {
         val httpClient = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)

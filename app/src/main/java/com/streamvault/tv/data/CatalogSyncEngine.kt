@@ -172,11 +172,20 @@ class CatalogSyncEngine(
                 // 5. Kick off Background 100% TMDB Enrichment Worker
                 startBackgroundTmdbEnrichment(onCatalogUpdated)
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable (not just Exception) so running out of memory is reported instead of closing the app
+                android.util.Log.e("StreamVault", "Catalog sync failed", e)
+                val reason = when (e) {
+                    is OutOfMemoryError -> "The TV ran out of memory while reading the catalog"
+                    is java.net.UnknownHostException -> "Cannot find the IPTV server address. Check the Server URL"
+                    is java.net.SocketTimeoutException -> "The IPTV server took too long to answer"
+                    is java.net.ConnectException -> "Cannot connect to the IPTV server. Check the Server URL and port"
+                    else -> e.localizedMessage ?: "Connection failed"
+                }
                 _syncState.value = _syncState.value.copy(
                     isSyncing = false,
-                    phase = "Sync Error: ${e.localizedMessage ?: "Check URL / Credentials"}",
-                    errorMessage = e.localizedMessage ?: "Connection failed"
+                    phase = "Sync Error: $reason",
+                    errorMessage = reason
                 )
             }
         }
@@ -217,10 +226,23 @@ class CatalogSyncEngine(
         val dedupMap = LinkedHashMap<String, MediaItem>(4096)
 
         httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+            if (!resp.isSuccessful) {
+                throw IllegalStateException(
+                    when (resp.code) {
+                        401, 403 -> "The IPTV server refused the login (HTTP ${resp.code}). Check username and password"
+                        404 -> "The IPTV server address is wrong (HTTP 404). Check the Server URL"
+                        in 500..599 -> "The IPTV server has a problem (HTTP ${resp.code}). Try again later"
+                        else -> "The IPTV server answered HTTP ${resp.code}"
+                    }
+                )
+            }
             val stream = resp.body?.byteStream() ?: return 0
             val reader = JsonReader(InputStreamReader(stream, Charsets.UTF_8))
 
+            // A list is expected. Providers answer with an object ({"user_info":{"auth":0}}) when the login is wrong.
+            if (reader.peek() == JsonToken.BEGIN_OBJECT) {
+                throw IllegalStateException("The IPTV server did not accept this username and password")
+            }
             if (reader.peek() != JsonToken.BEGIN_ARRAY) return 0
             reader.beginArray()
             var count = 0

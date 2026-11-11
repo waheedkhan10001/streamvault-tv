@@ -4236,7 +4236,8 @@ async function checkAuthAndRoute() {
     }
   } catch (_) {}
 
-  // Check if IPTV playlist configured
+  // Check if IPTV playlist configured (a playlist saved in the cloud is copied to this TV first)
+  if (!hasActivePlaylist()) { try { await loadPlaylistsData(); } catch (_) {} }
   const hasIptv = hasActivePlaylist();
   if (!hasIptv) {
     renderSidebar(true);
@@ -5541,27 +5542,22 @@ async function loadSettings(vp) {
     playlists = await loadPlaylistsData();
   } catch (_) {}
 
-  let activeCodeStr = 'SV-....';
-  let qrUrl = '';
-  try {
-    const cRes = await fetch('/api/cloud/status').catch(() => null);
-    if (cRes) {
-      const cData = await cRes.json();
-      activeCodeStr = cData.activeCode?.code || 'SV-PAIR';
-      qrUrl = activeCodeStr ? svQrDataUrl('https://streamvault-sync.streamvault-app.workers.dev/link?code=' + activeCodeStr) : '';
-    }
-  } catch (_) {}
-
   vp.innerHTML = `
     <div style="padding:8px 24px 22px 24px;max-width:1440px;margin:0 auto;box-sizing:border-box;max-height:100vh;overflow:hidden;">
       <div style="font-size:18px;font-weight:900;letter-spacing:-0.4px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
-        <span>Account &amp; IPTV Settings</span>
+        <span>Settings</span>
         <span style="font-size:11px;color:#A78BFA;font-weight:700;display:flex;align-items:center;gap:6px;">
           <span style="width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;"></span>
           StreamVault TV v2.7.0
         </span>
       </div>
 
+      ${appStatus && appStatus.lastCrash ? `
+        <div style="background:rgba(239,68,68,0.10);border:1px solid #7F1D2D;border-radius:8px;padding:5px 10px;margin-bottom:6px;font-size:9.5px;color:#FCA5A5;display:flex;align-items:center;gap:10px;">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">The app closed unexpectedly last time: ${escapeHtml(String(appStatus.lastCrash))}</span>
+          <button tabindex="0" id="btnDismissCrash" class="btn tv-focusable" style="padding:1px 8px;font-size:9.5px;flex-shrink:0;" onclick="dismissCrashNote()">OK</button>
+        </div>
+      ` : ''}
       <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:10px;box-sizing:border-box;">
         <!-- Quadrant 1 (Top-Left): IPTV Playlists Manager -->
         <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;min-height:220px;">
@@ -5579,7 +5575,7 @@ async function loadSettings(vp) {
               <div style="background:rgba(124,58,237,0.08);border:1.5px dashed #7C3AED;border-radius:10px;padding:16px 14px;text-align:center;margin-top:4px;">
                 <div style="font-size:13px;font-weight:800;color:#FFFFFF;margin-bottom:3px;">No Playlists Connected</div>
                 <div style="font-size:10px;color:#9CA3AF;line-height:1.4;margin-bottom:10px;">
-                  Add your Xtream Codes or M3U playlist. Your movies, series, and live channels will enrich automatically in the background.
+                  Add your IPTV provider login to load movies, series and live TV.
                 </div>
                 <button tabindex="0" id="btnFirstRunAddPlaylist" class="btn btn-primary tv-focusable" style="padding:6px 16px;font-size:11px;font-weight:800;" onclick="openAddPlaylistModal()">+ Connect Your First Playlist</button>
               </div>
@@ -5587,18 +5583,21 @@ async function loadSettings(vp) {
               <div style="display:flex;flex-direction:column;gap:6px;max-height:145px;overflow-y:auto;">
                 ${playlists.map((pl, idx) => {
                   const isEnabled = pl.is_enabled !== 0;
-                  const statusClass = pl.status === 'working' ? 'badge-status-working' : pl.status === 'syncing' ? 'badge-status-syncing' : 'badge-status-failed';
-                  const statusText = pl.status === 'working' ? '✓ Working' : pl.status === 'syncing' ? '⟳ Syncing' : '⚠ Failed';
+                  const live = playlistLiveStatus(pl);
+                  const badge = playlistBadge(live);
+                  const statusClass = badge.cls;
+                  const statusText = badge.text;
                   return `
                     <div style="background:#0F0B20;border:1px solid #231B3D;border-radius:8px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;">
                       <div style="min-width:0;flex:1;">
                         <div style="display:flex;align-items:center;gap:6px;">
                           <span style="font-size:11.5px;font-weight:800;color:#FFFFFF;">${escapeHtml(pl.name || 'IPTV ' + (idx + 1))}</span>
-                          <span class="${statusClass}">${statusText}</span>
+                          <span class="${statusClass}" data-pl-badge="${escapeHtml(pl.playlist_id)}">${statusText}</span>
                         </div>
                         <div style="font-size:9.5px;color:#9CA3AF;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                           ${escapeHtml(pl.server_url || pl.serverUrl || '')} &middot; User: ${escapeHtml(pl.username || '')}
                         </div>
+                        <div data-pl-reason="${escapeHtml(pl.playlist_id)}" style="display:${live.error ? 'block' : 'none'};font-size:9.5px;color:#FCA5A5;margin-top:2px;">${escapeHtml(live.error)}</div>
                       </div>
                       <div style="display:flex;gap:5px;align-items:center;">
                         <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;${isEnabled ? 'color:#10B981;' : 'color:#6B7280;'}" onclick="togglePlaylistEnabled('${pl.playlist_id}', ${isEnabled ? 1 : 0})">
@@ -5614,10 +5613,6 @@ async function loadSettings(vp) {
             `}
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:9.5px;color:#9CA3AF;">
-            <span>Safe Switching: Replacing playlists preserves watch progress</span>
-            <span style="color:#10B981;font-weight:700;">Local-First SQLite</span>
-          </div>
         </div>
 
         <!-- Quadrant 2 (Top-Right): Cloud Account & Bedside Phone Link -->
@@ -5625,27 +5620,17 @@ async function loadSettings(vp) {
           <div>
             <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-              Cloud Account &amp; Multi-TV Link
+              Account
             </div>
 
             ${isLinked ? `
               <div style="background:rgba(16,185,129,0.08);border:1.5px solid #059669;border-radius:10px;padding:10px 12px;margin-bottom:6px;">
-                <div style="font-size:9.5px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:0.6px;">Account Active</div>
+                <div style="font-size:9.5px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:0.6px;">Signed in</div>
                 <div style="font-size:13px;font-weight:900;color:#FFFFFF;margin-top:2px;">${escapeHtml(accountEmail)}</div>
-                <div style="font-size:9.5px;color:#9CA3AF;line-height:1.35;margin-top:3px;">Synchronized with Cloudflare D1. Resuming movies and watchlists works seamlessly across all your TVs.</div>
+                <div style="font-size:9.5px;color:#9CA3AF;margin-top:3px;">Watch history and lists sync across your TVs.</div>
               </div>
             ` : `
-              <div style="display:flex;gap:12px;align-items:center;background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:6px 10px;margin-bottom:6px;">
-                <div style="background:#FFFFFF;border-radius:6px;padding:4px;box-shadow:0 6px 18px rgba(0,0,0,0.6);flex-shrink:0;">
-                  <img id="tvLinkQrImg" src="${qrUrl}" alt="Scan QR" style="width:78px;height:78px;display:block;border-radius:4px;" />
-                </div>
-                <div style="min-width:0;flex:1;">
-                  <div style="font-size:9px;font-weight:800;color:#9CA3AF;text-transform:uppercase;">Phone Pairing</div>
-                  <div style="font-size:20px;font-weight:900;letter-spacing:2px;color:var(--theme-border, #A78BFA);margin:1px 0 2px;" id="tvLinkCodeDisplay">${escapeHtml(activeCodeStr)}</div>
-                  <div style="font-size:9.5px;color:#D1D5DB;line-height:1.3;">Scan with camera to link without typing</div>
-                  <div style="font-size:9px;color:var(--theme-border, #8B5CF6);margin-top:2px;font-weight:700;">streamvault-app.workers.dev/link</div>
-                </div>
-              </div>
+              <div style="background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:10px 12px;margin-bottom:6px;font-size:11px;color:#D1D5DB;">Not signed in. Sign in to keep your lists and history across TVs.</div>
             `}
           </div>
 
@@ -5668,29 +5653,17 @@ async function loadSettings(vp) {
           <div>
             <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-              Playback &amp; Hardware Engine
+              Playback
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#D1D5DB;margin-bottom:4px;">
-              <span>Hardware Decoder</span>
-              <span style="color:#10B981;font-weight:800;background:rgba(16,185,129,0.1);padding:1px 6px;border-radius:4px;border:1px solid rgba(16,185,129,0.3);font-size:10px;">HW+ ExoPlayer Media3</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#D1D5DB;margin-bottom:4px;">
-              <span>Audio Priority</span>
-              <button tabindex="0" id="btnAudioPriority" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleAudioPriority()">English (5.1ch Surround)</button>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#D1D5DB;">
-              <span>Stream Dedup Quality</span>
-              <button tabindex="0" id="btnDedupQuality" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;background:rgba(124,58,237,0.15);border:1px solid rgba(139,92,246,0.3);color:#DDD6FE;" onclick="toggleDedupQuality()">4K UHD &gt; Clean HQ* &gt; 1080p</button>
+              <span>Video decoding</span>
+              <span style="color:#10B981;font-weight:800;background:rgba(16,185,129,0.1);padding:1px 6px;border-radius:4px;border:1px solid rgba(16,185,129,0.3);font-size:10px;">Hardware</span>
             </div>
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:9.5px;color:#9CA3AF;">
-            <span>Zero-Lag Precision Seek (10s)</span>
-            <span style="color:#10B981;font-weight:800;">Optimal 60 FPS</span>
-          </div>
         </div>
 
-        <!-- Quadrant 4 (Bottom-Right): System Maintenance & Factory Reset -->
+        <!-- Quadrant 4 (Bottom-Right): Maintenance & Factory Reset -->
         <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
           <div>
             <div style="font-size:13px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
@@ -5700,18 +5673,14 @@ async function loadSettings(vp) {
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <div>
-                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Catalog &amp; Posters</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Fills in automatically. Use this to re-download your playlist now.</div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Catalog</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Updates by itself. Refresh to reload now.</div>
               </div>
               <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Refresh Now</button>
             </div>
 
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);font-size:9.5px;color:#9CA3AF;">
-            <span>Data Protection Active</span>
-            <span style="color:#A78BFA;font-weight:700;">TMDB Universally Keyed</span>
-          </div>
         </div>
       </div>
 
@@ -5731,6 +5700,7 @@ async function loadSettings(vp) {
   `;
 
   renderSyncStatus();
+  watchPlaylistStatus();
   setTimeout(() => {
     const firstBtn = document.getElementById('btnFirstRunAddPlaylist') || document.getElementById('btnAddPlaylistBtn') || document.getElementById('btnSyncNow');
     if (firstBtn) { firstBtn.focus(); playNavSound(); }
@@ -5740,32 +5710,71 @@ async function loadSettings(vp) {
 // Playlist Management APIs for standalone TV and cloud sync
 let cachedPlaylists = [];
 
+// Cloud and TV describe a playlist with different field names; the screen only ever sees this one shape.
+function normalizePlaylist(p) {
+  const enabled = p.isEnabled !== undefined ? !!p.isEnabled : p.is_enabled !== 0;
+  return {
+    playlist_id: p.playlist_id || p.playlistId || '',
+    name: p.name || '',
+    server_url: p.server_url || p.serverUrl || '',
+    serverUrl: p.server_url || p.serverUrl || '',
+    username: p.username || '',
+    password: p.password || '',
+    isEnabled: enabled,
+    is_enabled: enabled ? 1 : 0,
+    status: p.status || ''
+  };
+}
+
+// What the TV itself is doing with the playlist it is using: syncing, failed (with the reason), loaded, or not loaded yet
+function playlistLiveStatus(pl) {
+  const creds = (appStatus && appStatus.credentials) || {};
+  const sync = (appStatus && appStatus.syncStatus) || {};
+  const norm = u => String(u || '').trim().toLowerCase().replace(/\/+$/, '').replace(/^https?:\/\//, '');
+  const isOnThisTv = creds.serverUrl && norm(creds.serverUrl) === norm(pl.server_url) && creds.username === pl.username;
+  if (!pl.isEnabled) return { status: 'disabled', error: '' };
+  if (!isOnThisTv) return { status: pl.status === 'working' || pl.status === 'syncing' || pl.status === 'failed' ? pl.status : 'waiting', error: '' };
+  if (sync.isSyncing) return { status: 'syncing', error: '', phase: sync.phase || '' };
+  if (sync.error) return { status: 'failed', error: String(sync.error) };
+  if ((appStatus.totalCatalogCount || 0) > 0) return { status: 'working', error: '' };
+  return { status: 'waiting', error: '' };
+}
+
+function playlistBadge(live) {
+  if (live.status === 'working') return { cls: 'badge-status-working', text: '✓ Working' };
+  if (live.status === 'syncing') return { cls: 'badge-status-syncing', text: '⟳ Loading catalog…' };
+  if (live.status === 'failed') return { cls: 'badge-status-failed', text: '⚠ Failed' };
+  if (live.status === 'disabled') return { cls: 'badge-status-syncing', text: 'Off' };
+  return { cls: 'badge-status-syncing', text: 'Not loaded yet' };
+}
+
+// Gives this TV the login of a playlist (the TV downloads the titles itself)
+async function sendPlaylistToTv(pl) {
+  const res = await fetch('/api/save-credentials', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playlistName: pl.name || 'Primary IPTV', serverUrl: pl.serverUrl || pl.server_url, username: pl.username, password: pl.password || '' })
+  });
+  return res.ok;
+}
+
+async function refreshAppStatus() {
+  try {
+    const r = await fetch('/api/state');
+    if (r && r.ok) appStatus = await r.json();
+  } catch (_) {}
+}
+
 async function loadPlaylistsData() {
   try {
-    const sRes = await fetch('/api/state').catch(() => null);
-    if (sRes && sRes.ok) appStatus = await sRes.json();
+    await refreshAppStatus();
     const res = await fetch('/api/playlists');
     const data = await res.json();
-    cachedPlaylists = data.playlists || [];
-    if (!hasActivePlaylist() && cachedPlaylists.length > 0) {
-      const pl = cachedPlaylists.find(p => p.isEnabled) || cachedPlaylists[0];
-      if (pl && pl.serverUrl && pl.username) {
-        try {
-          const credRes = await fetch('/api/save-credentials', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              playlistName: pl.name || 'Primary IPTV',
-              serverUrl: pl.serverUrl,
-              username: pl.username,
-              password: pl.password || ''
-            })
-          });
-          if (credRes.ok) {
-            const freshState = await fetch('/api/state').catch(() => null);
-            if (freshState && freshState.ok) appStatus = await freshState.json();
-          }
-        } catch (_) {}
+    cachedPlaylists = (data.playlists || []).map(normalizePlaylist);
+    if (!hasActivePlaylist()) {
+      const pl = cachedPlaylists.find(p => p.isEnabled && p.server_url && p.username && p.password);
+      if (pl) {
+        try { if (await sendPlaylistToTv(pl)) await refreshAppStatus(); } catch (_) {}
       }
     }
     return cachedPlaylists;
@@ -5773,6 +5782,28 @@ async function loadPlaylistsData() {
     cachedPlaylists = [];
     return [];
   }
+}
+
+// While the catalog downloads, keep the badge on the Settings screen honest (no full redraw, focus stays where it is)
+let playlistStatusTimer = null;
+function watchPlaylistStatus() {
+  if (playlistStatusTimer) clearInterval(playlistStatusTimer);
+  playlistStatusTimer = setInterval(async () => {
+    if (currentTab !== 'SETTINGS' || !document.querySelector('[data-pl-badge]')) { clearInterval(playlistStatusTimer); playlistStatusTimer = null; return; }
+    await refreshAppStatus();
+    let anySyncing = false;
+    document.querySelectorAll('[data-pl-badge]').forEach(el => {
+      const pl = cachedPlaylists.find(p => p.playlist_id === el.getAttribute('data-pl-badge'));
+      if (!pl) return;
+      const live = playlistLiveStatus(pl);
+      const b = playlistBadge(live);
+      el.className = b.cls; el.innerText = b.text;
+      const why = document.querySelector(`[data-pl-reason="${pl.playlist_id}"]`);
+      if (why) { why.innerText = live.error; why.style.display = live.error ? 'block' : 'none'; }
+      if (live.status === 'syncing') anySyncing = true;
+    });
+    if (!anySyncing) { clearInterval(playlistStatusTimer); playlistStatusTimer = null; }
+  }, 3000);
 }
 
 function openAddPlaylistModal() {
@@ -5861,11 +5892,18 @@ async function handleSavePlaylistSubmit(e) {
     });
     const d = await res.json();
     if (d.success || d.ok) {
+      // The cloud keeps the record; this TV needs the login too so it can download the titles
+      const existing = editId ? cachedPlaylists.find(p => p.playlist_id === editId) : null;
+      const toTv = { name, serverUrl, username, password: password || (existing && existing.password) || '' };
+      const wasOnThisTv = !!existing && playlistLiveStatus(existing).status !== 'waiting' && playlistLiveStatus(existing).status !== 'disabled';
+      let started = false;
+      if (toTv.password && (!existing || existing.isEnabled)) { try { started = await sendPlaylistToTv(toTv); } catch (_) {} }
       closePlaylistModal();
-      showToast('✓ Playlist saved! Syncing catalog in background...');
+      showToast(started ? '✓ Saved. Loading your catalog now. This can take a few minutes.' : '✓ Playlist saved.');
+      await refreshAppStatus();
       const vp = document.getElementById('mainViewport');
       if (vp && currentTab === 'SETTINGS') {
-        loadSettings(vp);
+        await loadSettings(vp);
       }
     } else {
       if (statusMsg) {
@@ -5883,17 +5921,26 @@ async function handleSavePlaylistSubmit(e) {
 
 async function togglePlaylistEnabled(playlistId, currentEnabled) {
   playNavSound();
+  const pl = cachedPlaylists.find(p => p.playlist_id === playlistId);
   try {
     const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isEnabled: currentEnabled ? 0 : 1 })
+      body: JSON.stringify({ isEnabled: !currentEnabled })
     });
     const d = await res.json();
     if (d.success || d.ok) {
-      showToast(currentEnabled ? 'Playlist disabled' : 'Playlist enabled & syncing...');
+      if (pl) {
+        const onThisTv = playlistLiveStatus(pl).status !== 'waiting' && playlistLiveStatus(pl).status !== 'disabled';
+        if (currentEnabled && onThisTv) { await fetch('/api/clear-playlist', { method: 'POST' }).catch(() => {}); }
+        else if (!currentEnabled && pl.password) { await sendPlaylistToTv(pl).catch(() => {}); }
+      }
+      showToast(currentEnabled ? 'Playlist turned off' : 'Playlist turned on. Loading your catalog…');
+      await refreshAppStatus();
       const vp = document.getElementById('mainViewport');
-      if (vp && currentTab === 'SETTINGS') loadSettings(vp);
+      if (vp && currentTab === 'SETTINGS') await loadSettings(vp);
+    } else {
+      showToast(d.error || 'Could not change the playlist');
     }
   } catch (err) {
     showToast('Error: ' + err.message);
@@ -5902,28 +5949,52 @@ async function togglePlaylistEnabled(playlistId, currentEnabled) {
 
 async function deletePlaylist(playlistId) {
   playNavSound();
+  const pl = cachedPlaylists.find(p => p.playlist_id === playlistId);
   try {
-    const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, {
-      method: 'DELETE'
-    });
+    const res = await fetch(`/api/playlists/${encodeURIComponent(playlistId)}`, { method: 'DELETE' });
     const d = await res.json();
     if (d.success || d.ok) {
+      if (pl) {
+        const live = playlistLiveStatus(pl);
+        if (live.status !== 'waiting' && live.status !== 'disabled') await fetch('/api/clear-playlist', { method: 'POST' }).catch(() => {});
+      }
       showToast('Playlist removed');
+      await refreshAppStatus();
       const vp = document.getElementById('mainViewport');
-      if (vp && currentTab === 'SETTINGS') loadSettings(vp);
+      if (vp && currentTab === 'SETTINGS') await loadSettings(vp);
+    } else {
+      showToast(d.error || 'Could not remove the playlist');
     }
   } catch (err) {
     showToast('Error: ' + err.message);
   }
 }
 
-function triggerFullEnrichmentSync() {
+async function dismissCrashNote() {
   playNavSound();
-  fetch('/api/sync-now', { method: 'POST' }).then(() => {
-    showToast('✓ Refreshing your catalog in the background');
-  }).catch(() => {
-    showToast('Sync initiated');
-  });
+  await fetch('/api/clear-crash', { method: 'POST' }).catch(() => {});
+  await refreshAppStatus();
+  const vp = document.getElementById('mainViewport');
+  if (vp && currentTab === 'SETTINGS') await loadSettings(vp);
+}
+
+async function triggerFullEnrichmentSync() {
+  playNavSound();
+  await refreshAppStatus();
+  if (!hasActivePlaylist()) {
+    showToast('No working IPTV playlist to refresh. Add one under IPTV Playlists first.');
+    return;
+  }
+  try {
+    const res = await fetch('/api/sync-now', { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (d && d.ok === false) { showToast(d.error || 'Could not refresh'); return; }
+    showToast('✓ Refreshing your catalog. This can take a few minutes.');
+    await refreshAppStatus();
+    watchPlaylistStatus();
+  } catch (_) {
+    showToast('Could not refresh. Please try again.');
+  }
 }
 
 

@@ -252,7 +252,13 @@ class MainActivity : Activity() {
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
         )
         apiRouter = com.streamvault.tv.data.AppApiRouter(this, db, prefs, syncEngine)
-        runCatching { syncEngine.resumeEnrichmentIfNeeded() }
+        runCatching {
+            if (prefs.loadCredentials().isConfigured && prefs.shouldRunAutoDeltaSync()) {
+                syncEngine.triggerSync(isManual = false)      // first load, a load that never finished, or older than 24 h
+            } else {
+                syncEngine.resumeEnrichmentIfNeeded()
+            }
+        }
 
         try {
             toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 65)

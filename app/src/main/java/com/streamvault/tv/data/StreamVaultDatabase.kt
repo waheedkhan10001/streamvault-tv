@@ -1599,6 +1599,20 @@ class StreamVaultDatabase(context: Context) :
         writableDatabase.delete("pinned_smart_rows", "row_id = ?", arrayOf(rowId))
     }
 
+    /** Removes titles, episodes and channels only: profiles, watchlists, watched marks and resume points stay. */
+    fun clearTitlesOnly() {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("media_items", null, null)
+            db.delete("series_episodes", null, null)
+            db.delete("live_channels", null, null)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun clearCatalog() {
         val db = writableDatabase
         db.beginTransaction()

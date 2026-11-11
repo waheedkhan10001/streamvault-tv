@@ -143,6 +143,11 @@ class PreferencesManager(context: Context) {
         get() = prefs.getLong("last_full_sync_ts", 0L)
         set(value) = prefs.edit().putLong("last_full_sync_ts", value).apply()
 
+    /** Short description of the last time the app closed by itself (set by the crash recorder, shown in Settings). */
+    var lastCrash: String?
+        get() = prefs.getString("last_crash", null)
+        set(value) { if (value == null) prefs.edit().remove("last_crash").apply() else prefs.edit().putString("last_crash", value).apply() }
+
     fun shouldRunAutoDeltaSync(): Boolean {
         val last = lastFullSyncTimestamp
         if (last == 0L) return true
