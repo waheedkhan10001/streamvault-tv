@@ -337,7 +337,7 @@ class CatalogSyncEngine(
                         cleanTitle = parsed.cleanTitle,
                         rawTitle = name,
                         year = finalYear,
-                        rating = rating.coerceIn(0.0, 10.0),
+                        rating = 0.0, // the IPTV provider's rating is not trusted; TMDB enrichment fills it
                         genres = combinedGenres,
                         plot = plot,
                         cast = castStr.split(",").map { it.trim() }.filter { it.isNotBlank() },
@@ -798,8 +798,8 @@ class CatalogSyncEngine(
                 val obj = JSONObject(resp.body?.string() ?: "{}")
 
                 val plot = obj.optString("overview", item.plot)
-                val rating = obj.optDouble("vote_average", item.rating)
                 val voteCount = obj.optInt("vote_count", item.voteCount)
+                val rating = weightedRating(obj.optDouble("vote_average", 0.0), voteCount)
                 val runtime = obj.optInt("runtime", 0).let { rt ->
                     if (rt > 0) rt else obj.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
                 }
@@ -932,7 +932,7 @@ class CatalogSyncEngine(
                     tmdbId = info.optInt("tmdb_id", item.tmdbId),
                     imdbId = item.imdbId,
                     year = item.year,
-                    rating = info.optDouble("rating", item.rating),
+                    rating = item.rating, // provider rating ignored
                     voteCount = item.voteCount,
                     genres = genres.ifEmpty { item.genres.ifEmpty { listOf("General") } },
                     plot = plot,
@@ -1262,4 +1262,17 @@ class CatalogSyncEngine(
             }
         }
     }
+}
+
+/**
+ * IMDb-style weighted (Bayesian) rating: pulls titles with few votes toward the overall average so a
+ * film with two 10/10 votes cannot show "10". Fewer than 10 votes (or no score) = 0.0 = "Not rated".
+ *   WR = v/(v+m) * R + m/(v+m) * C      v = votes, R = TMDB average, m = 100, C = 6.4
+ */
+fun weightedRating(average: Double, votes: Int): Double {
+    if (votes < 10 || average <= 0.0) return 0.0
+    val m = 100.0
+    val c = 6.4
+    val wr = (votes / (votes + m)) * average + (m / (votes + m)) * c
+    return Math.round(wr * 10.0) / 10.0
 }

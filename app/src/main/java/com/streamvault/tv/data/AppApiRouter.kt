@@ -518,8 +518,8 @@ class AppApiRouter(
                     put("containerExtension", v.containerExtension)
                     put("fileSizeBytes", 0L)
                     put("fileSizeStr", "")
-                    put("qualityScore", 10)
-                    put("isCam", rawTitleMatchesCam(v.rawTitle))
+                    put("qualityScore", if (rawTitleIsBadPrint(v.rawTitle)) 1 else printScore(v.rawTitle, v.qualityTag, 0L))
+                    put("isCam", rawTitleIsBadPrint(v.rawTitle))
                 })
             }
             return JSONObject().apply {
@@ -534,27 +534,21 @@ class AppApiRouter(
         for (v in item.versions) {
             var fileSizeBytes = 0L
             var fileSizeStr = ""
-            var qualityScore = 10
+            var sizeMb = 0L
 
             if (creds.serverUrl.isNotBlank() && creds.username.isNotBlank() && creds.password.isNotBlank()) {
                 val size = probeStreamSize(creds.serverUrl, creds.username, creds.password, v.streamId, v.containerExtension)
                 if (size > 0L) {
                     fileSizeBytes = size
                     fileSizeStr = formatBytes(size)
-                    val mb = size / (1024L * 1024L)
-                    qualityScore = when {
-                        mb > 2500 -> 30
-                        mb > 1500 -> 22
-                        mb > 800 -> 15
-                        else -> 10
-                    }
+                    sizeMb = size / (1024L * 1024L)
                 }
             }
 
-            val isCam = rawTitleMatchesCam(v.rawTitle)
-            if (isCam) {
-                qualityScore = 1
-            }
+            // Quality comes first (labels in the title, clean-print mark, size as a small extra).
+            // Language never outranks quality: a better print in another language wins, the player offers the audio tracks.
+            val isCam = rawTitleIsBadPrint(v.rawTitle)
+            val qualityScore = if (isCam) 1 else printScore(v.rawTitle, v.qualityTag, sizeMb)
 
             val obj = JSONObject().apply {
                 put("streamId", v.streamId)
@@ -643,6 +637,41 @@ class AppApiRouter(
     // Whole-word match only: "American Gangster" or "Camelot" must not be flagged as a CAM copy.
     private fun rawTitleMatchesCam(rawTitle: String): Boolean =
         Regex("""(?<![A-Za-z0-9])(cam|camrip|hdcam|hd-cam|telesync|hdts|ts)(?![A-Za-z0-9])""", RegexOption.IGNORE_CASE).containsMatchIn(rawTitle)
+
+    // Cinema recordings and prints carrying a watermark / betting-site advert are always ranked last.
+    private val badPrintRegex = Regex(
+        """(?<![A-Za-z0-9])(cam|camrip|hdcam|hd-cam|telesync|hdts|ts|tc|telecine|screener|scr|dvdscr|workprint|1xbet|betwinner|linebet|dragon\s*money|sponsored|watermark(ed)?)(?![A-Za-z0-9])""",
+        RegexOption.IGNORE_CASE
+    )
+    private fun rawTitleIsBadPrint(rawTitle: String): Boolean = badPrintRegex.containsMatchIn(rawTitle)
+
+    private fun printScore(rawTitle: String, qualityTag: String, sizeMb: Long): Int {
+        val t = "$rawTitle $qualityTag".uppercase(java.util.Locale.ROOT)
+        fun has(re: String) = Regex(re).containsMatchIn(t)
+        var score = 10
+        score += when {
+            has("(?<![A-Z0-9])(4K|UHD|2160P?)(?![A-Z0-9])") -> 40
+            has("(?<![A-Z0-9])(BLURAY|BD-?RIP|BRRIP|REMUX)(?![A-Z0-9])") -> 30
+            has("(?<![A-Z0-9])(WEB-?DL|WEBRIP)(?![A-Z0-9])") -> 25
+            has("(?<![A-Z0-9])(1080P?|FHD)(?![A-Z0-9])") -> 15
+            has("(?<![A-Z0-9])720P?(?![A-Z0-9])") -> 5
+            else -> 0
+        }
+        if (has("(?<![A-Z0-9])(HDR10?|DOLBY\\s*VISION)(?![A-Z0-9])")) score += 3
+        if (has("(?<![A-Z0-9])(HEVC|X265|H\\.?265)(?![A-Z0-9])")) score += 5
+        if (has("(?<![A-Z0-9])(DUAL[\\s-]*AUDIO|MULTI[\\s-]*AUDIO)(?![A-Z0-9])")) score += 4
+        // A trailing "*" on this provider marks the clean Hindi-dubbed / dual-audio print
+        if (rawTitle.trimEnd().endsWith("*")) score += 15
+        // File size is only a small extra so a big recording can never beat a clean print
+        score += when {
+            sizeMb > 2500 -> 8
+            sizeMb > 1500 -> 6
+            sizeMb > 800 -> 4
+            sizeMb > 0 -> 1
+            else -> 0
+        }
+        return score
+    }
 
     private fun handleGetLive(queryParams: Map<String, String>): String {
         val activeProf = getActiveUserProfile()
