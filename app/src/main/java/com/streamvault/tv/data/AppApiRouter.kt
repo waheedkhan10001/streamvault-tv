@@ -161,6 +161,11 @@ class AppApiRouter(
             put("totalSeries", 0)
             put("enrichedCount", enriched)
             put("percentComplete", if (total > 0) (enriched * 100) / total else 100)
+            put("stage", syncState.stage)
+            put("processedItems", syncState.processedItems)
+            put("estimatedTotal", syncState.estimatedTotal)
+            put("removedCount", syncState.removedCount)
+            put("note", syncState.note ?: JSONObject.NULL)
             put("error", syncState.errorMessage ?: JSONObject.NULL)
             put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
         }
@@ -186,7 +191,7 @@ class AppApiRouter(
             put("pinnedSmartRows", smartRowsArr)
             put("totalCatalogCount", total)
             put("lastCrash", prefs.lastCrash ?: JSONObject.NULL)
-            put("totalLiveCount", db.getLiveChannels().size)
+            put("totalLiveCount", db.countLiveChannels())
             put("localIpUrl", "http://127.0.0.1:8765/phone")
             put("activeProfile", activeProf.toJson())
             put("profiles", profArr)
@@ -1177,7 +1182,7 @@ class AppApiRouter(
         if (!prefs.loadCredentials().isConfigured) {
             return JSONObject().apply {
                 put("ok", false)
-                put("error", "No working IPTV playlist to refresh. Add one under IPTV Playlists first.")
+                put("error", "No working IPTV playlist to check. Add one under IPTV Playlists first.")
             }.toString()
         }
         syncEngine.triggerSync(isManual = true)

@@ -306,7 +306,7 @@ class StreamVaultDatabase(context: Context) :
      * (in_watchlist, is_watched, resume_position_ms) and existing TMDB enrichment!
      * Returns the count of brand-new items added in this sync.
      */
-    fun upsertMediaBatch(items: List<MediaItem>, markNewIfInserted: Boolean): Int {
+    fun upsertMediaBatch(items: List<MediaItem>, markNewIfInserted: Boolean, mergeVersions: Boolean = false): Int {
         if (items.isEmpty()) return 0
         val db = writableDatabase
         var newlyAdded = 0
@@ -318,7 +318,8 @@ class StreamVaultDatabase(context: Context) :
                     SELECT is_enriched, genres_text, plot, cast_text, director, runtime_mins,
                            backdrop_url, imdb_id, in_watchlist, is_watched, resume_position_ms,
                            duration_ms, has_embedded_subtitles, embedded_sub_langs, embedded_audio_langs,
-                           certification, tmdb_id, vote_count, rating, year, poster_url
+                           certification, tmdb_id, vote_count, rating, year, poster_url,
+                           versions_json, category_name, quality_badges, added_timestamp
                     FROM media_items WHERE dedup_key = ?
                     """.trimIndent(),
                     arrayOf(item.dedupKey)
@@ -350,7 +351,18 @@ class StreamVaultDatabase(context: Context) :
                 val existingRating = if (exists) existingCursor.getDouble(18) else 0.0
                 val existingYear = if (exists) existingCursor.getInt(19) else 0
                 val existingPoster = if (exists) existingCursor.getString(20) ?: "" else ""
+                val existingVersionsJson = if (exists) existingCursor.getString(21) ?: "[]" else "[]"
+                val existingCategory = if (exists) existingCursor.getString(22) ?: "" else ""
+                val existingBadges = if (exists) existingCursor.getString(23) ?: "" else ""
+                val existingAdded = if (exists) existingCursor.getLong(24) else 0L
                 existingCursor.close()
+
+                // Chunked import: the same title can arrive in several chunks, so copies are merged with what is saved.
+                // A title that has not changed at all is not written again (a refresh then only saves what is new or changed).
+                val mergedVersionsJson = if (exists && mergeVersions) mergeVersionsJson(existingVersionsJson, item.versions) else null
+                if (exists && mergeVersions && mergedVersionsJson == existingVersionsJson && item.categoryName == existingCategory) {
+                    continue
+                }
 
                 if (!exists && markNewIfInserted) {
                     newlyAdded++
@@ -358,14 +370,16 @@ class StreamVaultDatabase(context: Context) :
 
                 val finalGenres = if (keepEnriched && existingGenres.isNotBlank()) {
                     existingGenres
+                } else if (exists && mergeVersions && existingGenres.isNotBlank()) {
+                    (existingGenres.split("|").filter { it.isNotBlank() } + item.genres).distinct().joinToString("|")
                 } else {
                     item.genres.distinct().joinToString("|")
                 }
-                val finalPlot = if (keepEnriched && existingPlot.isNotBlank()) existingPlot else item.plot
-                val finalCast = if (keepEnriched && existingCast.isNotBlank()) existingCast else item.cast.joinToString("|")
-                val finalDirector = if (keepEnriched && existingDirector.isNotBlank()) existingDirector else item.director
+                val finalPlot = if ((keepEnriched || mergeVersions) && existingPlot.isNotBlank()) existingPlot else item.plot
+                val finalCast = if ((keepEnriched || mergeVersions) && existingCast.isNotBlank()) existingCast else item.cast.joinToString("|")
+                val finalDirector = if ((keepEnriched || mergeVersions) && existingDirector.isNotBlank()) existingDirector else item.director
                 val finalRuntime = if (keepEnriched && existingRuntime > 0) existingRuntime else item.runtimeMins
-                val finalBackdrop = if (keepEnriched && existingBackdrop.isNotBlank()) existingBackdrop else item.backdropUrl
+                val finalBackdrop = if ((keepEnriched || mergeVersions) && existingBackdrop.isNotBlank()) existingBackdrop else item.backdropUrl
                 val finalImdb = if (keepEnriched && existingImdb.isNotBlank()) existingImdb else item.imdbId
                 // A re-sync must never wipe what TMDB already filled in (age rating, id, votes, rating, year, poster):
                 // without the age rating, Kids profiles would suddenly hide those titles.
@@ -374,11 +388,15 @@ class StreamVaultDatabase(context: Context) :
                 val finalVotes = if (keepEnriched && existingVotes > 0) existingVotes else item.voteCount
                 val finalRating = if (keepEnriched && existingRating > 0.0) existingRating else item.rating
                 val finalYear = if (keepEnriched && existingYear > 0) existingYear else item.year
-                val finalPoster = if (keepEnriched && existingPoster.isNotBlank()) existingPoster else item.posterUrl
+                val finalPoster = if ((keepEnriched || mergeVersions) && existingPoster.isNotBlank()) existingPoster else item.posterUrl
 
-                val versionsJson = JSONArray().apply {
+                val versionsJson = mergedVersionsJson ?: JSONArray().apply {
                     item.versions.forEach { put(it.toJson()) }
                 }.toString()
+                val finalBadges = if (exists && mergeVersions) {
+                    (existingBadges.split("|").filter { it.isNotBlank() } + item.qualityBadges).distinct().joinToString("|")
+                } else item.qualityBadges.distinct().joinToString("|")
+                val finalAdded = if (exists && mergeVersions) maxOf(existingAdded, item.addedTimestamp) else item.addedTimestamp
 
                 val isAdult = item.isAdult || checkIsAdult(item.cleanTitle, item.rawTitle, item.categoryName, finalGenres)
 
@@ -411,14 +429,14 @@ class StreamVaultDatabase(context: Context) :
                     put("poster_url", finalPoster)
                     put("backdrop_url", finalBackdrop)
                     put("language", item.language)
-                    put("quality_badges", item.qualityBadges.distinct().joinToString("|"))
+                    put("quality_badges", finalBadges)
                     put("has_embedded_subtitles", if (hasEmbSub) 1 else 0)
                     put("embedded_sub_langs", embSubLangs)
                     put("has_online_subtitles", if (item.hasOnlineSubtitles) 1 else 0)
                     put("embedded_audio_langs", embAudioLangs)
                     put("category_id", item.categoryId)
                     put("category_name", item.categoryName)
-                    put("added_timestamp", item.addedTimestamp)
+                    put("added_timestamp", finalAdded)
                     put("is_enriched", if (keepEnriched || item.isEnriched) 1 else 0)
                     put("is_newly_added", if (!exists && markNewIfInserted) 1 else 0)
                     put("in_watchlist", if (inWatchlist) 1 else 0)
@@ -439,6 +457,168 @@ class StreamVaultDatabase(context: Context) :
             db.endTransaction()
         }
         return newlyAdded
+    }
+
+    /** Merges a saved version list (JSON text) with new copies: the same streamId is replaced, other saved copies stay. */
+    private fun mergeVersionsJson(existingJson: String, incoming: List<StreamVersion>): String {
+        val byId = LinkedHashMap<String, JSONObject>()
+        runCatching {
+            val arr = JSONArray(existingJson)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val id = o.optString("streamId")
+                if (id.isNotBlank()) byId[id] = o
+            }
+        }
+        for (v in incoming) byId[v.streamId] = v.toJson()
+        val out = JSONArray()
+        byId.values.forEach { out.put(it) }
+        return out.toString()
+    }
+
+    fun countMediaOfType(type: MediaType): Int {
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM media_items WHERE media_type = ?", arrayOf(type.name)).use { c ->
+            return if (c.moveToFirst()) c.getInt(0) else 0
+        }
+    }
+
+    /**
+     * After a COMPLETE download: forgets copies the provider no longer lists. A title with no copy left is deleted
+     * (with its episodes); watchlist / resume entries stay in the profile tables and come back if the title returns.
+     * Returns (titles removed, single copies removed).
+     */
+    fun removeUnseenMedia(type: MediaType, seenStreamIds: Set<String>): Pair<Int, Int> {
+        val db = writableDatabase
+        val deleteKeys = ArrayList<String>()
+        val deleteSeriesIds = ArrayList<String>()
+        val updates = ArrayList<Triple<String, String, String>>() // key, new versions json, new primary stream id
+        var versionsRemoved = 0
+        db.rawQuery("SELECT dedup_key, versions_json, primary_stream_id FROM media_items WHERE media_type = ?", arrayOf(type.name)).use { c ->
+            while (c.moveToNext()) {
+                val key = c.getString(0) ?: continue
+                val json = c.getString(1) ?: "[]"
+                val primary = c.getString(2) ?: ""
+                val arr = runCatching { JSONArray(json) }.getOrNull() ?: continue
+                if (arr.length() == 0) continue
+                val kept = JSONArray()
+                val gone = ArrayList<String>()
+                var firstKept = ""
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val id = o.optString("streamId")
+                    if (id in seenStreamIds) {
+                        if (firstKept.isEmpty()) firstKept = id
+                        kept.put(o)
+                    } else gone.add(id)
+                }
+                if (gone.isEmpty()) continue
+                versionsRemoved += gone.size
+                if (kept.length() == 0) {
+                    deleteKeys.add(key)
+                    if (type == MediaType.SERIES) deleteSeriesIds.addAll(gone)
+                } else {
+                    updates.add(Triple(key, kept.toString(), if (primary in seenStreamIds) primary else firstKept))
+                }
+            }
+        }
+        if (deleteKeys.isEmpty() && updates.isEmpty()) return Pair(0, 0)
+        db.beginTransactionNonExclusive()
+        try {
+            for ((key, json, primary) in updates) {
+                val cv = ContentValues().apply { put("versions_json", json); put("primary_stream_id", primary) }
+                db.update("media_items", cv, "dedup_key = ?", arrayOf(key))
+            }
+            for (key in deleteKeys) db.delete("media_items", "dedup_key = ?", arrayOf(key))
+            for (id in deleteSeriesIds) db.delete("series_episodes", "series_id = ?", arrayOf(id))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return Pair(deleteKeys.size, versionsRemoved)
+    }
+
+    /** Removes live channels the provider no longer lists. Returns how many were removed. */
+    fun removeUnseenLive(seenStreamIds: Set<String>): Int {
+        val db = writableDatabase
+        val gone = ArrayList<String>()
+        db.rawQuery("SELECT stream_id FROM live_channels", null).use { c ->
+            while (c.moveToNext()) {
+                val id = c.getString(0) ?: continue
+                if (id !in seenStreamIds) gone.add(id)
+            }
+        }
+        if (gone.isEmpty()) return 0
+        db.beginTransactionNonExclusive()
+        try {
+            for (id in gone) db.delete("live_channels", "stream_id = ?", arrayOf(id))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return gone.size
+    }
+
+    fun countLiveChannels(): Int {
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM live_channels", null).use { c ->
+            return if (c.moveToFirst()) c.getInt(0) else 0
+        }
+    }
+
+    /**
+     * The same title listed once WITH a TMDB id and once WITHOUT one gets two different keys:
+     * fold the loose copy into the TMDB one (their versions are merged). Done after the chunked import.
+     */
+    fun foldLooseDuplicates(type: MediaType): Int {
+        val db = writableDatabase
+        val titleKeyToTmdbKey = HashMap<String, String>()
+        db.rawQuery("SELECT dedup_key, raw_title, category_name FROM media_items WHERE media_type = ? AND dedup_key LIKE 'tmdb:%'", arrayOf(type.name)).use { c ->
+            while (c.moveToNext()) {
+                val key = c.getString(0) ?: continue
+                val raw = c.getString(1) ?: ""
+                val cat = c.getString(2) ?: ""
+                if (raw.isBlank()) continue
+                titleKeyToTmdbKey[TitleParser.parse(raw, cat).dedupKey] = key
+            }
+        }
+        if (titleKeyToTmdbKey.isEmpty()) return 0
+        val pairs = ArrayList<Pair<String, String>>() // loose key -> tmdb key
+        db.rawQuery("SELECT dedup_key FROM media_items WHERE media_type = ? AND dedup_key NOT LIKE 'tmdb:%'", arrayOf(type.name)).use { c ->
+            while (c.moveToNext()) {
+                val key = c.getString(0) ?: continue
+                val target = titleKeyToTmdbKey[key] ?: continue
+                pairs.add(Pair(key, target))
+            }
+        }
+        if (pairs.isEmpty()) return 0
+        var folded = 0
+        db.beginTransactionNonExclusive()
+        try {
+            for ((loose, target) in pairs) {
+                var looseVersions = "[]"
+                db.rawQuery("SELECT versions_json FROM media_items WHERE dedup_key = ?", arrayOf(loose)).use { c ->
+                    if (c.moveToFirst()) looseVersions = c.getString(0) ?: "[]"
+                }
+                var targetVersions = "[]"
+                var targetFound = false
+                db.rawQuery("SELECT versions_json FROM media_items WHERE dedup_key = ?", arrayOf(target)).use { c ->
+                    if (c.moveToFirst()) { targetVersions = c.getString(0) ?: "[]"; targetFound = true }
+                }
+                if (!targetFound) continue
+                val incoming = ArrayList<StreamVersion>()
+                runCatching {
+                    val arr = JSONArray(looseVersions)
+                    for (i in 0 until arr.length()) incoming.add(StreamVersion.fromJson(arr.getJSONObject(i)))
+                }
+                val cv = ContentValues().apply { put("versions_json", mergeVersionsJson(targetVersions, incoming)) }
+                db.update("media_items", cv, "dedup_key = ?", arrayOf(target))
+                db.delete("media_items", "dedup_key = ?", arrayOf(loose))
+                folded++
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return folded
     }
 
     /**

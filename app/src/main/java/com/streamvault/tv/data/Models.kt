@@ -373,5 +373,12 @@ data class SyncProgressState(
     val enrichedCount: Int = 0,
     val totalToEnrich: Int = 0,
     val lastSyncTimestamp: Long = 0L,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** Which list is being read now: Movies, Series, Live TV, Adult & Extras, Tidying up. */
+    val stage: String = "",
+    /** About how many titles this list has (0 = not known). Used for "N of about M". */
+    val estimatedTotal: Int = 0,
+    val removedCount: Int = 0,
+    /** One-line result of the last check, e.g. "12 new titles added, 5 removed." */
+    val note: String? = null
 )

@@ -95,6 +95,22 @@ class CatalogSyncEngine(
         "fa" to "Persian"
     )
 
+    /** What one download keeps between the lists: Adult/Extras titles saved last, and what the provider listed. */
+    private class ImportContext {
+        val vaultBuffer = LinkedHashMap<String, MediaItem>()
+        val seenMovieStreams = HashSet<String>(100_000)
+        val seenSeriesStreams = HashSet<String>(20_000)
+        val seenMovieKeys = HashSet<String>(100_000)
+        val seenSeriesKeys = HashSet<String>(20_000)
+        val seenLiveStreams = HashSet<String>(20_000)
+    }
+
+    private class CountingInputStream(inner: java.io.InputStream) : java.io.FilterInputStream(inner) {
+        var bytes = 0L
+        override fun read(): Int { val r = super.read(); if (r >= 0) bytes++; return r }
+        override fun read(b: ByteArray, off: Int, len: Int): Int { val n = super.read(b, off, len); if (n > 0) bytes += n; return n }
+    }
+
     fun triggerSync(isManual: Boolean = false, onCatalogUpdated: () -> Unit = {}) {
         val creds = prefs.loadCredentials()
         if (!creds.isConfigured) {
@@ -112,9 +128,17 @@ class CatalogSyncEngine(
             }
             try {
                 val isFirstSync = prefs.lastFullSyncTimestamp == 0L
+                val ctx = ImportContext()
+                var moviesDone = false
+                var seriesDone = false
+                var liveDone = false
+                val prevMovies = db.countMediaOfType(MediaType.MOVIE)
+                val prevSeries = db.countMediaOfType(MediaType.SERIES)
+                val prevLive = db.countLiveChannels()
                 _syncState.value = SyncProgressState(
                     isSyncing = true,
                     phase = "Connecting to IPTV Server...",
+                    stage = "Connecting",
                     lastSyncTimestamp = prefs.lastFullSyncTimestamp
                 )
 
@@ -126,46 +150,90 @@ class CatalogSyncEngine(
                 _syncState.value = _syncState.value.copy(phase = "Loading Movie Categories...")
                 val vodCatMap = fetchCategoryMap("$baseUrl&action=get_vod_categories")
 
-                // 2. Stream & Deduplicate VOD Movies
-                _syncState.value = _syncState.value.copy(phase = "Streaming Movies Catalog (Memory-Safe)...")
+                // 2. Movies: read and saved in small chunks (Adult / Extras are held back and saved last)
+                _syncState.value = _syncState.value.copy(phase = "Streaming Movies Catalog (Memory-Safe)...", stage = "Movies", processedItems = 0, estimatedTotal = 0)
                 val newMovies = streamAndSaveMedia(
                     url = "$baseUrl&action=get_vod_streams",
                     mediaType = MediaType.MOVIE,
                     categoryMap = vodCatMap,
-                    markNew = !isFirstSync
+                    markNew = !isFirstSync,
+                    ctx = ctx,
+                    stageLabel = "Movies"
                 )
+                moviesDone = true
                 onCatalogUpdated()
 
-                // 3. Fetch Series Categories & Stream Series
+                // 3. Series
+                var newSeries = 0
                 if (!prefs.isPlaybackActive.get()) {
-                    _syncState.value = _syncState.value.copy(phase = "Streaming TV Series Catalog...")
+                    _syncState.value = _syncState.value.copy(phase = "Streaming TV Series Catalog...", stage = "Series", processedItems = 0, estimatedTotal = 0)
                     val seriesCatMap = fetchCategoryMap("$baseUrl&action=get_series_categories")
-                    val newSeries = streamAndSaveMedia(
+                    newSeries = streamAndSaveMedia(
                         url = "$baseUrl&action=get_series",
                         mediaType = MediaType.SERIES,
                         categoryMap = seriesCatMap,
-                        markNew = !isFirstSync
+                        markNew = !isFirstSync,
+                        ctx = ctx,
+                        stageLabel = "Series"
                     )
+                    seriesDone = true
                     _syncState.value = _syncState.value.copy(newlyAddedCount = newMovies + newSeries)
                     onCatalogUpdated()
                 }
 
-                // 4. Fetch Live TV Categories & Channels
+                // 4. Live TV
                 if (!prefs.isPlaybackActive.get()) {
-                    _syncState.value = _syncState.value.copy(phase = "Loading Live TV Channels...")
+                    _syncState.value = _syncState.value.copy(phase = "Loading Live TV Channels...", stage = "Live TV", processedItems = 0, estimatedTotal = prevLive)
                     val liveCatMap = fetchCategoryMap("$baseUrl&action=get_live_categories")
-                    streamAndSaveLiveChannels("$baseUrl&action=get_live_streams", liveCatMap)
+                    streamAndSaveLiveChannels("$baseUrl&action=get_live_streams", liveCatMap, ctx.seenLiveStreams)
+                    liveDone = true
                     onCatalogUpdated()
                 }
+
+                // 4b. Adult and Extras titles come LAST
+                _syncState.value = _syncState.value.copy(phase = "Saving Adult and Extras titles...", stage = "Adult & Extras", processedItems = 0, estimatedTotal = 0)
+                saveVaultBuffer(ctx, markNew = !isFirstSync)
+                onCatalogUpdated()
+
+                // 4c. Tidy up: fold duplicate listings and forget what the provider no longer lists (only after a COMPLETE download)
+                _syncState.value = _syncState.value.copy(phase = "Tidying up the catalogue...", stage = "Tidying up", processedItems = 0, estimatedTotal = 0)
+                if (moviesDone) db.foldLooseDuplicates(MediaType.MOVIE)
+                if (seriesDone) db.foldLooseDuplicates(MediaType.SERIES)
+                var removedTitles = 0
+                var looksIncomplete = false
+                // Safety: if the list is empty or far smaller than before, nothing is deleted
+                fun listLooksComplete(before: Int, nowListed: Int) = before == 0 || (nowListed > 0 && nowListed * 2 >= before)
+                if (moviesDone) {
+                    if (listLooksComplete(prevMovies, ctx.seenMovieKeys.size)) removedTitles += db.removeUnseenMedia(MediaType.MOVIE, ctx.seenMovieStreams).first
+                    else looksIncomplete = true
+                }
+                if (seriesDone) {
+                    if (listLooksComplete(prevSeries, ctx.seenSeriesKeys.size)) removedTitles += db.removeUnseenMedia(MediaType.SERIES, ctx.seenSeriesStreams).first
+                    else looksIncomplete = true
+                }
+                if (liveDone) {
+                    if (listLooksComplete(prevLive, ctx.seenLiveStreams.size)) removedTitles += db.removeUnseenLive(ctx.seenLiveStreams)
+                    else looksIncomplete = true
+                }
+                val summary: String? = when {
+                    isFirstSync -> null
+                    looksIncomplete -> "The provider list looks incomplete, so nothing was removed."
+                    (newMovies + newSeries) == 0 && removedTitles == 0 -> "Your catalog is up to date."
+                    else -> "${newMovies + newSeries} new titles added, $removedTitles removed."
+                }
+                onCatalogUpdated()
 
                 prefs.lastFullSyncTimestamp = System.currentTimeMillis()
                 val (enriched, total) = db.getEnrichmentCounts()
                 _syncState.value = _syncState.value.copy(
                     isSyncing = false,
                     phase = "Catalog Synced • Starting Background TMDB Enrichment ($enriched / $total)",
+                    stage = "",
                     enrichedCount = enriched,
                     totalToEnrich = total,
                     lastSyncTimestamp = prefs.lastFullSyncTimestamp,
+                    removedCount = removedTitles,
+                    note = summary,
                     errorMessage = null
                 )
 
@@ -220,10 +288,25 @@ class CatalogSyncEngine(
         url: String,
         mediaType: MediaType,
         categoryMap: Map<String, String>,
-        markNew: Boolean
+        markNew: Boolean,
+        ctx: ImportContext,
+        stageLabel: String
     ): Int {
         val req = Request.Builder().url(url).header("User-Agent", "StreamVaultTV/1.0").build()
-        val dedupMap = LinkedHashMap<String, MediaItem>(4096)
+        // Only a small chunk is ever held in memory: it is saved and cleared as the list is read.
+        // Adult / Extras titles wait in ctx.vaultBuffer and are saved LAST (after Movies, Series and Live TV).
+        val dedupMap = LinkedHashMap<String, MediaItem>(2048)
+        val seenStreams = if (mediaType == MediaType.MOVIE) ctx.seenMovieStreams else ctx.seenSeriesStreams
+        val seenKeys = if (mediaType == MediaType.MOVIE) ctx.seenMovieKeys else ctx.seenSeriesKeys
+        val previousTotal = db.countMediaOfType(mediaType)
+        var totalNew = 0
+        fun flushChunk() {
+            if (dedupMap.isEmpty()) return
+            for (chunk in dedupMap.values.toList().chunked(500)) {
+                totalNew += db.upsertMediaBatch(chunk, markNewIfInserted = markNew, mergeVersions = true)
+            }
+            dedupMap.clear()
+        }
 
         httpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
@@ -236,8 +319,10 @@ class CatalogSyncEngine(
                     }
                 )
             }
-            val stream = resp.body?.byteStream() ?: return 0
-            val reader = JsonReader(InputStreamReader(stream, Charsets.UTF_8))
+            val rawStream = resp.body?.byteStream() ?: return 0
+            val contentLength = resp.body?.contentLength() ?: -1L
+            val counting = CountingInputStream(rawStream)
+            val reader = JsonReader(InputStreamReader(counting, Charsets.UTF_8))
 
             // A list is expected. Providers answer with an object ({"user_info":{"auth":0}}) when the login is wrong.
             if (reader.peek() == JsonToken.BEGIN_OBJECT) {
@@ -327,9 +412,14 @@ class CatalogSyncEngine(
                     addedTimestamp = addedTs
                 )
 
-                val existing = dedupMap[parsed.dedupKey]
+                seenStreams.add(streamId)
+                seenKeys.add(parsed.dedupKey)
+                val isVault = StreamVaultDatabase.checkIsAdult(parsed.cleanTitle, name, catName, combinedGenres.joinToString(" ")) ||
+                    StreamVaultDatabase.checkIsExtra(catName)
+                val target: MutableMap<String, MediaItem> = if (isVault) ctx.vaultBuffer else dedupMap
+                val existing = target[parsed.dedupKey]
                 if (existing == null) {
-                    dedupMap[parsed.dedupKey] = MediaItem(
+                    target[parsed.dedupKey] = MediaItem(
                         dedupKey = parsed.dedupKey,
                         primaryStreamId = streamId,
                         tmdbId = tmdbId,
@@ -363,7 +453,7 @@ class CatalogSyncEngine(
                     val bestPoster = if (existing.posterUrl.isNotBlank()) existing.posterUrl else poster
                     val bestRating = maxOf(existing.rating, rating.coerceIn(0.0, 10.0))
                     val bestAdded = maxOf(existing.addedTimestamp, addedTs)
-                    dedupMap[parsed.dedupKey] = existing.copy(
+                    target[parsed.dedupKey] = existing.copy(
                         qualityBadges = mergedQualities,
                         genres = mergedGenres,
                         posterUrl = bestPoster,
@@ -380,48 +470,41 @@ class CatalogSyncEngine(
                 }
 
                 count++
+                if (dedupMap.size >= 1500) flushChunk()
+                if (ctx.vaultBuffer.size >= 8000) totalNew += saveVaultBuffer(ctx, markNew)
                 if (count % 1500 == 0) {
+                    val fraction = if (contentLength > 0) counting.bytes.toDouble() / contentLength else 0.0
+                    val estimate = when {
+                        fraction > 0.05 -> (count / fraction).toInt()
+                        previousTotal > 0 -> previousTotal
+                        else -> 0
+                    }
                     _syncState.value = _syncState.value.copy(
                         processedItems = count,
-                        phase = "Parsed $count ${if (mediaType == MediaType.MOVIE) "Movies" else "Series"} (${dedupMap.size} unique cards)..."
+                        stage = stageLabel,
+                        estimatedTotal = estimate,
+                        phase = "Parsed $count ${if (mediaType == MediaType.MOVIE) "Movies" else "Series"} (${seenKeys.size} unique cards)..."
                     )
                 }
             }
             reader.endArray()
         }
-
-        // Same movie listed once WITH a TMDB id and once WITHOUT one gets two different keys: fold the second into the first
-        val byTitleKey = HashMap<String, String>()
-        for ((key, item) in dedupMap) {
-            if (key.startsWith("tmdb:")) byTitleKey[TitleParser.parse(item.rawTitle, item.categoryName).dedupKey] = key
-        }
-        if (byTitleKey.isNotEmpty()) {
-            for (key in dedupMap.keys.toList()) {
-                val target = byTitleKey[key] ?: continue
-                if (target == key) continue
-                val loose = dedupMap.remove(key) ?: continue
-                val keep = dedupMap[target] ?: continue
-                dedupMap[target] = keep.copy(
-                    qualityBadges = (keep.qualityBadges + loose.qualityBadges).distinct(),
-                    genres = (keep.genres + loose.genres).distinct(),
-                    versions = keep.versions + loose.versions,
-                    posterUrl = keep.posterUrl.ifBlank { loose.posterUrl },
-                    rating = maxOf(keep.rating, loose.rating),
-                    addedTimestamp = maxOf(keep.addedTimestamp, loose.addedTimestamp)
-                )
-            }
-        }
-
-        // Save in memory-safe chunks of 500
-        var totalNew = 0
-        val allUnique = dedupMap.values.toList()
-        for (chunk in allUnique.chunked(500)) {
-            totalNew += db.upsertMediaBatch(chunk, markNewIfInserted = markNew)
-        }
+        flushChunk()
         return totalNew
     }
 
-    private fun streamAndSaveLiveChannels(url: String, categoryMap: Map<String, String>) {
+    /** Saves the Adult / Extras titles that were held back (called after the mainstream lists are done). */
+    private fun saveVaultBuffer(ctx: ImportContext, markNew: Boolean): Int {
+        if (ctx.vaultBuffer.isEmpty()) return 0
+        var added = 0
+        for (chunk in ctx.vaultBuffer.values.toList().chunked(500)) {
+            added += db.upsertMediaBatch(chunk, markNewIfInserted = markNew, mergeVersions = true)
+        }
+        ctx.vaultBuffer.clear()
+        return added
+    }
+
+    private fun streamAndSaveLiveChannels(url: String, categoryMap: Map<String, String>, seen: MutableSet<String>) {
         val req = Request.Builder().url(url).header("User-Agent", "StreamVaultTV/1.0").build()
         val batch = mutableListOf<LiveChannel>()
         // First ever import: nothing is "new". Later imports: channels we have not seen before count as new.
@@ -457,6 +540,7 @@ class CatalogSyncEngine(
                 }
                 reader.endObject()
                 if (streamId.isNotBlank() && name.isNotBlank()) {
+                    seen.add(streamId)
                     batch.add(
                         LiveChannel(
                             streamId = streamId,
@@ -499,12 +583,18 @@ class CatalogSyncEngine(
             val creds = prefs.loadCredentials()
             val apiKey = creds.tmdbApiKey.ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY }
 
+            // Titles whose lookup failed in this run are skipped for now (retried next start). Without this, the same
+            // failing titles sat at the head of the queue and were tried again and again, so the rest never got looked up.
+            val failedKeys = HashSet<String>()
             while (isActive) {
-                val queue = db.getUnenrichedMediaQueue(creds.preferredLanguages, limit = 600)
+                val queue = db.getUnenrichedMediaQueue(creds.preferredLanguages, limit = 600 + failedKeys.size)
+                    .filter { it.dedupKey !in failedKeys }
+                    .take(600)
                 if (queue.isEmpty()) {
                     val (enriched, total) = db.getEnrichmentCounts()
                     _syncState.value = _syncState.value.copy(
-                        phase = "100% Catalog Enriched ($enriched Titles Ready)",
+                        phase = if (failedKeys.isEmpty()) "100% Catalog Enriched ($enriched Titles Ready)"
+                        else "Details loaded ($enriched of $total). ${failedKeys.size} titles could not be looked up right now and will be tried again later",
                         enrichedCount = enriched,
                         totalToEnrich = total
                     )
@@ -538,6 +628,9 @@ class CatalogSyncEngine(
                     val updatedItem = db.getItemByDedupKey(item.dedupKey)
                     if (updatedItem != null) {
                         enrichedBatch.add(updatedItem)
+                        if (!updatedItem.isEnriched) failedKeys.add(item.dedupKey)
+                    } else {
+                        failedKeys.add(item.dedupKey)
                     }
                     updatedInBatch++
                     if (updatedInBatch % 25 == 0) {

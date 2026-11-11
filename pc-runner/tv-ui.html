@@ -195,6 +195,17 @@
     flex: 1; height: 100vh; overflow-y: auto; position: relative;
     scroll-behavior: auto; background: var(--bg);
   }
+  /* Catalog loading strip (small, quiet, never takes focus) */
+  #catalogStrip {
+    position: fixed; top: 0; left: 220px; right: 0; height: 22px; z-index: 40;
+    display: none; align-items: center; gap: 8px; padding: 0 18px; box-sizing: border-box;
+    background: #0E0B1E; border-bottom: 1px solid #251C42; color: #C4B5FD;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.2px; pointer-events: none;
+  }
+  #catalogStrip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme-accent, #8B5CF6); flex-shrink: 0; animation: stripPulse 1.2s ease-in-out infinite; }
+  #catalogStrip.quiet { color: #9CA3AF; font-weight: 600; }
+  @keyframes stripPulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+  body.strip-on .viewport { margin-top: 22px; height: calc(100vh - 22px); }
   .viewport::-webkit-scrollbar { width: 8px; }
   .viewport::-webkit-scrollbar-thumb { background: #262A38; border-radius: 4px; }
 
@@ -4528,6 +4539,7 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
   }
   const leavingTab = currentTab;
   currentTab = tabId;
+  renderCatalogStrip();
   lastContentFocusTarget = null;
   // Leaving the 18+ or Extras area locks it again
   if (leavingTab !== tabId) {
@@ -4663,7 +4675,7 @@ async function catalogNoticeHtml() {
   const sync = (appStatus && appStatus.syncStatus) || {};
   const total = Number((appStatus && appStatus.totalCatalogCount) || 0);
   if (sync.error && !sync.isSyncing) {
-    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#F87171;margin-bottom:8px;">Could not load your catalog</div><div style="font-size:13px;color:#D1D5DB;max-width:560px;margin:0 auto;">${escapeHtml(String(sync.error))}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;">Check your IPTV details in Settings &rarr; IPTV Playlists, then use Refresh Now.</div></div>`;
+    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#F87171;margin-bottom:8px;">Could not load your catalog</div><div style="font-size:13px;color:#D1D5DB;max-width:560px;margin:0 auto;">${escapeHtml(String(sync.error))}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;">Check your IPTV details in Settings &rarr; IPTV Playlists, then use Check for new titles.</div></div>`;
   }
   if (sync.isSyncing || total === 0) {
     const phase = sync.phase ? escapeHtml(String(sync.phase)) : 'Getting started...';
@@ -5904,9 +5916,9 @@ async function loadSettings(vp) {
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Catalog</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Updates by itself. Refresh to reload now.</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Checks by itself every day. Tap to check now.</div>
               </div>
-              <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Refresh Now</button>
+              <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Check for new titles</button>
             </div>
 
           </div>
@@ -6212,18 +6224,18 @@ async function triggerFullEnrichmentSync() {
   playNavSound();
   await refreshAppStatus();
   if (!hasActivePlaylist()) {
-    showToast('No working IPTV playlist to refresh. Add one under IPTV Playlists first.');
+    showToast('No working IPTV playlist to check. Add one under IPTV Playlists first.');
     return;
   }
   try {
     const res = await fetch('/api/sync-now', { method: 'POST' });
     const d = await res.json().catch(() => ({}));
-    if (d && d.ok === false) { showToast(d.error || 'Could not refresh'); return; }
-    showToast('✓ Refreshing your catalog. This can take a few minutes.');
+    if (d && d.ok === false) { showToast(d.error || 'Could not check for new titles'); return; }
+    showToast('✓ Checking for new titles. This can take a few minutes.');
     await refreshAppStatus();
     watchPlaylistStatus();
   } catch (_) {
-    showToast('Could not refresh. Please try again.');
+    showToast('Could not check for new titles. Please try again.');
   }
 }
 
@@ -10517,6 +10529,79 @@ window.onload = init;
     return r;
   };
 })();
+
+// ---- Catalog loading strip: "Loading your catalog: Movies 12,400 of about 69,800 · you can browse now" ----
+let catalogStripTimer = null;
+let catalogStripWasSyncing = false;
+function formatCount(n) { return Number(n || 0).toLocaleString('en-US'); }
+function catalogStripState() {
+  const sync = (appStatus && appStatus.syncStatus) || {};
+  const total = Number((appStatus && appStatus.totalCatalogCount) || 0);
+  if (sync.isSyncing) {
+    const firstLoad = !sync.lastSyncTimestamp || total === 0;
+    if (!firstLoad) return { text: 'Checking for new titles…', quiet: true };
+    const stage = sync.stage || '';
+    const n = Number(sync.processedItems || 0);
+    const est = Number(sync.estimatedTotal || 0);
+    let head;
+    if (stage === 'Movies' || stage === 'Series') {
+      head = n > 0 ? `${stage} ${formatCount(n)}${est > n ? ' of about ' + formatCount(est) : ' loaded'}` : `${stage}…`;
+    } else if (stage === 'Live TV') {
+      head = 'Live TV channels…';
+    } else if (stage === 'Connecting') {
+      head = 'connecting to your IPTV provider…';
+    } else {
+      head = 'finishing up…';
+    }
+    const more = ['SEARCH', 'MOVIES', 'SERIES'].includes(currentTab) ? ' · some titles may not show yet' : '';
+    return { text: `Loading your catalog: ${head} · you can browse now${more}`, quiet: false };
+  }
+  const enr = Number(sync.enrichedCount || 0), tot = Number(sync.totalToEnrich || 0);
+  if (tot > 0 && enr < tot && /Enriching|Loading details|Starting Background/i.test(String(sync.phase || ''))) {
+    return { text: `Adding details and ratings: ${formatCount(enr)} of ${formatCount(tot)} titles`, quiet: true };
+  }
+  return null;
+}
+function renderCatalogStrip() {
+  let el = document.getElementById('catalogStrip');
+  const welcome = document.getElementById('welcomeScreenOverlay');
+  const hidden = !getStoredAuthToken() || (welcome && welcome.style.display !== 'none' && welcome.style.display !== '')
+    || currentTab === 'SETTINGS' || currentTab === 'PROFILE';
+  const st = hidden ? null : catalogStripState();
+  if (!st) {
+    if (el) el.style.display = 'none';
+    document.body.classList.remove('strip-on');
+    return;
+  }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'catalogStrip';
+    el.setAttribute('aria-live', 'polite');
+    document.body.appendChild(el);
+  }
+  const html = `<span class="dot"></span><span>${escapeHtml(st.text)}</span>`;
+  if (el.getAttribute('data-html') !== html) { el.innerHTML = html; el.setAttribute('data-html', html); }
+  el.className = st.quiet ? 'quiet' : '';
+  el.style.display = 'flex';
+  document.body.classList.add('strip-on');
+}
+async function pollCatalogStrip() {
+  let delay = 12000;
+  try {
+    if (getStoredAuthToken()) {
+      await refreshAppStatus();
+      const sync = (appStatus && appStatus.syncStatus) || {};
+      if (catalogStripWasSyncing && !sync.isSyncing && sync.note) showToast(escapeHtml(sync.note));
+      catalogStripWasSyncing = !!sync.isSyncing;
+      renderCatalogStrip();
+      if (sync.isSyncing || catalogStripState()) delay = 2500;
+    } else {
+      renderCatalogStrip();
+    }
+  } catch (_) {}
+  catalogStripTimer = setTimeout(pollCatalogStrip, delay);
+}
+window.addEventListener('load', () => { setTimeout(pollCatalogStrip, 1500); });
 </script>
 </body>
 </html>

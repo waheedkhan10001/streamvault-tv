@@ -64,7 +64,7 @@ async function newTv(browser, token, email, nativeStart = {}) {
         if (path === '/api/status') return j({ ok: true, credentials: n.creds, catalogCount: n.total });
         if (path === '/api/session') return j({ ok: true, authenticated: true, token });
         if (path === '/api/save-credentials') { const b = JSON.parse(body || '{}'); n.calls.push(['save', b]); n.creds = { serverUrl: b.serverUrl, username: b.username, password: b.password, hasPassword: !!b.password, playlistName: b.playlistName }; n.sync = { isSyncing: true, phase: 'Connecting…', error: null }; return j({ ok: true }); }
-        if (path === '/api/sync-now') { n.calls.push(['sync']); if (!n.creds.serverUrl) return j({ ok: false, error: 'No working IPTV playlist to refresh. Add one under IPTV Playlists first.' }); return j({ ok: true }); }
+        if (path === '/api/sync-now') { n.calls.push(['sync']); if (!n.creds.serverUrl) return j({ ok: false, error: 'No working IPTV playlist to check. Add one under IPTV Playlists first.' }); return j({ ok: true }); }
         if (path === '/api/clear-playlist') { n.calls.push(['clear']); n.creds = {}; n.total = 0; return j({ success: true }); }
         if (path === '/api/profiles') return j({ ok: true, profiles, activeProfileId: 'p1' });
         return j({ ok: true, items: [], playlists: [] });
@@ -93,12 +93,12 @@ async function run() {
   const token = vf.json.token;
   const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
 
-  console.log('1. No playlist yet: Refresh Now says so honestly');
+  console.log('1. No playlist yet: Check for new titles says so honestly');
   let tv = await newTv(browser, token, 'pl@example.com');
   await openSettings(tv);
   check('Settings invites you to add a playlist', (await tv.evaluate(() => document.getElementById('mainViewport').innerText)).includes('No Playlists Connected'));
   await tv.evaluate(() => document.getElementById('btnEnrichNow').focus()); await press(tv, 'Enter'); await sleep(400);
-  check('Refresh Now: "No working IPTV playlist to refresh…" (not "refreshing")', /No working IPTV playlist to refresh/i.test(await toast(tv)), await toast(tv));
+  check('Check for new titles: "No working IPTV playlist to check…" (not "checking")', /No working IPTV playlist to check/i.test(await toast(tv)), await toast(tv));
   check('and nothing was started on the TV', !(await calls(tv)).includes('sync'));
 
   console.log('\n2. Add a playlist with the remote');

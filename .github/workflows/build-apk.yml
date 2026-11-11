@@ -2,7 +2,7 @@ name: Build StreamVault TV APK
 
 on:
   push:
-    branches: [ "main", "master", "standalone-accounts" ]
+    branches: [ "main", "master", "standalone-accounts", "wip/**" ]
   pull_request:
     branches: [ "main", "master", "standalone-accounts" ]
   workflow_dispatch:
@@ -56,6 +56,11 @@ jobs:
               -storepass streamvault2026 -keypass streamvault2026 \
               -dname "CN=StreamVault TV CI, OU=TV, O=StreamVault, L=Karachi, S=Sindh, C=PK"
           fi
+
+      - name: Run the catalog import database tests (Robolectric)
+        run: |
+          chmod +x ./gradlew || true
+          ./gradlew testDebugUnitTest --tests "com.streamvault.tv.CatalogImportMergeTest" --no-daemon
 
       - name: Build Debug & Release APK
         env:
