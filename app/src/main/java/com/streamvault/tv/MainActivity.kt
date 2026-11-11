@@ -311,7 +311,10 @@ class MainActivity : Activity() {
                 ): WebResourceResponse? {
                     val url = request?.url ?: return null
                     val urlStr = url.toString()
-                    if (urlStr.contains("/api/")) {
+                    // Only the app's own local pages are answered by the on-TV router. Calls to the
+                    // cloud Worker (https://...workers.dev/api/...) must go out to the internet,
+                    // otherwise sign-up, login and the pairing code never reach the server.
+                    if (isLocalApiRequest(url.scheme, urlStr)) {
                         val path = url.path ?: ""
                         val query = url.query ?: ""
                         val fullPath = if (query.isNotEmpty()) "$path?$query" else path
