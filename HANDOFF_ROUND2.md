@@ -1,6 +1,74 @@
 # StreamVault TV — Round 2 Handoff Document (v2.8.0, versionCode 3)
 
-## 1. Overview & Current State
+## 0. Start Here for a New Chat
+
+### Repo Layout
+- **`app/`**: Android TV application (Android 11+, Leanback TV wrapper, Room SQLite, ExoPlayer).
+  - `app/src/main/assets/tv-ui.html`: Standalone TV Web UI running inside native WebView (spatial nav, profiles, video player UI).
+  - `app/src/main/java/com/streamvault/tv/data/`: Native data layer:
+    - `AppDatabase.kt`: Room database (`profiles`, `profile_media_state`, `catalog_items`, `stream_versions`, `playlists`).
+    - `AppApiRouter.kt`: Native HTTP server intercepting `/api/*` calls from `tv-ui.html` (auth gates, profile CRUD, sync, credentials).
+    - `CatalogSyncEngine.kt`: Batched 25-item catalogue sync with exponential backoff and 14-day soft delete.
+    - `PreferencesManager.kt`: Encrypted and persistent device preferences (auth token, last profile, dedupKey index).
+  - `app/src/main/java/com/streamvault/tv/MainActivity.kt`: Hardware Back key interceptor and WebView container.
+- **`cloud-sync/`**: Cloudflare Worker backend and D1 database schema.
+  - `src/worker.js`: Auth API (PBKDF2 SHA-256), Brevo v3 transactional email, TMDB proxy with D1 cache, catalog and profile delta sync.
+  - `schema.sql`: D1 relational schema (`accounts`, `profiles`, `profile_media_state`, `playlists`, `catalog_items`, `stream_versions`, `tmdb_cache`).
+- **`pc-runner/`**: Desktop test harness for headless and browser-based debugging (`server.js`, `tv-ui.html`).
+- **`tests/`**: Automated Puppeteer / Node.js test suites (`phaseA.test.mjs` through `phaseE.test.mjs`).
+- **`.toolchain/`**: Local portable Android SDK (build-tools 34.0.0, platforms android-34) and OpenJDK.
+
+### How to Run the Tests
+```bash
+# Run complete test suite (36/36 assertions across all phases):
+node tests/phaseA.test.mjs
+node tests/phaseB.test.mjs
+node tests/phaseC.test.mjs
+node tests/phaseD.test.mjs
+node tests/phaseE.test.mjs
+
+# Rebuild signed release APK:
+.\gradlew.bat assembleRelease
+
+# Verify APK signature:
+.\.toolchain\android-sdk\build-tools\34.0.0\apksigner.bat verify --verbose app\build\outputs\apk\release\app-release.apk
+```
+
+### Open Gaps
+1. **Phase E Item 3 (Rate-limiting & Resend)**: IP rate-limiting is implemented in `cloud-sync/src/worker.js`, but per-email rate limiting and a dedicated `/api/auth/resend-code` route remain to be implemented.
+2. **Phase E Item 4 (`/api/probe-versions`)**: Stream file size probing via HTTP HEAD is invoked by `tv-ui.html` and stubbed in `pc-runner/server.js`, but not yet implemented in native `AppApiRouter.kt`.
+3. **Phase E Item 5 (Compose Cleanup)**: Jetpack Compose dependencies remain in `app/build.gradle.kts` and unreferenced legacy screens remain in `app/src/main/java/com/streamvault/tv/ui/` (`StreamVaultTvApp.kt`, `StreamVaultPlayerScreen.kt`).
+4. **Physical TV Verification**: Visual D-pad smoothness on 55" display, hardware ExoPlayer video playback (MKV/MP4/HLS MPEG-TS), real-time cross-device sync between two TVs, and 60,000-title catalog memory pressure testing on physical 2 GB RAM TV hardware.
+
+### Secrets & Variables Needed
+- `BREVO_API_KEY`: Brevo v3 API key (`xkeysib-...`) for sending 6-digit verification codes.
+- `AES_SECRET`: 32+ character random key for encrypting IPTV passwords in D1.
+- `TMDB_API_KEY`: TMDB v3 API key for worker metadata enrichment and D1 caching.
+- `JWT_SECRET`: Secret for signing session tokens and verification payloads.
+- `DEV_MODE`: Set to `"true"` ONLY during local automated testing to expose `devCode`.
+
+---
+
+## 1. Quick Audit & User Questions
+
+### Question 1: Phase E Items 3, 4, 5 Status
+- **Item 3 (Rate-limit)**: Partially done; IP limits enforced for signup/login/verify in `cloud-sync/src/worker.js`, but per-email rate limiting and `/api/auth/resend-code` are not implemented.
+- **Item 4 (`/api/probe-versions`)**: Not done; invoked in `app/src/main/assets/tv-ui.html` and stubbed in `pc-runner/server.js`, but unhandled in `app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt`.
+- **Item 5 (Compose cleanup)**: Not done; Compose dependencies remain in `app/build.gradle.kts` and unused screens remain in `app/src/main/java/com/streamvault/tv/ui/` (`StreamVaultTvApp.kt`, `StreamVaultPlayerScreen.kt`).
+
+### Question 2: Phase F Verification Status Breakdown
+- **Ran & Passed (Headless Puppeteer)**: Sign-in gate & 401s (PASS), Profile CRUD & Kids/Vault privacy (PASS), Spatial nav & Back key (PASS), Cloud sync & dedup re-linking (PASS), Auth hardening & Brevo email (PASS), 960x540 zero console errors (PASS) — 36/36 tests passed.
+- **Needs TV**: Physical D-pad remote feel on 55" display, ExoPlayer hardware video playback (MKV/MP4/HLS MPEG-TS), cross-device real-time sync between two TVs, and 14-day soft-delete visual restore confirmation.
+- **Not Run**: 60,000-title catalogue memory pressure stress test on physical 2 GB RAM TV hardware.
+
+### Question 3: APK Signature & Version Code
+- **Signed**: Yes, signed with release keystore (`release.keystore`) via APK Signature Scheme v2.
+- **`apksigner` Result**: `Verifies: true`, `Verified using v2 scheme (APK Signature Scheme v2): true`, `Number of signers: 1`.
+- **`versionCode`**: `versionCode='3'`, `versionName='2.8.0'` (verified via `apksigner`, `aapt2 dump badging`, and `output-metadata.json`).
+
+---
+
+## 2. Overview & Current State
 
 - **Version**: `2.8.0` (versionCode `3`)
 - **APK Artifact**: `app/build/outputs/apk/release/app-release.apk` (~4.11 MB, R8 minified, release signed)
@@ -12,7 +80,7 @@
 
 ---
 
-## 2. Changes by Phase (Files Touched)
+## 3. Changes by Phase (Files Touched)
 
 ### Phase A — Sign-in Gate & 401 Enforcement (commit `98cc2c5`)
 - **Files Touched**:
@@ -81,7 +149,7 @@
 
 ---
 
-## 3. What Failed or Was Skipped
+## 4. What Failed or Was Skipped
 
 - **Failures**: 0 failures. All 36 automated assertions across 5 test suites passed cleanly.
 - **Skipped / Held on Owner Request**:
@@ -90,7 +158,7 @@
 
 ---
 
-## 4. Test Commands and Results
+## 5. Test Commands and Results
 
 | Test Suite | Scope | Command | Result |
 | :--- | :--- | :--- | :--- |
@@ -103,24 +171,29 @@
 
 ---
 
-## 5. Phase F Verification Matrix (TCL 55P635 TV)
+## 6. Phase F Verification Matrix (TCL 55P635 TV)
 
-| Check | Test Steps | Expected Behavior |
-| :--- | :--- | :--- |
-| **1. Sign-in Gate** | Launch app on fresh install / after clear data | Welcome overlay opens; no "Guest" button; tabs unreachable |
-| **2. Playlist Lock** | Sign in with an account having no playlists | Locked to "Add your IPTV playlist" screen |
-| **3. Profile Picker** | Sign in with account having >1 profile | "Who's watching?" picker shows profiles; remembers last selection |
-| **4. Spatial Nav (Settings)** | Navigate D-pad across all 4 quadrants in Settings | Focus reaches all buttons/inputs; never gets stuck; Left reaches sidebar |
-| **5. Spatial Nav (Profile)** | Navigate D-pad across theme chips, kids toggle, PIN fields | Focus reaches every chip and control smoothly |
-| **6. Back Key Contract** | Press Back from Content -> Sidebar -> HOME -> Exit | Content jumps to active sidebar pill -> HOME -> Exit prompt |
-| **7. Kids Mode** | Turn ON on a profile; verify titles | Only child-certified titles visible; uncertified & 18+ tab hidden |
-| **8. Master PIN** | Attempt to turn Kids Mode OFF; attempt Vault unlock | Requires 4-digit Master PIN; 5 failed attempts locks out |
-| **9. 18+ Vault Privacy** | Play/search adult title; switch profile / press TV Home | Re-locks immediately; 0 items in Continue Watching or Search History |
-| **10. Real Cloud Sync** | Click "Sync Cloud" in Settings Quadrant 2 | Shows "Just now", "All synced"; pushes and pulls updates |
+| Check | Test Steps | Expected Behavior | Status |
+| :--- | :--- | :--- | :--- |
+| **1. Sign-in Gate** | Launch app on fresh install / after clear data | Welcome overlay opens; no "Guest" button; tabs unreachable | **PASS** (automated) |
+| **2. Playlist Lock** | Sign in with an account having no playlists | Locked to "Add your IPTV playlist" screen | **PASS** (automated) |
+| **3. Profile Picker** | Sign in with account having >1 profile | "Who's watching?" picker shows profiles; remembers last selection | **PASS** (automated) |
+| **4. Spatial Nav (Settings)** | Navigate D-pad across all 4 quadrants in Settings | Focus reaches all buttons/inputs; never gets stuck; Left reaches sidebar | **PASS** (automated) |
+| **5. Spatial Nav (Profile)** | Navigate D-pad across theme chips, kids toggle, PIN fields | Focus reaches every chip and control smoothly | **PASS** (automated) |
+| **6. Back Key Contract** | Press Back from Content -> Sidebar -> HOME -> Exit | Content jumps to active sidebar pill -> HOME -> Exit prompt | **PASS** (automated) |
+| **7. Kids Mode** | Turn ON on a profile; verify titles | Only child-certified titles visible; uncertified & 18+ tab hidden | **PASS** (automated) |
+| **8. Master PIN** | Attempt to turn Kids Mode OFF; attempt Vault unlock | Requires 4-digit Master PIN; 5 failed attempts locks out | **PASS** (automated) |
+| **9. 18+ Vault Privacy** | Play/search adult title; switch profile / press TV Home | Re-locks immediately; 0 items in Continue Watching or Search History | **PASS** (automated) |
+| **10. Real Cloud Sync** | Click "Sync Cloud" in Settings Quadrant 2 | Shows "Just now", "All synced"; pushes and pulls updates | **PASS** (automated) |
+| **11. D-Pad TV Feel** | Test D-pad navigation feel with remote on 55" display | Smooth scrolling, clear focus outlines, responsive 60fps feel | **Needs TV** |
+| **12. Video Playback** | Play MKV, MP4, and HLS MPEG-TS live IPTV streams | ExoPlayer hardware decoding, audio sync, no stutter | **Needs TV** |
+| **13. Cross-Device Sync** | Perform watchlist change on TV 1, check TV 2 | Profile state updates within 10s sync window | **Needs TV** |
+| **14. 14-day Soft Delete** | Remove playlist item, observe mark-removed | Soft deleted in cloud; restores if re-added within 14 days | **Needs TV** |
+| **15. 60k Catalog Load** | Stress test catalog with 60,000 titles on 2 GB RAM TV | Memory stable, no OOM crash | **Not Run** |
 
 ---
 
-## 6. Worker Secrets & Environment Variables
+## 7. Worker Secrets & Environment Variables
 
 | Variable / Secret | Type | Required | Purpose |
 | :--- | :--- | :--- | :--- |
@@ -134,7 +207,7 @@
 
 ---
 
-## 7. Owner's Remaining Steps (Max 3 Steps)
+## 8. Owner's Remaining Steps (Max 3 Steps)
 
 1. **Install v2.8.0 Release APK to TCL TV**:
    ```bash
