@@ -1326,7 +1326,8 @@ class StreamVaultDatabase(context: Context) :
         searchQuery: String = "",
         profileId: String = "",
         isKids: Boolean = false,
-        group: String = "normal"
+        group: String = "normal",
+        keywords: List<String> = emptyList()
     ): List<LiveChannel> {
         // Kids mode: Live TV is hidden completely.
         if (isKids) return emptyList()
@@ -1350,8 +1351,15 @@ class StreamVaultDatabase(context: Context) :
         }
 
         if (searchQuery.isNotBlank()) {
-            clauses.add("lc.name LIKE ?")
+            clauses.add("(lc.name LIKE ? OR lc.category_name LIKE ?)")
             args.add("%$searchQuery%")
+            args.add("%$searchQuery%")
+        }
+
+        // Quick-tab keywords (Sports, News, Kids ...) match the provider's category name
+        if (keywords.isNotEmpty()) {
+            clauses.add("(" + keywords.joinToString(" OR ") { "lower(lc.category_name) LIKE ?" } + ")")
+            keywords.forEach { args.add("%$it%") }
         }
 
         // Adult and Extras live channels only ever appear in their own unlocked tab, never in normal Live TV.

@@ -4291,14 +4291,102 @@ async function init() {
 }
 
 
+// ===== 18+ ADULT and EXTRAS: separate locked areas, each with Movies / Series / Live TV panels =====
+const VAULT_IDLE_MS = 30 * 60 * 1000;      // auto-lock after 30 minutes without a button press
+let vaultIdleTimer = null;
+const vaultPanelState = { VAULT_18: 'MOVIES', EXTRAS: 'MOVIES' };
+
+function isVaultTab(tab) { return tab === 'VAULT_18' || tab === 'EXTRAS'; }
+function vaultMediaType(tab) {
+  if (!isVaultTab(tab)) return null;
+  const p = vaultPanelState[tab];
+  return p === 'MOVIES' ? 'MOVIE' : p === 'SERIES' ? 'SERIES' : null;
+}
+
+function resetVaultIdleTimer() {
+  if (vaultIdleTimer) { clearTimeout(vaultIdleTimer); vaultIdleTimer = null; }
+  const pc = appStatus && appStatus.parentalControl;
+  if (pc && (pc.showAdult || pc.showExtras)) {
+    vaultIdleTimer = setTimeout(() => { window.lockParentalControls(); }, VAULT_IDLE_MS);
+  }
+}
+['keydown', 'click', 'mousemove'].forEach((ev) => document.addEventListener(ev, () => {
+  if (vaultIdleTimer) resetVaultIdleTimer();
+}, true));
+
+// Lock just one area ('adult' or 'extras'). quiet = do not navigate (used when the user is already leaving).
+async function lockVault(target, quiet = false) {
+  // Update the page state first so any redraw that follows is already correct
+  if (appStatus && appStatus.parentalControl) {
+    if (target === 'adult') { appStatus.parentalControl.showAdult = false; }
+    if (target === 'extras') { appStatus.parentalControl.showExtras = false; }
+    appStatus.parentalControl.isLocked = !appStatus.parentalControl.showAdult;
+  }
+  try {
+    await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'lock', target })
+    });
+  } catch (_) {}
+  if (!quiet) {
+    renderSidebar();
+    if ((target === 'adult' && currentTab === 'VAULT_18') || (target === 'extras' && currentTab === 'EXTRAS')) {
+      navigateToTab('HOME');
+    }
+  }
+  resetVaultIdleTimer();
+  updateParentalStatusInSettings();
+}
+
+function vaultPanelBarHtml(tab) {
+  const cur = vaultPanelState[tab];
+  const mk = (id, label) => `<button tabindex="0" id="vaultPanel${id}" class="filter-pill-btn tv-focusable ${cur === id ? 'active' : ''}" style="flex-shrink:0;${cur === id ? 'background:rgba(139,92,246,0.35);border-color:#8B5CF6;color:#fff;' : ''}" onclick="selectVaultPanel('${id}')">${label}</button>`;
+  return `<div id="vaultPanelBar" class="filter-pill-row" style="margin:0 0 10px 0;gap:8px;">${mk('MOVIES', 'Movies')}${mk('SERIES', 'Series')}${mk('LIVE', 'Live TV')}</div>`;
+}
+
+function injectVaultPanelBar(vp) {
+  if (!vp || !isVaultTab(currentTab)) return;
+  const old = document.getElementById('vaultPanelBar');
+  if (old) old.remove();
+  vp.insertAdjacentHTML('afterbegin', vaultPanelBarHtml(currentTab));
+}
+
+function openVaultPanel(vp, tab, focusFirstCard) {
+  if (vaultPanelState[tab] === 'LIVE') {
+    currentLiveTab = 'ALL';
+    currentLiveSearch = '';
+    loadLiveTv(vp);
+  } else {
+    loadSuperFilter(vp, tab === 'VAULT_18' ? '18+ Vault' : 'Extras');
+    if (focusFirstCard) {
+      setTimeout(() => {
+        const firstCard = document.querySelector('#filterResultsGrid .poster-card');
+        if (firstCard) { firstCard.focus(); playNavSound(); }
+      }, 400);
+    }
+  }
+}
+
+function selectVaultPanel(panel) {
+  playNavSound();
+  if (!isVaultTab(currentTab)) return;
+  vaultPanelState[currentTab] = panel;
+  resetFilterState();
+  const vp = document.getElementById('mainViewport');
+  openVaultPanel(vp, currentTab, false);
+  setTimeout(() => { const b = document.getElementById('vaultPanel' + panel); if (b) b.focus(); }, 60);
+}
+
 let previousTab = 'HOME';
 
 function renderSidebar(lockedToPlaylist = false) {
   const container = document.getElementById('navList');
   if (!container) return;
   const isLocked = lockedToPlaylist || isAppLockedForPlaylist();
-  const items = [...NAV_ITEMS];
   const isKids = Boolean(currentActiveProfile && currentActiveProfile.isKids);
+  // Kids mode: Live TV is hidden completely
+  const items = NAV_ITEMS.filter((it) => !(isKids && it.id === 'LIVE_TV'));
   const isAdultUnlocked = !isKids && appStatus?.parentalControl && !appStatus.parentalControl.isLocked && appStatus.parentalControl.showAdult;
   if (isAdultUnlocked) {
     items.push({
@@ -4307,6 +4395,15 @@ function renderSidebar(lockedToPlaylist = false) {
       svg: `<svg viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1.5" fill="#F59E0B"/></svg>`
     });
   }
+  const isExtrasUnlocked = !isKids && Boolean(appStatus?.parentalControl && appStatus.parentalControl.showExtras);
+  if (isExtrasUnlocked) {
+    items.push({
+      id: 'EXTRAS',
+      label: 'Extras',
+      svg: `<svg viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>`
+    });
+  }
+  resetVaultIdleTimer();
   container.innerHTML = items.map((item) => {
     const disabledAttr = isLocked ? 'style="opacity:0.35;pointer-events:none;"' : '';
     return `
@@ -4357,8 +4454,15 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
   if (currentTab !== 'SETTINGS' && currentTab !== 'PROFILE' && (tabId === 'SETTINGS' || tabId === 'PROFILE')) {
     previousTab = currentTab;
   }
+  const leavingTab = currentTab;
   currentTab = tabId;
   lastContentFocusTarget = null;
+  // Leaving the 18+ or Extras area locks it again
+  if (leavingTab !== tabId) {
+    if (leavingTab === 'VAULT_18') lockVault('adult', true);
+    if (leavingTab === 'EXTRAS') lockVault('extras', true);
+    if (tabId === 'VAULT_18' || tabId === 'EXTRAS') vaultPanelState[tabId] = 'MOVIES';
+  }
 
   if (customFilter) {
     filterState = {
@@ -4380,7 +4484,7 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     // Clean slate on tab switch per user decision: clear query and reset filter dropdowns
     filterState = {
       searchQuery: '',
-      mediaTypeFilter: tabId === 'MOVIES' ? 'MOVIE' : tabId === 'SERIES' ? 'SERIES' : null,
+      mediaTypeFilter: tabId === 'MOVIES' ? 'MOVIE' : tabId === 'SERIES' ? 'SERIES' : vaultMediaType(tabId),
       categoryFilter: null,
       yearFilter: null,
       includedGenres: [],
@@ -4447,17 +4551,27 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     }
     const isAdultUnlocked = appStatus?.parentalControl && !appStatus.parentalControl.isLocked && appStatus.parentalControl.showAdult;
     if (!isAdultUnlocked) {
-      openParentalPinModal();
+      openParentalPinModal({ action: 'unlock', target: 'adult' });
       return;
     }
-    loadSuperFilter(vp, '18+ Vault');
-    if (focusFirstCard) {
-      setTimeout(() => {
-        const firstCard = document.querySelector('#filterResultsGrid .poster-card');
-        if (firstCard) { firstCard.focus(); playNavSound(); }
-      }, 400);
+    openVaultPanel(vp, 'VAULT_18', focusFirstCard);
+  } else if (tabId === 'EXTRAS') {
+    if (currentActiveProfile && currentActiveProfile.isKids) {
+      showToast('Extras is not available in Kids Mode');
+      navigateToTab('HOME');
+      return;
     }
+    if (!(appStatus?.parentalControl && appStatus.parentalControl.showExtras)) {
+      navigateToTab('HOME');
+      return;
+    }
+    openVaultPanel(vp, 'EXTRAS', focusFirstCard);
   } else if (tabId === 'LIVE_TV') {
+    if (currentActiveProfile && currentActiveProfile.isKids) {
+      showToast('Live TV is not available in Kids Mode');
+      navigateToTab('HOME');
+      return;
+    }
     await loadLiveTv(vp);
   } else if (tabId === 'WATCHLIST') {
     await loadWatchlist(vp);
@@ -4903,7 +5017,7 @@ function selectFilterRating(r) {
 function selectFilterSort(s) {
   filterState.sortBy = s;
   closeAllDropdowns();
-  loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
+  loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'EXTRAS' ? 'Extras' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
   focusFilterPill('dropSort');
 }
 
@@ -4923,7 +5037,7 @@ function selectFilterYear(yr) {
     filterState.decade = yr;
   }
   closeAllDropdowns();
-  loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
+  loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'EXTRAS' ? 'Extras' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
   focusFilterPill((currentTab === 'VAULT_18' ? 'dropAdultYear' : 'dropYear'));
 }
 
@@ -4934,7 +5048,7 @@ async function lockVaultAndReturnHome() {
 }
 
 function resetFilterState() {
-  const currentTabMediaType = (currentTab === 'SERIES') ? 'SERIES' : (currentTab === 'MOVIES') ? 'MOVIE' : null;
+  const currentTabMediaType = (currentTab === 'SERIES') ? 'SERIES' : (currentTab === 'MOVIES') ? 'MOVIE' : vaultMediaType(currentTab);
   filterState = {
     searchQuery: '',
     mediaTypeFilter: currentTabMediaType,
@@ -4951,7 +5065,7 @@ function resetFilterState() {
     limit: 120
   };
   closeAllDropdowns();
-  loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
+  loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'EXTRAS' ? 'Extras' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
 }
 
 function onSearchFilterFocus() {
@@ -5090,7 +5204,7 @@ async function executeFilterQuery(append = false) {
     const res = await fetch('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...filterState, adultOnly: currentTab === 'VAULT_18', limit: 120, offset: currentFilterOffset })
+      body: JSON.stringify({ ...filterState, adultOnly: currentTab === 'VAULT_18', extrasOnly: currentTab === 'EXTRAS', limit: 120, offset: currentFilterOffset })
     });
     const data = await res.json();
     const items = data.items || [];
@@ -5217,7 +5331,8 @@ async function fetchLiveChannels(rebuildTabs = true) {
   const grid = document.getElementById('liveGrid');
   if (!grid) return;
 
-  const url = `/api/live?tab=${encodeURIComponent(currentLiveTab)}&q=${encodeURIComponent(currentLiveSearch)}`;
+  const liveGroup = currentTab === 'VAULT_18' ? 'adult' : currentTab === 'EXTRAS' ? 'extras' : 'normal';
+  const url = `/api/live?tab=${encodeURIComponent(currentLiveTab)}&q=${encodeURIComponent(currentLiveSearch)}&group=${liveGroup}`;
   try {
     const res = await fetch(url);
     const data = await res.json();
@@ -5501,13 +5616,22 @@ async function loadProfile(vp) {
               </div>
             </div>
 
+            ${(currentActiveProfile && currentActiveProfile.isKids) ? `
+            <div style="padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);font-size:10px;color:#9CA3AF;">Kids Mode is on: 18+ and Extras are not available.</div>` : `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
-                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Adult Vault Session</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Locked by default; auto-locks on standby</div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">18+ Adult</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Needs Master PIN. Locks again when you leave it, after 30 min, or on standby</div>
               </div>
               <button tabindex="0" id="btnToggleParentalLock" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="toggleParentalLockSession()">Unlock</button>
             </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Extras</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Naats, dance, clips, cartoon packs, WWE. Same rules as 18+</div>
+              </div>
+              <button tabindex="0" id="btnToggleExtrasLock" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="toggleExtrasLockSession()">Unlock</button>
+            </div>`}
 
             <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
@@ -6879,6 +7003,10 @@ function toggleProfileKidsMode() {
     // Currently OFF -> Turning ON does NOT require PIN!
     currentActiveProfile.isKids = true;
     updateKidsModeToggleBtn(true);
+    // Turning Kids Mode on closes 18+ and Extras straight away
+    lockVault('adult', true);
+    lockVault('extras', true);
+    renderSidebar();
     showToast('Kids Mode enabled');
   }
 }
@@ -6962,6 +7090,7 @@ async function switchUserProfile(profileId) {
   if (appStatus && appStatus.parentalControl) {
     appStatus.parentalControl.isLocked = true;
     appStatus.parentalControl.showAdult = false;
+    appStatus.parentalControl.showExtras = false;
   }
   
   if (currentActiveProfile && currentActiveProfile.theme) {
@@ -6975,7 +7104,7 @@ async function switchUserProfile(profileId) {
   if (vp && currentTab === 'PROFILE') {
     await loadProfile(vp);
   } else {
-    await navigateToTab(currentTab === 'VAULT_18' ? 'HOME' : currentTab);
+    await navigateToTab((currentTab === 'VAULT_18' || currentTab === 'EXTRAS') ? 'HOME' : currentTab);
   }
 }
 
@@ -8069,14 +8198,14 @@ async function fetchSearchHistory() {
 }
 
 async function saveSearchQuery(q) {
-  if (currentTab === 'VAULT_18') return; // Strictly never record adult search queries!
+  if (currentTab === 'VAULT_18' || currentTab === 'EXTRAS') return; // Strictly never record adult / extras search queries!
   const query = (q || '').trim();
   if (!query || query.length < 2) return;
   try {
     await fetch('/api/search-history', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, isVault: currentTab === 'VAULT_18' })
+      body: JSON.stringify({ query, isVault: currentTab === 'VAULT_18' || currentTab === 'EXTRAS' })
     });
     cachedSearchHistory = [query, ...cachedSearchHistory.filter(h => h.toLowerCase() !== query.toLowerCase())].slice(0, 20);
   } catch (e) {}
@@ -8323,22 +8452,27 @@ async function updateParentalStatusInSettings() {
       body: JSON.stringify({ action: 'status' })
     });
     const d = await res.json();
-    const lbl = document.getElementById('parentalSessionStatusText');
-    const btn = document.getElementById('btnToggleParentalLock');
-    if (btn) {
-      if (d.isLocked) {
-        if (lbl) lbl.innerHTML = '';
-        btn.innerText = 'Unlock';
-      } else {
-        if (lbl) lbl.innerHTML = '';
-        btn.innerText = 'Lock';
-      }
+    const adultOpen = Boolean(d.showAdult);
+    const extrasOpen = Boolean(d.showExtras);
+    const bA = document.getElementById('btnToggleParentalLock');
+    const bE = document.getElementById('btnToggleExtrasLock');
+    if (bA) bA.innerText = adultOpen ? 'Lock' : 'Unlock';
+    if (bE) bE.innerText = extrasOpen ? 'Lock' : 'Unlock';
+    if (appStatus && appStatus.parentalControl) {
+      appStatus.parentalControl.showAdult = adultOpen;
+      appStatus.parentalControl.showExtras = extrasOpen;
+      appStatus.parentalControl.isLocked = !adultOpen;
     }
   } catch (e) {}
 }
 
-async function toggleParentalLockSession() {
+// One switch per area: target is 'adult' or 'extras'. Unlocking needs the Master PIN; locking does not.
+async function toggleVaultSession(target) {
   playNavSound();
+  if (currentActiveProfile && currentActiveProfile.isKids) {
+    showToast('Not available in Kids Mode');
+    return;
+  }
   try {
     const res = await fetch('/api/parental-pin', {
       method: 'POST',
@@ -8346,26 +8480,17 @@ async function toggleParentalLockSession() {
       body: JSON.stringify({ action: 'status' })
     });
     const d = await res.json();
-    if (d.isLocked) {
-      openParentalPinModal();
+    const open = target === 'extras' ? d.showExtras : d.showAdult;
+    if (open) {
+      await lockVault(target);
     } else {
-      await fetch('/api/parental-pin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'lock' })
-      });
-      if (appStatus && appStatus.parentalControl) {
-        appStatus.parentalControl.isLocked = true;
-        appStatus.parentalControl.showAdult = false;
-      }
-      renderSidebar();
-      updateParentalStatusInSettings();
-      if (currentTab === 'VAULT_18') {
-        navigateToTab('HOME');
-      }
+      openParentalPinModal({ action: 'unlock', target });
     }
   } catch (e) {}
 }
+
+async function toggleParentalLockSession() { return toggleVaultSession('adult'); }
+async function toggleExtrasLockSession() { return toggleVaultSession('extras'); }
 
 window.lockParentalControls = async function() {
   try {
@@ -8378,9 +8503,10 @@ window.lockParentalControls = async function() {
     if (appStatus && appStatus.parentalControl) {
       appStatus.parentalControl.isLocked = true;
       appStatus.parentalControl.showAdult = false;
+    appStatus.parentalControl.showExtras = false;
     }
     renderSidebar();
-    if (currentTab === 'VAULT_18') {
+    if (currentTab === 'VAULT_18' || currentTab === 'EXTRAS') {
       navigateToTab('HOME');
     } else if (currentTab === 'LIVE_TV' || currentTab === 'SEARCH') {
       navigateToTab(currentTab);
@@ -8430,7 +8556,7 @@ async function openParentalPinModal(context = { action: 'unlock' }) {
     if (isCreatingPinMode) {
       sub.innerText = 'Set a 4-digit Master PIN to protect adult content & settings';
     } else {
-      sub.innerText = context.action === 'disable_kids' ? 'Enter Master PIN to disable Kids Mode' : 'Enter 4-digit Master PIN to unlock 18+ Vault';
+      sub.innerText = context.action === 'disable_kids' ? 'Enter Master PIN to disable Kids Mode' : ('Enter 4-digit Master PIN to unlock ' + (context.target === 'extras' ? 'Extras' : '18+ Vault'));
     }
   }
   document.getElementById('pinErrorMessage').innerText = '';
@@ -8504,11 +8630,11 @@ async function verifyParentalPin() {
           await fetch('/api/parental-pin', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'unlock', pin: pinUsed })
+            body: JSON.stringify({ action: 'unlock', pin: pinUsed, target: (parentalPinContext && parentalPinContext.target) || 'adult' })
           });
           if (appStatus && appStatus.parentalControl) {
-            appStatus.parentalControl.isLocked = false;
-            appStatus.parentalControl.showAdult = true;
+            if (parentalPinContext && parentalPinContext.target === 'extras') { appStatus.parentalControl.showExtras = true; }
+            else { appStatus.parentalControl.isLocked = false; appStatus.parentalControl.showAdult = true; }
           }
           renderSidebar();
           if (currentTab === 'SETTINGS' || currentTab === 'PROFILE') {
@@ -8529,7 +8655,7 @@ async function verifyParentalPin() {
     const res = await fetch('/api/parental-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: actionParam, pin: enteredPin })
+      body: JSON.stringify({ action: actionParam, pin: enteredPin, target: (parentalPinContext && parentalPinContext.target) || 'adult' })
     });
     const d = await res.json();
     if (d.success || d.ok) {
@@ -8541,8 +8667,8 @@ async function verifyParentalPin() {
         }
       } else {
         if (appStatus && appStatus.parentalControl) {
-          appStatus.parentalControl.isLocked = false;
-          appStatus.parentalControl.showAdult = true;
+          if (parentalPinContext && parentalPinContext.target === 'extras') { appStatus.parentalControl.showExtras = true; }
+          else { appStatus.parentalControl.isLocked = false; appStatus.parentalControl.showAdult = true; }
         }
         renderSidebar();
         if (currentTab === 'SETTINGS' || currentTab === 'PROFILE') {
@@ -10254,6 +10380,22 @@ function escapeHtml(str) {
 }
 
 window.onload = init;
+
+// Keep the Movies / Series / Live TV panel bar on top of every re-render inside the 18+ and Extras tabs
+(function () {
+  const origSuper = loadSuperFilter;
+  loadSuperFilter = function (vp, ...rest) {
+    const r = origSuper.call(this, vp, ...rest);
+    injectVaultPanelBar(vp);
+    return r;
+  };
+  const origLive = loadLiveTv;
+  loadLiveTv = function (vp, ...rest) {
+    const r = origLive.call(this, vp, ...rest);
+    injectVaultPanelBar(vp);
+    return r;
+  };
+})();
 </script>
 </body>
 </html>

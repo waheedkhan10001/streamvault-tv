@@ -646,8 +646,11 @@ class AppApiRouter(
 
     private fun handleGetLive(queryParams: Map<String, String>): String {
         val activeProf = getActiveUserProfile()
-        val cat = queryParams["category"]
-        val search = queryParams["search"] ?: ""
+        // The screen sends tab=<id>&q=<text>; older callers used category= and search=
+        val tab = (queryParams["tab"] ?: "ALL").uppercase()
+        val search = (queryParams["q"] ?: queryParams["search"] ?: "").trim()
+        val legacyCat = queryParams["category"]
+
         // Live TV: hidden completely in Kids mode; adult / extras channels only in their own unlocked tab.
         val group = when {
             activeProf.isKids -> "normal"
@@ -655,8 +658,37 @@ class AppApiRouter(
             queryParams["group"] == "extras" && prefs.isExtrasUnlocked() -> "extras"
             else -> "normal"
         }
-        val channels = if (activeProf.isKids) emptyList() else db.getLiveChannels(categoryName = cat, searchQuery = search, profileId = activeProf.id, isKids = false, group = group)
-        val categories = if (activeProf.isKids) listOf("All Channels") else db.getLiveCategories(group)
+
+        val tabKeywords = mapOf(
+            "SPORTS" to listOf("sport", "cricket", "football", "soccer", "golf", "wwe", "ufc", "f1", "racing", "tennis", "nba", "espn"),
+            "NEWS" to listOf("news"),
+            "MOVIES" to listOf("cinema", "movie", "film", "hbo", "box office"),
+            "ENTERTAINMENT" to listOf("entertain", "drama", "series", "shows", "comedy"),
+            "KIDS" to listOf("kids", "cartoon", "disney", "nick", "pogo", "anime"),
+            "PAKISTAN" to listOf("pak", "urdu"),
+            "INDIA" to listOf("india", "hindi", "ind |", "in |"),
+            "UK" to listOf("uk"),
+            "US" to listOf("usa", "us |")
+        )
+
+        val channels = if (activeProf.isKids) emptyList() else db.getLiveChannels(
+            categoryName = if (tab == "FAVORITES") "★ Favorites" else legacyCat,
+            searchQuery = search,
+            profileId = activeProf.id,
+            isKids = false,
+            group = group,
+            keywords = if (group == "normal") tabKeywords[tab] ?: emptyList() else emptyList()
+        )
+
+        // Favourites are never kept for adult / extras channels
+        val tabsArr = JSONArray()
+        tabsArr.put(JSONObject().put("id", "ALL").put("label", "All"))
+        if (group == "normal") {
+            tabsArr.put(JSONObject().put("id", "FAVORITES").put("label", "★ Favorites"))
+            listOf("SPORTS" to "Sports", "NEWS" to "News", "MOVIES" to "Movies", "ENTERTAINMENT" to "Entertainment",
+                "KIDS" to "Kids", "PAKISTAN" to "Pakistan", "INDIA" to "India", "UK" to "UK", "US" to "US")
+                .forEach { tabsArr.put(JSONObject().put("id", it.first).put("label", it.second)) }
+        }
 
         val chArr = JSONArray()
         for (ch in channels) {
@@ -665,15 +697,17 @@ class AppApiRouter(
                 put("name", ch.name)
                 put("logoUrl", ch.logoUrl)
                 put("categoryName", ch.categoryName)
-                put("isFavorite", ch.isFavorite)
+                put("isFavorite", ch.isFavorite && group == "normal")
                 put("currentProgram", ch.currentProgramTitle)
             })
         }
 
         return JSONObject().apply {
             put("ok", true)
+            put("tabs", tabsArr)
+            put("currentTab", tab)
             put("channels", chArr)
-            put("categories", JSONArray(categories))
+            put("matchedCount", channels.size)
         }.toString()
     }
 
