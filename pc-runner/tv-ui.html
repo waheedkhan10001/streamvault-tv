@@ -107,16 +107,21 @@
     background: linear-gradient(180deg, #FFFFFF 20%, #D1D5DB 100%);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   }
-  .nav-group { display: flex; flex-direction: column; width: 100%; }
+  /* The tab list always fits: rows squeeze (padding / font / icon) when there are many tabs. Profile + Settings stay pinned. */
+  .sidebar > div:first-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* 10px inset keeps the highlighted tab's left line off the very edge of the screen (TV overscan can cut it) */
+  .nav-group { display: flex; flex-direction: column; width: 100%; flex: 1; min-height: 0; overflow: hidden; padding: 0 10px; }
   .nav-btn {
-    width: 100%; display: flex; align-items: center; gap: 14px;
-    padding: 13px 22px; background: transparent; border: none;
+    width: 100%; display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    padding: var(--nav-pad, 13px) 14px; background: transparent; border: none; border-radius: 8px;
     border-left: 3.5px solid transparent; color: var(--muted);
-    font-size: 14px; font-weight: 600; text-align: left;
+    font-size: var(--nav-font, 14px); font-weight: 600; text-align: left;
     transition: all 0.12s ease; cursor: pointer;
     outline: none;
   }
-  .nav-btn svg { width: 18px; height: 18px; stroke-width: 2; flex-shrink: 0; }
+  @media (max-height: 480px) { .brand-header { padding-bottom: 8px !important; margin-bottom: 4px !important; } .nav-btn { gap: 8px; } }
+  .sidebar.fitting .nav-btn, .sidebar.fitting .nav-btn * { transition: none !important; }
+  .nav-btn svg { width: var(--nav-icon, 18px); height: var(--nav-icon, 18px); stroke-width: 2; flex-shrink: 0; }
   .nav-btn:hover { background: rgba(255, 255, 255, 0.04); color: #fff; }
   .nav-btn.active {
     background: linear-gradient(90deg, rgba(124, 58, 237, 0.18) 0%, rgba(229, 9, 20, 0.01) 100%);
@@ -4463,6 +4468,29 @@ function selectVaultPanel(panel) {
 
 let previousTab = 'HOME';
 
+let sidebarSignature = '';
+// Squeezes the tab rows until every tab is visible (no scrolling): Profile and Settings stay pinned at the bottom.
+function fitSidebar() {
+  const sb = document.querySelector('.sidebar');
+  const nav = document.getElementById('navList');
+  if (!sb || !nav || !nav.children.length) return;
+  if (nav.clientHeight === 0) { sb.dataset.fitted = ''; return; }   // sidebar hidden right now: measure when it shows
+  const levels = [[13, 14, 18], [11, 13.5, 17], [9, 13, 16], [7, 12.5, 15], [5, 12, 14], [3, 11.5, 13], [2, 11, 12], [1, 10, 11], [0, 9, 10]];
+  sb.classList.add('fitting');   // measure without the slide animation, or the sizes read stale
+  for (const [pad, font, icon] of levels) {
+    sb.style.setProperty('--nav-pad', pad + 'px');
+    sb.style.setProperty('--nav-font', font + 'px');
+    sb.style.setProperty('--nav-icon', icon + 'px');
+    if (nav.scrollHeight <= nav.clientHeight + 1) break;
+  }
+  void nav.offsetHeight;
+  sb.classList.remove('fitting');
+  sb.dataset.fitted = '1';
+}
+window.addEventListener('resize', () => { try { fitSidebar(); } catch (_) {} });
+// the list's available height can change after it is built (profile pill appears, fonts load): refit then
+try { new ResizeObserver(() => { try { fitSidebar(); } catch (_) {} }).observe(document.getElementById('navList')); } catch (_) {}
+
 function renderSidebar(lockedToPlaylist = false) {
   const container = document.getElementById('navList');
   if (!container) return;
@@ -4487,9 +4515,17 @@ function renderSidebar(lockedToPlaylist = false) {
     });
   }
   resetVaultIdleTimer();
-  container.innerHTML = items.map((item) => {
-    const disabledAttr = isLocked ? 'style="opacity:0.35;pointer-events:none;"' : '';
-    return `
+  // Same tabs as last time: only move the highlight (rebuilding the list on every tab switch made it flicker)
+  const sig = items.map((it) => it.id).join(',') + '|' + (isLocked ? 'L' : 'U');
+  if (sig === sidebarSignature && container.children.length) {
+    container.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === currentTab));
+    const sbEl = document.querySelector('.sidebar');
+    if (sbEl && sbEl.dataset.fitted !== '1') fitSidebar();
+  } else {
+    sidebarSignature = sig;
+    container.innerHTML = items.map((item) => {
+      const disabledAttr = isLocked ? 'style="opacity:0.35;pointer-events:none;"' : '';
+      return `
       <div tabindex="${isLocked ? '-1' : '0'}" class="nav-btn tv-focusable ${currentTab === item.id ? 'active' : ''}"
            data-tab="${item.id}"
            ${disabledAttr}
@@ -4500,7 +4536,9 @@ function renderSidebar(lockedToPlaylist = false) {
         <span class="nav-label">${item.label}</span>
       </div>
     `;
-  }).join('');
+    }).join('');
+    fitSidebar();
+  }
 
   const userPill = document.getElementById('sidebarUserProfilePill') || document.querySelector('.user-profile-pill');
   if (userPill) {
