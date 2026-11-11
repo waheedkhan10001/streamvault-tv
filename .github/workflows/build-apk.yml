@@ -57,10 +57,10 @@ jobs:
               -dname "CN=StreamVault TV CI, OU=TV, O=StreamVault, L=Karachi, S=Sindh, C=PK"
           fi
 
-      - name: Run the catalog import database tests (Robolectric)
+      - name: Run the Kotlin unit tests (catalog import, More Like This scoring)
         run: |
           chmod +x ./gradlew || true
-          ./gradlew testDebugUnitTest --tests "com.streamvault.tv.CatalogImportMergeTest" --no-daemon
+          ./gradlew testDebugUnitTest --tests "com.streamvault.tv.*" --no-daemon
 
       - name: Build Debug & Release APK
         env:
