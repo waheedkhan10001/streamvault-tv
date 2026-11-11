@@ -66,7 +66,7 @@ const typePin = async (page, pin) => { for (const d of pin) { await page.evaluat
 
 async function run() {
   console.log('=== StreamVault TV — 18+ Adult and Extras areas ===\n');
-  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
   const page = await newApp(browser);
 
   console.log('1. Invisible until unlocked');

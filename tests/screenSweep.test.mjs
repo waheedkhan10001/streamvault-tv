@@ -111,7 +111,7 @@ const reachability = (page, scopeSel) => page.evaluate((scopeSel) => {
 
 async function run() {
   console.log('=== StreamVault TV — Whole-app remote-control sweep ===\n');
-  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
 
   // ---- Who's watching picker ----
   console.log('1. "Who\'s watching?" picker');

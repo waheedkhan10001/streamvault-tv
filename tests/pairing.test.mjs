@@ -115,7 +115,7 @@ const waitView = (page, v) => page.waitForFunction(v => !document.getElementById
 
 async function run() {
   console.log('=== StreamVault — TV <-> phone linking, end to end ===\n');
-  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
 
   console.log('1. Brand-new user: scan QR -> create account -> e-mail code -> TV signs in');
   {

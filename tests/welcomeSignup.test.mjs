@@ -83,7 +83,7 @@ async function walk(page, label, steps) {
 
 async function run() {
   console.log('=== StreamVault TV — Welcome / Sign-up remote-control tests ===\n');
-  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
 
   // ---------- 1. Welcome screen: pairing code + QR ----------
   console.log('1. Welcome screen');

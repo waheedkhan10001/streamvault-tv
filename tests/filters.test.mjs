@@ -11,7 +11,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function run() {
   console.log('=== StreamVault TV — Filters, paging and More Like This ===\n');
-  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 960, height: 540 });
   const errors = []; page.on('pageerror', e => errors.push(e.message));

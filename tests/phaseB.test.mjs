@@ -10,7 +10,7 @@ async function runPhaseBTests() {
   const browser = await puppeteer.launch({
     executablePath: CHROME_PATH,
     headless: 'new',
-    args: ['--allow-file-access-from-files', '--no-sandbox']
+    args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND']
   });
 
   const page = await browser.newPage();

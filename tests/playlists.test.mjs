@@ -91,7 +91,7 @@ async function run() {
   const su = await callW('POST', '/api/auth/signup', { email: 'pl@example.com', password: 'Secret123!' });
   const vf = await callW('POST', '/api/auth/verify-code', { email: 'pl@example.com', code: su.json.devCode });
   const token = vf.json.token;
-  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
 
   console.log('1. No playlist yet: Refresh Now says so honestly');
   let tv = await newTv(browser, token, 'pl@example.com');

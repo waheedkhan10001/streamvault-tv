@@ -64,7 +64,7 @@ const navTabs = page => page.evaluate(() => [...document.querySelectorAll('.nav-
 const go = async (page, tab) => { await page.evaluate(t => window.navigateToTab(t), tab); await sleep(700); };
 async function run() {
   console.log('=== StreamVault TV — Latest added ===\n');
-  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 'new', args: ['--allow-file-access-from-files', '--no-sandbox', '--host-resolver-rules=MAP *.workers.dev ~NOTFOUND'] });
   const page = await newApp(browser);
   const tabs = await navTabs(page);
   check('"New" tab is in the sidebar, right after Home', tabs[0] === 'HOME' && tabs[1] === 'LATEST', tabs.join());
