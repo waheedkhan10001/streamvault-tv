@@ -20,9 +20,9 @@ android {
             val keystoreFile = project.rootProject.file("release.keystore")
             if (keystoreFile.exists()) {
                 storeFile = keystoreFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "streamvault2026"
-                keyAlias = System.getenv("KEY_ALIAS") ?: "streamvault"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "streamvault2026"
+                storePassword = System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: "streamvault2026"
+                keyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "streamvault"
+                keyPassword = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: "streamvault2026"
             } else {
                 val debugKeystore = signingConfigs.getByName("debug")
                 storeFile = debugKeystore.storeFile
