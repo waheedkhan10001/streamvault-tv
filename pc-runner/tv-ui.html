@@ -23,31 +23,61 @@
     --theme-glow: rgba(139, 92, 246, 0.45);
     --theme-border: #A78BFA;
     --theme-badge-grad: linear-gradient(135deg, #7C3AED, #4C1D95);
+    --theme-accent-rgb: 139, 92, 246;
+    --theme-border-rgb: 167, 139, 250;
+    --theme-light: #C4B5FD;
+    --theme-pale: #DDD6FE;
+    --theme-deep: #7C3AED;
+    --theme-deep-rgb: 124, 58, 237;
+    --theme-darkest: #4C1D95;
   }
   body.theme-netflix {
     --red: #E50914;
     --red-glow: rgba(229, 9, 20, 0.45);
     --theme-accent: #E50914;
+    --theme-accent-rgb: 229, 9, 20;
     --theme-glow: rgba(229, 9, 20, 0.45);
     --theme-border: #EF4444;
+    --theme-border-rgb: 239, 68, 68;
+    --theme-light: #FCA5A5;
+    --theme-pale: #FEE2E2;
+    --theme-deep: #E50914;
+    --theme-deep-rgb: 229, 9, 20;
+    --theme-darkest: #991B1B;
     --theme-badge-grad: linear-gradient(135deg, #E50914, #991B1B);
   }
   body.theme-disney {
     --red: #0063E5;
     --red-glow: rgba(0, 99, 229, 0.45);
     --theme-accent: #0063E5;
+    --theme-accent-rgb: 0, 99, 229;
     --theme-glow: rgba(0, 99, 229, 0.45);
     --theme-border: #60A5FA;
+    --theme-border-rgb: 96, 165, 250;
+    --theme-light: #BFDBFE;
+    --theme-pale: #DBEAFE;
+    --theme-deep: #0063E5;
+    --theme-deep-rgb: 0, 99, 229;
+    --theme-darkest: #1E3A8A;
     --theme-badge-grad: linear-gradient(135deg, #0063E5, #1E3A8A);
   }
   body.theme-prime {
     --red: #00A8E1;
     --red-glow: rgba(0, 168, 225, 0.45);
     --theme-accent: #00A8E1;
+    --theme-accent-rgb: 0, 168, 225;
     --theme-glow: rgba(0, 168, 225, 0.45);
     --theme-border: #38BDF8;
+    --theme-border-rgb: 56, 189, 248;
+    --theme-light: #BAE6FD;
+    --theme-pale: #E0F2FE;
+    --theme-deep: #00A8E1;
+    --theme-deep-rgb: 0, 168, 225;
+    --theme-darkest: #0369A1;
     --theme-badge-grad: linear-gradient(135deg, #00A8E1, #0369A1);
   }
+  /* SVG icons keep their colour in an attribute; CSS can still recolour them with the theme */
+  [stroke="#A78BFA" i] { stroke: var(--theme-border); }
   * {
     box-sizing: border-box; user-select: none; margin: 0; padding: 0;
     scrollbar-width: thin;
@@ -78,7 +108,7 @@
   }
   .tv-focusable:focus, .tv-focusable.tv-focused {
     border-color: #FFFFFF !important;
-    box-shadow: 0 0 0 2px var(--red), 0 8px 24px rgba(124, 58, 237, 0.45) !important;
+    box-shadow: 0 0 0 2px var(--red), 0 8px 24px rgba(var(--theme-deep-rgb), 0.45) !important;
     transform: scale(1.06) !important;
     z-index: 10;
   }
@@ -101,7 +131,7 @@
     flex-shrink: 0;
     /* Clean, premium floating monogram with zero cheap outer border */
   }
-  .brand-logo-icon svg { width: 30px; height: 30px; filter: drop-shadow(0 0 10px rgba(124, 58, 237, 0.65)); }
+  .brand-logo-icon svg { width: 30px; height: 30px; filter: drop-shadow(0 0 10px rgba(var(--theme-deep-rgb), 0.65)); }
   .brand-title {
     font-size: 15px; font-weight: 900; letter-spacing: 1.6px; color: #FFFFFF;
     background: linear-gradient(180deg, #FFFFFF 20%, #D1D5DB 100%);
@@ -124,12 +154,12 @@
   .nav-btn svg { width: var(--nav-icon, 18px); height: var(--nav-icon, 18px); stroke-width: 2; flex-shrink: 0; }
   .nav-btn:hover { background: rgba(255, 255, 255, 0.04); color: #fff; }
   .nav-btn.active {
-    background: linear-gradient(90deg, rgba(124, 58, 237, 0.18) 0%, rgba(229, 9, 20, 0.01) 100%);
+    background: linear-gradient(90deg, rgba(var(--theme-deep-rgb), 0.18) 0%, rgba(229, 9, 20, 0.01) 100%);
     border-left-color: var(--red); color: #FFFFFF; font-weight: 700;
   }
   /* Remove surrounding box border when moving through sidebar tabs: only left red line and gradient glow */
   .nav-btn:focus, .nav-btn.tv-focused {
-    background: linear-gradient(90deg, rgba(124, 58, 237, 0.22) 0%, rgba(229, 9, 20, 0.02) 100%) !important;
+    background: linear-gradient(90deg, rgba(var(--theme-deep-rgb), 0.22) 0%, rgba(229, 9, 20, 0.02) 100%) !important;
     border-left: 3.5px solid var(--red) !important;
     color: #FFFFFF !important;
     outline: none !important;
@@ -159,14 +189,14 @@
     transform: none !important;
   }
   .user-profile-pill.active {
-    border-color: var(--theme-accent, #8B5CF6) !important;
+    border-color: var(--theme-accent) !important;
     color: #FFFFFF !important;
-    background: var(--theme-glow, rgba(139, 92, 246, 0.25)) !important;
-    box-shadow: 0 0 14px var(--theme-glow, rgba(139, 92, 246, 0.35)) !important;
+    background: var(--theme-glow) !important;
+    box-shadow: 0 0 14px var(--theme-glow) !important;
   }
   .user-avatar-circle {
     width: 20px; height: 20px; border-radius: 50%;
-    background: linear-gradient(135deg, #7C3AED, #B91C1C);
+    background: linear-gradient(135deg, var(--theme-deep), #B91C1C);
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-size: 10px; font-weight: 800; flex-shrink: 0;
   }
@@ -188,10 +218,10 @@
     transform: none !important;
   }
   .settings-icon-btn.active {
-    border-color: var(--theme-accent, #8B5CF6) !important;
+    border-color: var(--theme-accent) !important;
     color: #FFFFFF !important;
-    background: var(--theme-glow, rgba(139, 92, 246, 0.25)) !important;
-    box-shadow: 0 0 14px var(--theme-glow, rgba(139, 92, 246, 0.35)) !important;
+    background: var(--theme-glow) !important;
+    box-shadow: 0 0 14px var(--theme-glow) !important;
   }
   .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 6px; }
 
@@ -204,10 +234,10 @@
   #catalogStrip {
     position: fixed; top: 0; left: 220px; right: 0; height: 22px; z-index: 40;
     display: none; align-items: center; gap: 8px; padding: 0 18px; box-sizing: border-box;
-    background: #0E0B1E; border-bottom: 1px solid #251C42; color: #C4B5FD;
+    background: #0E0B1E; border-bottom: 1px solid #251C42; color: var(--theme-light);
     font-size: 11px; font-weight: 700; letter-spacing: 0.2px; pointer-events: none;
   }
-  #catalogStrip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme-accent, #8B5CF6); flex-shrink: 0; animation: stripPulse 1.2s ease-in-out infinite; }
+  #catalogStrip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--theme-accent); flex-shrink: 0; animation: stripPulse 1.2s ease-in-out infinite; }
   #catalogStrip.quiet { color: #9CA3AF; font-weight: 600; }
   @keyframes stripPulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
   body.strip-on .viewport { margin-top: 22px; height: calc(100vh - 22px); }
@@ -250,8 +280,8 @@
     display: inline-flex; align-items: center; gap: 3px;
   }
   .badge-status-syncing {
-    background: rgba(124, 58, 237, 0.2); border: 1px solid rgba(167, 139, 250, 0.6);
-    color: #DDD6FE; font-weight: 800; font-size: 9.5px; padding: 1.5px 6px; border-radius: 4px;
+    background: rgba(var(--theme-deep-rgb), 0.2); border: 1px solid rgba(var(--theme-border-rgb), 0.6);
+    color: var(--theme-pale); font-weight: 800; font-size: 9.5px; padding: 1.5px 6px; border-radius: 4px;
     display: inline-flex; align-items: center; gap: 3px;
   }
   .badge-status-failed {
@@ -299,7 +329,7 @@
     font-size: 28px; font-weight: 900; display: flex; align-items: center; justify-content: center;
     cursor: pointer; z-index: 15; opacity: 0; transition: opacity 0.2s ease, background 0.2s ease;
   }
-  .chevron-btn:hover { background: rgba(124, 58, 237, 0.85); opacity: 1 !important; }
+  .chevron-btn:hover { background: rgba(var(--theme-deep-rgb), 0.85); opacity: 1 !important; }
   .row-strip-wrapper:hover .chevron-btn { opacity: 0.8; }
   .chevron-left { left: 0; border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
   .chevron-right { right: 0; border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
@@ -317,15 +347,15 @@
   .poster-card.tv-focusable.tv-focused {
     transform: scale(1.05) translateY(-4px) translateZ(0) !important;
     z-index: 25 !important;
-    border: 2px solid var(--theme-border, #A78BFA) !important;
-    box-shadow: 0 0 0 1px var(--theme-border, #A78BFA), 0 10px 28px var(--theme-glow, rgba(124, 58, 237, 0.45)), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
+    border: 2px solid var(--theme-border) !important;
+    box-shadow: 0 0 0 1px var(--theme-border), 0 10px 28px var(--theme-glow), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
     outline: none !important;
   }
   .poster-card.is-series.tv-focusable:hover,
   .poster-card.is-series.tv-focusable:focus,
   .poster-card.is-series.tv-focusable.tv-focused {
-    border: 2px solid var(--theme-border, #A78BFA) !important;
-    box-shadow: 0 0 0 1px var(--theme-border, #A78BFA), 0 10px 28px var(--theme-glow, rgba(139, 92, 246, 0.58)), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
+    border: 2px solid var(--theme-border) !important;
+    box-shadow: 0 0 0 1px var(--theme-border), 0 10px 28px var(--theme-glow), 0 4px 14px rgba(0, 0, 0, 0.9) !important;
   }
   .card-series-row {
     display: flex;
@@ -337,7 +367,7 @@
     flex-wrap: wrap;
   }
   .badge-series {
-    background: linear-gradient(135deg, #7C3AED, #4C1D95);
+    background: linear-gradient(135deg, var(--theme-deep), var(--theme-darkest));
     color: #FFFFFF; font-size: 8.5px; font-weight: 900;
     padding: 1px 5px; border-radius: 3px; letter-spacing: 0.35px;
     border: 1px solid rgba(196, 181, 253, 0.45);
@@ -351,9 +381,9 @@
     display: inline-flex; align-items: center;
   }
   .badge-season-pill {
-    background: rgba(124, 58, 237, 0.25);
-    border: 1px solid rgba(167, 139, 250, 0.45);
-    color: #DDD6FE; font-weight: 800; font-size: 8.5px;
+    background: rgba(var(--theme-deep-rgb), 0.25);
+    border: 1px solid rgba(var(--theme-border-rgb), 0.45);
+    color: var(--theme-pale); font-weight: 800; font-size: 8.5px;
     padding: 1px 5px; border-radius: 3px; display: inline-flex; align-items: center;
   }
   .badge-year-pill {
@@ -362,32 +392,32 @@
     padding: 1px 4.5px; border-radius: 3px; display: inline-flex; align-items: center;
   }
   .badge-series-pill {
-    background: rgba(124, 58, 237, 0.22);
-    border: 1px solid rgba(167, 139, 250, 0.4);
-    color: #DDD6FE; font-weight: 800; font-size: 9.5px;
+    background: rgba(var(--theme-deep-rgb), 0.22);
+    border: 1px solid rgba(var(--theme-border-rgb), 0.4);
+    color: var(--theme-pale); font-weight: 800; font-size: 9.5px;
     padding: 1px 5px; border-radius: 4px; display: inline-flex; align-items: center;
   }
   .badge-genre-cinema {
-    background: rgba(124, 58, 237, 0.22);
-    border: 1px solid rgba(167, 139, 250, 0.45);
-    color: #DDD6FE; font-weight: 700; font-size: 11px;
+    background: rgba(var(--theme-deep-rgb), 0.22);
+    border: 1px solid rgba(var(--theme-border-rgb), 0.45);
+    color: var(--theme-pale); font-weight: 700; font-size: 11px;
     padding: 2px 9px; border-radius: 6px; letter-spacing: 0.2px;
     display: inline-flex; align-items: center;
   }
   .detail-season-tag {
-    font-size: 14px; color: #C4B5FD; font-weight: 800;
+    font-size: 14px; color: var(--theme-light); font-weight: 800;
     margin-left: 12px; vertical-align: middle;
-    background: linear-gradient(135deg, rgba(124,58,237,0.35), rgba(76,29,149,0.35));
+    background: linear-gradient(135deg, rgba(var(--theme-deep-rgb),0.35), rgba(76,29,149,0.35));
     padding: 2px 10px; border-radius: 6px;
-    border: 1px solid rgba(167,139,250,0.45);
-    box-shadow: 0 2px 8px rgba(124,58,237,0.3);
+    border: 1px solid rgba(var(--theme-border-rgb),0.45);
+    box-shadow: 0 2px 8px rgba(var(--theme-deep-rgb),0.3);
   }
   .card-progress-bar {
     position: absolute; bottom: 0; left: 0; right: 0; height: 3.5px;
     background: rgba(255, 255, 255, 0.25); z-index: 6; border-bottom-left-radius: 9px; border-bottom-right-radius: 9px;
   }
   .card-progress-fill {
-    height: 100%; background: #7C3AED; border-radius: 2px;
+    height: 100%; background: var(--theme-deep); border-radius: 2px;
   }
   .poster-img-wrap {
     position: relative; width: 146px; height: 219px; border-radius: 10px;
@@ -468,11 +498,11 @@
     display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
   }
   .search-auto-chip {
-    padding: 4px 12px; border-radius: 12px; background: #1B1830; border: 1px solid #4C1D95;
-    color: #C4B5FD; font-size: 11px; font-weight: 700; cursor: pointer; outline: none;
+    padding: 4px 12px; border-radius: 12px; background: #1B1830; border: 1px solid var(--theme-darkest);
+    color: var(--theme-light); font-size: 11px; font-weight: 700; cursor: pointer; outline: none;
   }
   .search-auto-chip:focus, .search-auto-chip.tv-focused {
-    background: #7C3AED !important; color: #FFFFFF !important; border-color: #A78BFA !important;
+    background: var(--theme-deep) !important; color: #FFFFFF !important; border-color: var(--theme-border) !important;
   }
   /* YouTube TV Style Search Suggestions & Recent Searches */
   .search-suggestions-container {
@@ -497,7 +527,7 @@
     transition: background 0.12s ease, transform 0.12s ease;
   }
   .search-suggestion-item:focus, .search-suggestion-item.tv-focused {
-    background: #7C3AED !important; color: #FFFFFF !important;
+    background: var(--theme-deep) !important; color: #FFFFFF !important;
     transform: scale(1.008);
   }
   .suggestion-left {
@@ -541,11 +571,11 @@
     background: #181B26; border: 1.5px solid #2C3144; color: #E5E7EB; cursor: pointer; white-space: nowrap;
   }
   .filter-pill-btn.active {
-    background: #252B3E; border-color: #A78BFA; color: #DDD6FE;
+    background: #252B3E; border-color: var(--theme-border); color: var(--theme-pale);
   }
   .filter-floating-dropdown {
     position: absolute; top: calc(100% + 4px); left: 0; background: #120E24;
-    border: 1.5px solid #7C3AED; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.98);
+    border: 1.5px solid var(--theme-deep); border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.98);
     padding: 4px 0; z-index: 99999; max-height: 380px; overflow-y: auto; min-width: 190px;
     display: none;
   }
@@ -556,7 +586,7 @@
     background: transparent;
   }
   .filter-floating-dropdown::-webkit-scrollbar-thumb {
-    background: #4C1D95;
+    background: var(--theme-darkest);
     border-radius: 4px;
   }
   .dropdown-option {
@@ -645,9 +675,9 @@
     color: #FFFFFF; border-color: #4B5563; background: #232736;
   }
   .mlt-chip.active {
-    background: linear-gradient(135deg, rgba(124, 58, 237, 0.25) 0%, rgba(229, 9, 20, 0.08) 100%);
+    background: linear-gradient(135deg, rgba(var(--theme-deep-rgb), 0.25) 0%, rgba(229, 9, 20, 0.08) 100%);
     border-color: var(--red); color: #FFFFFF; font-weight: 800;
-    box-shadow: 0 0 12px rgba(124, 58, 237, 0.35);
+    box-shadow: 0 0 12px rgba(var(--theme-deep-rgb), 0.35);
   }
   .btn-watched-active {
     background: rgba(16, 185, 129, 0.2) !important;
@@ -746,14 +776,14 @@
     cursor: pointer; outline: none; transition: all 0.15s ease; flex-shrink: 0;
   }
   .episode-card:focus, .episode-card.tv-focused {
-    border-color: #A78BFA !important;
+    border-color: var(--theme-border) !important;
     background: #231C3D !important;
     transform: scale(1.04);
-    box-shadow: 0 8px 24px rgba(124, 58, 237, 0.45);
+    box-shadow: 0 8px 24px rgba(var(--theme-deep-rgb), 0.45);
   }
   .episode-badge {
-    font-size: 11px; font-weight: 800; background: rgba(124, 58, 237, 0.3);
-    color: #DDD6FE; border: 1px solid #7C3AED; border-radius: 4px; padding: 2px 6px;
+    font-size: 11px; font-weight: 800; background: rgba(var(--theme-deep-rgb), 0.3);
+    color: var(--theme-pale); border: 1px solid var(--theme-deep); border-radius: 4px; padding: 2px 6px;
     display: inline-block;
   }
   .episode-title {
@@ -770,7 +800,7 @@
     cursor: pointer; outline: none; transition: all 0.15s ease;
   }
   .season-pill.active {
-    background: #7C3AED !important; border-color: #8B5CF6 !important; color: #FFFFFF !important;
+    background: var(--theme-deep) !important; border-color: var(--theme-accent) !important; color: #FFFFFF !important;
   }
   .season-pill:focus, .season-pill.tv-focused {
     border-color: #FFFFFF !important; color: #FFFFFF !important; transform: scale(1.06);
@@ -780,7 +810,7 @@
     background: transparent; border: 1px solid transparent; color: #9CA3AF; cursor: pointer; outline: none;
   }
   .detail-lower-tab.active {
-    background: rgba(124, 58, 237, 0.2); color: #DDD6FE; border-bottom: 2.5px solid #7C3AED;
+    background: rgba(var(--theme-deep-rgb), 0.2); color: var(--theme-pale); border-bottom: 2.5px solid var(--theme-deep);
   }
   .detail-lower-tab:focus, .detail-lower-tab.tv-focused {
     color: #FFFFFF !important; border-color: #FFFFFF !important;
@@ -809,7 +839,7 @@
   .player-center-indicator {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: 78px; height: 78px; border-radius: 50%; background: rgba(18, 14, 36, 0.90);
-    border: 2px solid rgba(139, 92, 246, 0.75); color: #FFFFFF;
+    border: 2px solid rgba(var(--theme-accent-rgb), 0.75); color: #FFFFFF;
     display: flex; align-items: center; justify-content: center;
     font-size: 18px; font-weight: 900; z-index: 15;
     opacity: 0; transition: opacity 0.18s ease; pointer-events: none;
@@ -835,7 +865,7 @@
   .timeline-slider:hover, .timeline-slider:focus { height: 9px; }
   .timeline-slider::-webkit-slider-thumb {
     -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--red);
-    box-shadow: 0 0 8px rgba(124, 58, 237, 0.8); cursor: pointer;
+    box-shadow: 0 0 8px rgba(var(--theme-deep-rgb), 0.8); cursor: pointer;
   }
 
   /* 4-Digit Parental PIN Modal */
@@ -908,14 +938,14 @@
 
 <!-- Delete Single Search Query Modal -->
 <div id="deleteHistoryModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
-  <div style="background:#120E24;border:1.5px solid #7C3AED;border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
-    <div style="font-size:20px;font-weight:900;color:#DDD6FE;margin-bottom:8px;">Remove from search history?</div>
+  <div style="background:#120E24;border:1.5px solid var(--theme-deep);border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
+    <div style="font-size:20px;font-weight:900;color:var(--theme-pale);margin-bottom:8px;">Remove from search history?</div>
     <div id="deleteHistoryModalText" style="font-size:14px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
       Do you want to remove this search from your history?
     </div>
     <div style="display:flex;gap:12px;justify-content:center;">
       <button tabindex="0" id="btnCancelDeleteHistory" class="btn tv-focusable" style="padding:10px 22px;" onclick="closeDeleteHistoryModal()">Cancel</button>
-      <button tabindex="0" id="btnConfirmDeleteHistory" class="btn tv-focusable" style="background:#7C3AED;border-color:#A78BFA;color:#fff;padding:10px 22px;font-weight:800;" onclick="confirmDeleteSearchHistory()">Remove</button>
+      <button tabindex="0" id="btnConfirmDeleteHistory" class="btn tv-focusable" style="background:var(--theme-deep);border-color:var(--theme-border);color:#fff;padding:10px 22px;font-weight:800;" onclick="confirmDeleteSearchHistory()">Remove</button>
     </div>
   </div>
 </div>
@@ -953,8 +983,8 @@
 
 <!-- Dark-Themed Voice Search Dialog -->
 <div id="voiceSearchModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
-  <div style="background:#120E24;border:1.5px solid var(--theme-border, #7C3AED);border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
-    <div id="voiceSearchMicIcon" style="width:64px;height:64px;border-radius:50%;background:rgba(124,58,237,0.25);margin:0 auto 16px;display:flex;align-items:center;justify-content:center;border:2px solid var(--theme-border, #A78BFA);box-shadow:0 0 24px var(--theme-glow, rgba(124,58,237,0.5));">
+  <div style="background:#120E24;border:1.5px solid var(--theme-border);border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
+    <div id="voiceSearchMicIcon" style="width:64px;height:64px;border-radius:50%;background:rgba(var(--theme-deep-rgb),0.25);margin:0 auto 16px;display:flex;align-items:center;justify-content:center;border:2px solid var(--theme-border);box-shadow:0 0 24px var(--theme-glow);">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
     </div>
     <div id="voiceSearchStatusTitle" style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:8px;">Listening...</div>
@@ -1021,7 +1051,7 @@
 
 <!-- Reset PIN Dialog (via Cloud Account Password or Email Code) -->
 <div id="resetPinModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100010;align-items:center;justify-content:center;">
-  <div style="background:#120E24;border:1.5px solid var(--theme-border, #A78BFA);border-radius:16px;max-width:440px;width:90%;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
+  <div style="background:#120E24;border:1.5px solid var(--theme-border);border-radius:16px;max-width:440px;width:90%;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
     <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Reset Master PIN</div>
     <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Enter your StreamVault account password, or choose "Email me a code" and type the 6-digit code we send you.</div>
 
@@ -1063,7 +1093,7 @@
 
 <!-- Add Profile Dialog -->
 <div id="addProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
-  <div style="background:#120E24;border:1.5px solid var(--theme-border, #A78BFA);border-radius:16px;max-width:440px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
+  <div style="background:#120E24;border:1.5px solid var(--theme-border);border-radius:16px;max-width:440px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
     <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Add New Profile</div>
     <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Create a separate profile with its own watchlist and recommendations</div>
     
@@ -1148,7 +1178,7 @@
     <!-- Left Hero: Branding & Quick Phone Link QR -->
     <div>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
-        <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--theme-accent, #7C3AED),#4C1D95);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px var(--theme-glow, rgba(124,58,237,0.4));">
+        <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--theme-accent),var(--theme-darkest));display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px var(--theme-glow);">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5"><path d="M5 3l14 9-14 9V3z"/></svg>
         </div>
         <div style="font-size:22px;font-weight:900;letter-spacing:1.5px;color:#FFFFFF;">STREAMVAULT TV</div>
@@ -1173,8 +1203,8 @@
             <div>2. Sign in or create an account there</div>
             <div>3. This TV signs in by itself</div>
           </div>
-          <div style="font-size:10px;color:#9CA3AF;margin-top:5px;">Or open <span style="color:var(--theme-accent, #8B5CF6);font-weight:700;">streamvault-sync.streamvault-app.workers.dev/link</span> and type the TV code:</div>
-          <div id="welcomeCodeDisplay" style="font-size:22px;font-weight:900;letter-spacing:2.5px;color:var(--theme-border, #A78BFA);margin-top:1px;">SV-....</div>
+          <div style="font-size:10px;color:#9CA3AF;margin-top:5px;">Or open <span style="color:var(--theme-accent);font-weight:700;">streamvault-sync.streamvault-app.workers.dev/link</span> and type the TV code:</div>
+          <div id="welcomeCodeDisplay" style="font-size:22px;font-weight:900;letter-spacing:2.5px;color:var(--theme-border);margin-top:1px;">SV-....</div>
         </div>
       </div>
     </div>
@@ -1214,7 +1244,7 @@
 <div id="userProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#120E24;border:1.5px solid #251C42;border-radius:18px;max-width:420px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
-      <div id="userProfileAvatarInitial" style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#7C3AED,#4C1D95);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:900;box-shadow:0 4px 14px rgba(124, 58, 237, 0.5);">P</div>
+      <div id="userProfileAvatarInitial" style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--theme-deep),var(--theme-darkest));display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:900;box-shadow:0 4px 14px rgba(var(--theme-deep-rgb), 0.5);">P</div>
       <div>
         <div id="userProfileModalName" style="font-size:18px;font-weight:900;color:#FFFFFF;">Profile</div>
         <div style="font-size:11px;color:#10B981;font-weight:700;">● Active Profile &middot; Primary</div>
@@ -1246,7 +1276,7 @@
 <div id="cloudAuthModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100005;align-items:center;justify-content:center;">
   <div style="background:#141026;border:1.5px solid #281F4B;border-radius:18px;max-width:440px;width:90%;padding:26px;box-shadow:0 24px 60px rgba(0,0,0,0.95);">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-      <div style="width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--theme-accent, #7C3AED),#4C1D95);display:flex;align-items:center;justify-content:center;">
+      <div style="width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--theme-accent),var(--theme-darkest));display:flex;align-items:center;justify-content:center;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5"><path d="M5 3l14 9-14 9V3z"/></svg>
       </div>
       <div style="font-size:16px;font-weight:900;letter-spacing:1px;color:#FFFFFF;">STREAMVAULT CLOUD</div>
@@ -1261,17 +1291,17 @@
 
       <form onsubmit="handleCloudAuthSubmit(event)">
         <div id="cloudAuthNameRow" style="display:none;margin-bottom:12px;">
-          <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Display Name</label>
+          <label style="display:block;font-size:11px;font-weight:700;color:var(--theme-light);margin-bottom:4px;text-transform:uppercase;">Display Name</label>
           <input id="cloudAuthName" type="text" class="tv-focusable search-field" placeholder="Account Owner" style="width:100%;font-size:13.5px;padding:8px 12px;" readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
 
         <div style="margin-bottom:12px;">
-          <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Email Address</label>
+          <label style="display:block;font-size:11px;font-weight:700;color:var(--theme-light);margin-bottom:4px;text-transform:uppercase;">Email Address</label>
           <input id="cloudAuthEmail" type="email" class="tv-focusable search-field" placeholder="name@domain.com" style="width:100%;font-size:13.5px;padding:8px 12px;" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
 
         <div style="margin-bottom:12px;">
-          <label style="display:block;font-size:11px;font-weight:700;color:#C4B5FD;margin-bottom:4px;text-transform:uppercase;">Password</label>
+          <label style="display:block;font-size:11px;font-weight:700;color:var(--theme-light);margin-bottom:4px;text-transform:uppercase;">Password</label>
           <input id="cloudAuthPassword" type="password" class="tv-focusable search-field" placeholder="••••••••" style="width:100%;font-size:13.5px;padding:8px 12px;" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
 
@@ -1281,7 +1311,7 @@
         </div>
 
         <div style="text-align:center;margin-top:14px;">
-          <a href="#" id="cloudAuthToggleLink" tabindex="0" class="tv-focusable" onclick="toggleCloudAuthMode(event)" style="color:#A78BFA;font-size:12px;text-decoration:none;font-weight:700;display:inline-block;padding:4px 8px;border-radius:6px;">
+          <a href="#" id="cloudAuthToggleLink" tabindex="0" class="tv-focusable" onclick="toggleCloudAuthMode(event)" style="color:var(--theme-border);font-size:12px;text-decoration:none;font-weight:700;display:inline-block;padding:4px 8px;border-radius:6px;">
             Don't have an account? Sign Up
           </a>
         </div>
@@ -1293,7 +1323,7 @@
     <div id="cloudAuthVerifyPane" style="display:none;">
       <div style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Enter Verification Code</div>
       <div style="font-size:12.5px;color:#9CA3AF;line-height:1.4;margin-bottom:16px;">
-        We sent a 6-digit confirmation code to <b id="cloudVerifyEmailLabel" style="color:#C4B5FD;"></b>. Enter it below to activate your account:
+        We sent a 6-digit confirmation code to <b id="cloudVerifyEmailLabel" style="color:var(--theme-light);"></b>. Enter it below to activate your account:
       </div>
 
       <form onsubmit="handleVerifyCodeSubmit(event)">
@@ -1308,7 +1338,7 @@
         </div>
 
         <div style="text-align:center;margin-top:14px;">
-          <a href="#" id="cloudVerifyResendLink" tabindex="0" class="tv-focusable" onclick="resendVerificationCode(event)" style="color:#A78BFA;font-size:12px;text-decoration:none;font-weight:700;display:inline-block;padding:4px 8px;border-radius:6px;">
+          <a href="#" id="cloudVerifyResendLink" tabindex="0" class="tv-focusable" onclick="resendVerificationCode(event)" style="color:var(--theme-border);font-size:12px;text-decoration:none;font-weight:700;display:inline-block;padding:4px 8px;border-radius:6px;">
             Didn't receive code? Resend
           </a>
         </div>
@@ -1322,7 +1352,7 @@
 <div id="playlistModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100006;align-items:center;justify-content:center;">
   <div style="background:#141026;border:1.5px solid #281F4B;border-radius:18px;max-width:440px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-      <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#7C3AED,#4C1D95);display:flex;align-items:center;justify-content:center;">
+      <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--theme-deep),var(--theme-darkest));display:flex;align-items:center;justify-content:center;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
       </div>
       <div id="playlistModalTitle" style="font-size:18px;font-weight:900;color:#FFFFFF;">Add IPTV Playlist</div>
@@ -1335,20 +1365,20 @@
     <form onsubmit="handleSavePlaylistSubmit(event)">
       <input type="hidden" id="playlistModalEditId" value="" />
       <div style="margin-bottom:10px;">
-        <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Playlist Name</label>
+        <label style="display:block;font-size:10px;font-weight:700;color:var(--theme-light);margin-bottom:3px;text-transform:uppercase;">Playlist Name</label>
         <input id="inpPlaylistName" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="e.g. Primary IPTV" value="Primary IPTV" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
       </div>
       <div style="margin-bottom:10px;">
-        <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Server URL</label>
+        <label style="display:block;font-size:10px;font-weight:700;color:var(--theme-light);margin-bottom:3px;text-transform:uppercase;">Server URL</label>
         <input id="inpPlaylistServer" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="http://example.com:8080" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
       </div>
       <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:12px;">
         <div>
-          <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Username</label>
+          <label style="display:block;font-size:10px;font-weight:700;color:var(--theme-light);margin-bottom:3px;text-transform:uppercase;">Username</label>
           <input id="inpPlaylistUser" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="Username" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
         <div>
-          <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Password</label>
+          <label style="display:block;font-size:10px;font-weight:700;color:var(--theme-light);margin-bottom:3px;text-transform:uppercase;">Password</label>
           <input id="inpPlaylistPass" type="password" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="••••••••" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
         </div>
       </div>
@@ -4183,7 +4213,7 @@ function showProfilePicker(profiles, onSelect) {
     const initial = (p.name || 'U').charAt(0).toUpperCase();
     const color = p.avatarColor || '#7C3AED';
     return `
-      <div tabindex="0" class="profile-picker-card tv-focusable" data-profile-id="${escapeHtml(p.id)}" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 20px;border-radius:14px;background:#151028;border:2px solid ${isSelected ? 'var(--theme-border, #A78BFA)' : '#281F48'};cursor:pointer;min-width:130px;transition:transform 0.2s, border-color 0.2s;">
+      <div tabindex="0" class="profile-picker-card tv-focusable" data-profile-id="${escapeHtml(p.id)}" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 20px;border-radius:14px;background:#151028;border:2px solid ${isSelected ? 'var(--theme-border)' : '#281F48'};cursor:pointer;min-width:130px;transition:transform 0.2s, border-color 0.2s;">
         <div style="width:72px;height:72px;border-radius:50%;background:${escapeHtml(color)};display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:32px;font-weight:900;box-shadow:0 6px 18px rgba(0,0,0,0.6);">
           ${escapeHtml(initial)}
         </div>
@@ -4362,7 +4392,7 @@ function renderLatest(vp, focusFirst = false) {
   if ((latestPanel === 'ADULT' || latestPanel === 'EXTRAS') && !groups[latestPanel]) latestPanel = 'MOVIES';
   const mk = (id, label, n) => {
     const on = latestPanel === id;
-    return `<button tabindex="0" id="latestPanel${id}" class="filter-pill-btn tv-focusable ${on ? 'active' : ''}" style="flex-shrink:0;${on ? 'background:rgba(139,92,246,0.35);border-color:#8B5CF6;color:#fff;' : ''}" onclick="selectLatestPanel('${id}')">${label} (${n})</button>`;
+    return `<button tabindex="0" id="latestPanel${id}" class="filter-pill-btn tv-focusable ${on ? 'active' : ''}" style="flex-shrink:0;${on ? 'background:rgba(var(--theme-accent-rgb),0.35);border-color:var(--theme-accent);color:#fff;' : ''}" onclick="selectLatestPanel('${id}')">${label} (${n})</button>`;
   };
   const empty = '<div style="padding:40px;color:var(--muted);text-align:center;">Nothing new yet. New titles from your provider show up here for 14 days.</div>';
   const cards = (arr) => `<div class="results-grid" id="filterResultsGrid">${arr.map((m) => renderPosterCard(m)).join('')}</div>`;
@@ -4451,7 +4481,7 @@ async function lockVault(target, quiet = false) {
 
 function vaultPanelBarHtml(tab) {
   const cur = vaultPanelState[tab];
-  const mk = (id, label) => `<button tabindex="0" id="vaultPanel${id}" class="filter-pill-btn tv-focusable ${cur === id ? 'active' : ''}" style="flex-shrink:0;${cur === id ? 'background:rgba(139,92,246,0.35);border-color:#8B5CF6;color:#fff;' : ''}" onclick="selectVaultPanel('${id}')">${label}</button>`;
+  const mk = (id, label) => `<button tabindex="0" id="vaultPanel${id}" class="filter-pill-btn tv-focusable ${cur === id ? 'active' : ''}" style="flex-shrink:0;${cur === id ? 'background:rgba(var(--theme-accent-rgb),0.35);border-color:var(--theme-accent);color:#fff;' : ''}" onclick="selectVaultPanel('${id}')">${label}</button>`;
   return `<div id="vaultPanelBar" class="filter-pill-row" style="margin:0 0 10px 0;gap:8px;">${mk('MOVIES', 'Movies')}${mk('SERIES', 'Series')}${mk('LIVE', 'Live TV')}</div>`;
 }
 
@@ -4585,6 +4615,7 @@ function renderSidebar(lockedToPlaylist = false) {
 }
 
 async function navigateToTab(tabId, customFilter = null, focusFirstCard = false) {
+  if (tabId !== 'PROFILE') revertThemePreview();
   if (!getStoredAuthToken()) {
     showWelcomeScreen();
     return;
@@ -4739,7 +4770,7 @@ async function catalogNoticeHtml() {
   }
   if (sync.isSyncing || total === 0) {
     const phase = sync.phase ? escapeHtml(String(sync.phase)) : 'Getting started...';
-    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:8px;">Loading your catalog…</div><div style="font-size:13px;color:#A78BFA;">${phase}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;max-width:560px;margin-left:auto;margin-right:auto;">The first time can take a few minutes. Titles appear as soon as they are ready, and you can keep using the app.</div></div>`;
+    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:8px;">Loading your catalog…</div><div style="font-size:13px;color:var(--theme-border);">${phase}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;max-width:560px;margin-left:auto;margin-right:auto;">The first time can take a few minutes. Titles appear as soon as they are ready, and you can keep using the app.</div></div>`;
   }
   return '';
 }
@@ -5358,7 +5389,7 @@ async function executeFilterQuery(append = false) {
     currentFilterOffset += 120;
     const loaderPill = document.createElement('div');
     loaderPill.id = 'filterScrollLoader';
-    loaderPill.style.cssText = 'grid-column:1/-1;padding:24px;text-align:center;color:#A78BFA;font-weight:700;font-size:13px;letter-spacing:0.3px;';
+    loaderPill.style.cssText = 'grid-column:1/-1;padding:24px;text-align:center;color:var(--theme-border);font-weight:700;font-size:13px;letter-spacing:0.3px;';
     loaderPill.innerText = '⟳ Loading more titles...';
     grid.appendChild(loaderPill);
   } else {
@@ -5435,7 +5466,7 @@ async function executeFilterQuery(append = false) {
       }
     }
     if (items.length === 0) {
-      grid.innerHTML = '<div style="grid-column:1/-1;padding:60px 20px;color:var(--muted);text-align:center;font-size:15px;">No matching titles found for current filter combination.<br/><span style="font-size:13px;color:#8B5CF6;cursor:pointer;margin-top:8px;display:inline-block;" onclick="resetFilterState()">Click here to reset all filters</span></div>';
+      grid.innerHTML = '<div style="grid-column:1/-1;padding:60px 20px;color:var(--muted);text-align:center;font-size:15px;">No matching titles found for current filter combination.<br/><span style="font-size:13px;color:var(--theme-accent);cursor:pointer;margin-top:8px;display:inline-block;" onclick="resetFilterState()">Click here to reset all filters</span></div>';
       return;
     }
     grid.innerHTML = items.map((m) => renderPosterCard(m)).join('');
@@ -5562,7 +5593,7 @@ async function fetchLiveChannels(rebuildTabs = true) {
 
 function renderChannelBadge(ch) {
   const cat = (ch.categoryName || '').toUpperCase();
-  let grad = 'linear-gradient(135deg, #7C3AED 0%, #4C1D95 100%)';
+  let grad = 'linear-gradient(135deg, var(--theme-deep) 0%, var(--theme-darkest) 100%)';
   if (/SPORTS|CRICKET|FOOTBALL|SOCCER|GOLF|WWE|UFC|F1|RACING|TENNIS|NBA|ESPN|SKY SPORT/.test(cat)) {
     grad = 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)';
   } else if (/NEWS|CNN|BBC|SKY NEWS|AL JAZEERA|GEO|ARY|BOL|HUM|AAJ/.test(cat)) {
@@ -5619,18 +5650,41 @@ async function loadWatchlist(vp) {
 let currentActiveProfile = getDefaultProfile();
 window.currentActiveProfile = currentActiveProfile;
 
-function applyProfileTheme(themeKey) {
+// Theme: clicking a colour only PREVIEWS it. It is kept when Save Profile is pressed; if the screen is left without saving,
+// the saved theme comes back.
+let themePreviewActive = false;
+
+function applyThemeClass(themeKey) {
   document.body.classList.remove('theme-netflix', 'theme-disney', 'theme-prime');
   if (themeKey && themeKey !== 'purple' && themeKey !== 'streamvault') {
     document.body.classList.add('theme-' + themeKey);
   }
+}
+
+// Commit: used when a theme is loaded or saved
+function applyProfileTheme(themeKey) {
+  applyThemeClass(themeKey);
+  themePreviewActive = false;
   localStorage.setItem('streamvault_active_theme', themeKey || 'purple');
+}
+
+function savedThemeKey() {
+  return localStorage.getItem('streamvault_active_theme') || 'purple';
+}
+
+function revertThemePreview() {
+  if (!themePreviewActive) return;
+  const saved = savedThemeKey();
+  applyThemeClass(saved);
+  if (currentActiveProfile) currentActiveProfile.theme = saved;
+  themePreviewActive = false;
 }
 
 function setProfileTheme(themeKey) {
   playNavSound();
   currentActiveProfile.theme = themeKey;
-  applyProfileTheme(themeKey);
+  applyThemeClass(themeKey);                       // preview only: nothing is stored until Save
+  themePreviewActive = themeKey !== savedThemeKey();
   document.querySelectorAll('.profile-theme-chip').forEach(c => {
     if (c.getAttribute('data-theme') === themeKey) {
       c.style.border = '2.5px solid #FFFFFF';
@@ -5665,7 +5719,7 @@ async function loadProfile(vp) {
     <div style="padding:8px 24px 22px 24px;max-width:1440px;margin:0 auto;box-sizing:border-box;max-height:100vh;overflow:hidden;">
       <div style="font-size:18px;font-weight:900;letter-spacing:-0.4px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
         <span>Profile &amp; Personal Settings</span>
-        <span style="font-size:11px;color:#A78BFA;font-weight:700;display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:var(--theme-border);font-weight:700;display:flex;align-items:center;gap:6px;">
           <span style="width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;"></span>
           ${escapeHtml(activeProf.name)} &middot; StreamVault TV
         </span>
@@ -5678,13 +5732,13 @@ async function loadProfile(vp) {
           ${profiles.map(p => `
             <div tabindex="0" class="profile-card-item tv-focusable ${p.id === activeProf.id ? 'is-active-profile' : ''}"
                  onclick="switchUserProfile('${p.id}')" onfocus="playNavSound()"
-                 style="background:#120E24;border:${p.id === activeProf.id ? '2px solid var(--theme-accent, #8B5CF6)' : '1.5px solid #251C42'};border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:10px;cursor:pointer;box-sizing:border-box;min-height:42px;box-shadow:${p.id === activeProf.id ? '0 0 14px var(--theme-glow, rgba(139,92,246,0.35))' : 'none'};">
-              <div class="profile-avatar-initials" style="width:28px;height:28px;border-radius:50%;background:${escapeHtml(p.avatarColor || 'var(--theme-accent, #7C3AED)')};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900;flex-shrink:0;">
+                 style="background:#120E24;border:${p.id === activeProf.id ? '2px solid var(--theme-accent)' : '1.5px solid #251C42'};border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:10px;cursor:pointer;box-sizing:border-box;min-height:42px;box-shadow:${p.id === activeProf.id ? '0 0 14px var(--theme-glow)' : 'none'};">
+              <div class="profile-avatar-initials" style="width:28px;height:28px;border-radius:50%;background:${escapeHtml(p.avatarColor || 'var(--theme-accent)')};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900;flex-shrink:0;">
                 ${escapeHtml((p.name || 'U').slice(0, 2).toUpperCase())}
               </div>
               <div style="min-width:0;flex:1;">
                 <div class="profile-name-text" style="font-size:12px;font-weight:800;color:#FFFFFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.name)}</div>
-                <div style="font-size:9px;color:${p.id === activeProf.id ? 'var(--theme-border, #A78BFA)' : '#9CA3AF'};font-weight:700;margin-top:1px;">
+                <div style="font-size:9px;color:${p.id === activeProf.id ? 'var(--theme-border)' : '#9CA3AF'};font-weight:700;margin-top:1px;">
                   ${p.id === activeProf.id ? '✓ Active Profile' : (p.isKids ? 'Kids Mode' : 'Switch')}
                 </div>
               </div>
@@ -5707,7 +5761,7 @@ async function loadProfile(vp) {
         <div class="settings-card" style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
           <div>
             <div style="font-size:13px;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--theme-border, #A78BFA)" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--theme-border)" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               Profile Customization
             </div>
 
@@ -5848,7 +5902,7 @@ async function loadSettings(vp) {
     <div style="padding:8px 24px 22px 24px;max-width:1440px;margin:0 auto;box-sizing:border-box;max-height:100vh;overflow:hidden;">
       <div style="font-size:18px;font-weight:900;letter-spacing:-0.4px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
         <span>Settings</span>
-        <span style="font-size:11px;color:#A78BFA;font-weight:700;display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:var(--theme-border);font-weight:700;display:flex;align-items:center;gap:6px;">
           <span style="width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;"></span>
           StreamVault TV v2.7.0
         </span>
@@ -5874,7 +5928,7 @@ async function loadSettings(vp) {
 
             <!-- Playlists List / First-Run Guidance -->
             ${playlists.length === 0 ? `
-              <div style="background:rgba(124,58,237,0.08);border:1.5px dashed #7C3AED;border-radius:10px;padding:16px 14px;text-align:center;margin-top:4px;">
+              <div style="background:rgba(var(--theme-deep-rgb),0.08);border:1.5px dashed var(--theme-deep);border-radius:10px;padding:16px 14px;text-align:center;margin-top:4px;">
                 <div style="font-size:13px;font-weight:800;color:#FFFFFF;margin-bottom:3px;">No Playlists Connected</div>
                 <div style="font-size:10px;color:#9CA3AF;line-height:1.4;margin-bottom:10px;">
                   Add your IPTV provider login to load movies, series and live TV.
@@ -5936,7 +5990,7 @@ async function loadSettings(vp) {
             ${isLinked ? `
               <button tabindex="0" id="btnSignOutAccount" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:3px 10px;font-size:10px;" onclick="openSignOutModal()">Sign Out</button>
             ` : `
-              <button tabindex="0" id="btnOpenCloudSignIn" class="btn tv-focusable" style="background:var(--theme-accent, #7C3AED);border-color:var(--theme-border, #A78BFA);color:#fff;padding:3px 10px;font-size:10px;font-weight:800;" onclick="openCloudAuthModal('login')">Sign In / Sign Up</button>
+              <button tabindex="0" id="btnOpenCloudSignIn" class="btn tv-focusable" style="background:var(--theme-accent);border-color:var(--theme-border);color:#fff;padding:3px 10px;font-size:10px;font-weight:800;" onclick="openCloudAuthModal('login')">Sign In / Sign Up</button>
             `}
             <div style="display:flex;gap:6px;align-items:center;">
               <span id="syncStatusLabel" style="font-size:9.5px;color:#9CA3AF;font-weight:700;">Just now</span>
@@ -6183,7 +6237,7 @@ async function handleSavePlaylistSubmit(e) {
   }
 
   if (statusMsg) {
-    statusMsg.style.color = '#A78BFA';
+    statusMsg.style.color = 'var(--theme-border)';
     statusMsg.innerText = 'Connecting to IPTV provider...';
   }
 
@@ -6490,7 +6544,7 @@ function showToast(msg, durationMs = 3200) {
   if (!toast) {
     toast = document.createElement('div');
     toast.id = 'tvToastNotification';
-    toast.style.cssText = 'position:fixed;bottom:36px;left:50%;transform:translateX(-50%);background:#1A1333;border:1.5px solid var(--theme-border,#8B5CF6);border-radius:30px;padding:11px 26px;font-size:13.5px;font-weight:800;color:#FFFFFF;box-shadow:0 12px 36px rgba(0,0,0,0.85);z-index:99999;pointer-events:none;opacity:0;transition:opacity 0.25s ease,transform 0.25s ease;display:flex;align-items:center;gap:10px;';
+    toast.style.cssText = 'position:fixed;bottom:36px;left:50%;transform:translateX(-50%);background:#1A1333;border:1.5px solid var(--theme-border);border-radius:30px;padding:11px 26px;font-size:13.5px;font-weight:800;color:#FFFFFF;box-shadow:0 12px 36px rgba(0,0,0,0.85);z-index:99999;pointer-events:none;opacity:0;transition:opacity 0.25s ease,transform 0.25s ease;display:flex;align-items:center;gap:10px;';
     document.body.appendChild(toast);
   }
   toast.innerHTML = msg;
@@ -7207,7 +7261,7 @@ async function saveActiveProfileChanges() {
   }
   
   lastVerifiedPin = '';
-  localStorage.setItem('streamvault_active_theme', currentActiveProfile.theme || 'purple');
+  applyProfileTheme(currentActiveProfile.theme || 'purple');   // saved: the preview becomes the theme
 
   const statusLbl = document.getElementById('profSaveStatus');
   if (statusLbl) {
@@ -7497,7 +7551,7 @@ function getDetailActionButtonsHtml(item) {
         <button tabindex="0" id="detailWatchedBtn" class="btn tv-focusable detail-action-btn ${isWatched ? 'btn-watched-active' : ''}" onclick="toggleWatchedCoupled('${item.dedupKey}')" onfocus="playNavSound()">
           ${isWatched ? '✓ Watched' : 'Mark Watched'}
         </button>
-        ${hasResume ? `<span style="font-size:12px;color:#A78BFA;font-weight:700;margin-left:4px;">(at ${resumeTimeStr})</span>` : ''}
+        ${hasResume ? `<span style="font-size:12px;color:var(--theme-border);font-weight:700;margin-left:4px;">(at ${resumeTimeStr})</span>` : ''}
       </div>
     `;
   }
@@ -7522,7 +7576,7 @@ function getDetailActionButtonsHtml(item) {
       <button tabindex="0" id="detailWatchedBtn" class="btn tv-focusable detail-action-btn ${isWatched ? 'btn-watched-active' : ''}" onclick="toggleWatchedCoupled('${item.dedupKey}')" onfocus="playNavSound()">
         ${isWatched ? '✓ Watched' : 'Mark Watched'}
       </button>
-      ${hasResume ? `<span style="font-size:12px;color:#A78BFA;font-weight:700;margin-left:4px;">(at ${resumeTimeStr})</span>` : ''}
+      ${hasResume ? `<span style="font-size:12px;color:var(--theme-border);font-weight:700;margin-left:4px;">(at ${resumeTimeStr})</span>` : ''}
       ${(item.versions && item.versions.length > 1) ? `
         <div id="detailVersionsContainer" style="display:flex;gap:8px;align-items:center;width:100%;margin-top:6px;flex-wrap:wrap;">
           <span style="font-size:11px;font-weight:700;color:var(--muted);margin-right:2px;">Versions (${item.versions.length}):</span>
@@ -7540,7 +7594,7 @@ function getDetailActionButtonsHtml(item) {
             }
             return `
               <button tabindex="0" class="btn tv-focusable detail-version-pill"
-                      style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid ${isCam ? '#EF4444' : vIdx === 0 ? '#8B5CF6' : '#2D3345'};background:${isCam ? 'rgba(239,68,68,0.15)' : vIdx === 0 ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.05)'};color:${isCam ? '#FCA5A5' : vIdx === 0 ? '#DDD6FE' : '#9CA3AF'};"
+                      style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid ${isCam ? '#EF4444' : vIdx === 0 ? 'var(--theme-accent)' : '#2D3345'};background:${isCam ? 'rgba(239,68,68,0.15)' : vIdx === 0 ? 'rgba(var(--theme-accent-rgb),0.2)' : 'rgba(255,255,255,0.05)'};color:${isCam ? '#FCA5A5' : vIdx === 0 ? 'var(--theme-pale)' : '#9CA3AF'};"
                       onclick="startMoviePlayback('${item.dedupKey}', ${vIdx}, 0)" onfocus="playNavSound()">
                 ▶ ${escapeHtml(vLabel)}
               </button>
@@ -7613,8 +7667,8 @@ function renderRelatedStripHtml(related, item) {
   if (related.length < 8) return related.map((r) => renderPosterCard(r)).join('');   // fewer than a full row: nothing more to show
   return related.map((r) => renderPosterCard(r)).join('') + `
     <div tabindex="0" class="poster-card show-more-card tv-focusable" onclick="openFullMltCatalog('${item.dedupKey}')" onfocus="playNavSound()">
-      <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(124,58,237,0.36) 0%, #100C1F 100%);border:1px solid rgba(167,139,250,0.35);border-radius:10px;">
-        <div style="width:44px;height:44px;border-radius:50%;background:rgba(124,58,237,0.35);display:flex;align-items:center;justify-content:center;margin-bottom:10px;border:1.5px solid #A78BFA;box-shadow:0 4px 14px rgba(124,58,237,0.4);">
+      <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(var(--theme-deep-rgb),0.36) 0%, #100C1F 100%);border:1px solid rgba(var(--theme-border-rgb),0.35);border-radius:10px;">
+        <div style="width:44px;height:44px;border-radius:50%;background:rgba(var(--theme-deep-rgb),0.35);display:flex;align-items:center;justify-content:center;margin-bottom:10px;border:1.5px solid var(--theme-border);box-shadow:0 4px 14px rgba(var(--theme-deep-rgb),0.4);">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
         </div>
         <div style="font-size:14px;font-weight:900;color:#FFFFFF;letter-spacing:0.3px;">Show More</div>
@@ -7719,7 +7773,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
                 <span class="badge-rating" style="padding:2px 7px;font-size:11px;">${item.rating > 0 ? '★ ' + item.rating : 'Not rated'}</span>
                 ${(item.qualityBadges || []).slice(0, 1).map((q) => `<span class="badge-quality" style="padding:2px 7px;font-size:11px;">${q}</span>`).join('')}
                 <span class="badge-language" style="padding:2px 7px;font-size:11px;">${item.language || 'English'}</span>
-                <span class="badge-audio" style="background:#2E1065;color:#DDD6FE;border:1px solid #7C3AED;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;">Multi-Audio</span>
+                <span class="badge-audio" style="background:#2E1065;color:var(--theme-pale);border:1px solid var(--theme-deep);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;">Multi-Audio</span>
                 <span class="badge-subtitles" style="padding:2px 7px;font-size:11px;">CC Subtitles</span>
                 <span style="color:#9CA3AF;font-weight:700;">${item.year || ''}</span>
                 <span>${!isSeries && item.runtimeMins ? item.runtimeMins + ' min' : (isSeries ? (item.episodes || []).length + ' Episodes' : '')}</span>
@@ -7829,7 +7883,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
                   }
                   return `
                     <button tabindex="0" class="btn tv-focusable detail-version-pill"
-                            style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid ${isCam ? '#EF4444' : vIdx === 0 ? '#8B5CF6' : '#2D3345'};background:${isCam ? 'rgba(239,68,68,0.15)' : vIdx === 0 ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.05)'};color:${isCam ? '#FCA5A5' : vIdx === 0 ? '#DDD6FE' : '#9CA3AF'};"
+                            style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid ${isCam ? '#EF4444' : vIdx === 0 ? 'var(--theme-accent)' : '#2D3345'};background:${isCam ? 'rgba(239,68,68,0.15)' : vIdx === 0 ? 'rgba(var(--theme-accent-rgb),0.2)' : 'rgba(255,255,255,0.05)'};color:${isCam ? '#FCA5A5' : vIdx === 0 ? 'var(--theme-pale)' : '#9CA3AF'};"
                             onclick="startMoviePlayback('${item.dedupKey}', ${vIdx}, 0)" onfocus="playNavSound()">
                       ▶ ${escapeHtml(vLabel)}
                     </button>
@@ -8077,7 +8131,7 @@ async function loadMltPage(first) {
     if (mltPageState.hasMore) {
       grid.insertAdjacentHTML('beforeend', `
         <div tabindex="0" class="poster-card mlt-more-card tv-focusable" onfocus="playNavSound()" onclick="loadMltPage(false)">
-          <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(124,58,237,0.36) 0%, #100C1F 100%);border:1px solid rgba(167,139,250,0.35);border-radius:10px;">
+          <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(var(--theme-deep-rgb),0.36) 0%, #100C1F 100%);border:1px solid rgba(var(--theme-border-rgb),0.35);border-radius:10px;">
             <div style="font-size:14px;font-weight:900;color:#FFFFFF;">Show more</div>
           </div>
         </div>`);
@@ -8508,7 +8562,7 @@ async function renderSearchSuggestions(query = '', autoChips = []) {
         ${recentItems.map(item => `
           <div tabindex="0" class="search-suggestion-item is-history tv-focusable" data-query="${escapeHtml(item)}" onclick="if(!historyLongPressTriggered) applySearchSuggestion('${escapeHtml(item)}')" onfocus="playNavSound()">
             <div class="suggestion-left">
-              <span class="suggestion-icon" style="color:#A78BFA;">🕒</span>
+              <span class="suggestion-icon" style="color:var(--theme-border);">🕒</span>
               <span>${escapeHtml(item)}</span>
             </div>
             <span class="suggestion-hint">Hold OK to remove</span>
@@ -8542,7 +8596,7 @@ async function renderSearchSuggestions(query = '', autoChips = []) {
     html += `
       <div tabindex="0" class="search-suggestion-item is-history tv-focusable" data-query="${escapeHtml(item)}" onclick="if(!historyLongPressTriggered) applySearchSuggestion('${escapeHtml(item)}')" onfocus="playNavSound()">
         <div class="suggestion-left">
-          <span class="suggestion-icon" style="color:#A78BFA;">🕒</span>
+          <span class="suggestion-icon" style="color:var(--theme-border);">🕒</span>
           <span>${escapeHtml(item)}</span>
         </div>
         <span class="suggestion-hint">Hold OK to remove</span>
@@ -8944,7 +8998,7 @@ async function requestPinResetCode() {
     if (errLbl) { errLbl.innerText = 'Please sign in to your StreamVault account first'; errLbl.style.color = '#EF4444'; }
     return;
   }
-  if (errLbl) { errLbl.innerText = 'Sending code...'; errLbl.style.color = '#A78BFA'; }
+  if (errLbl) { errLbl.innerText = 'Sending code...'; errLbl.style.color = 'var(--theme-border)'; }
   try {
     const res = await fetch(CLOUD_SYNC_BASE + '/api/account/request-pin-reset', {
       method: 'POST',
@@ -8987,7 +9041,7 @@ async function submitResetPin() {
 
   if (errLbl) {
     errLbl.innerText = 'Verifying with cloud server...';
-    errLbl.style.color = '#A78BFA';
+    errLbl.style.color = 'var(--theme-border)';
   }
 
   try {
