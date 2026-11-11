@@ -126,7 +126,7 @@ async function run() {
   check('Home says "Loading your catalog" and shows the progress', /Loading your catalog/.test(txt) && /Parsed 12,000 Movies/.test(txt), txt.slice(0, 120));
   await go(ep, 'MOVIES');
   txt = await ep.evaluate(() => document.getElementById('mainViewport').innerText);
-  check('Movies says the same instead of "No matching titles"', /Loading your catalog/.test(txt) && !/No matching titles/.test(txt), txt.slice(0, 120));
+  check('Movies says the same instead of "No titles match these filters"', /Loading your catalog/.test(txt) && !/No titles match/.test(txt), txt.slice(0, 120));
   await ep.evaluate(() => { window.__sync = { isSyncing: false, phase: '', error: 'The IPTV server refused the login (HTTP 403). Check username and password' }; });
   await go(ep, 'HOME');
   txt = await ep.evaluate(() => document.getElementById('mainViewport').innerText);

@@ -36,7 +36,7 @@ async function newApp(browser) {
         if (p === '/api/profiles') return J({ ok: true, profiles, activeProfileId: 'p1' });
         if (p === '/api/playlists') return J({ ok: true, playlists: [] });
         if (p === '/api/home') return J({ hero: movie, rows: [{ title: 'Featured', items: [movie] }] });
-        if (p === '/api/detail') return J({ ok: true, item: movie, related: window.__noRelated ? [] : rel });
+        if (p === '/api/detail') return window.__kidsBlock ? J({ ok: false, error: 'This title is not available in Kids mode.' }) : J({ ok: true, item: movie, related: window.__noRelated ? [] : rel });
         if (p === '/api/related') {
           const q = new URLSearchParams(path.split('?')[1] || ''); const off = +q.get('offset') || 0, lim = +q.get('limit') || 24; window.__relCalls = (window.__relCalls || []); window.__relCalls.push(path);
           const all = Array.from({ length: 30 }, (_, i) => ({ ...rel[0], dedupKey: 'x' + i, id: 'x' + i, cleanTitle: 'Match ' + i }));
@@ -97,6 +97,14 @@ async function run() {
     check('no JavaScript errors', page.errors.length === 0, page.errors.join(' | '));
     await page.close();
   }
+  console.log('Kids profile opening a title that is not child-rated');
+  const kp = await newApp(browser);
+  await kp.evaluate(() => { window.__kidsBlock = true; window.openDetailModal('m1'); }); await sleep(600);
+  const kt = await kp.evaluate(() => ({ toast: (document.getElementById('tvToastNotification') || {}).innerText || '', open: document.getElementById('detailOverlay').style.display }));
+  check('it shows a clear message and no broken detail screen', /not available in Kids mode/.test(kt.toast) && kt.open === 'none', JSON.stringify(kt));
+  check('no JavaScript errors (Kids block)', kp.errors.length === 0, kp.errors.join(' | '));
+  await kp.close();
+
   console.log('Show more page');
   const sp = await newApp(browser);
   await sp.evaluate(() => window.openDetailModal('m1')); await sleep(600);

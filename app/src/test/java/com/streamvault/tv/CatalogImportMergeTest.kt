@@ -146,4 +146,20 @@ class CatalogImportMergeTest {
         db.removeCloudPending(listOf("c", "d"))
         assertEquals(0, db.countCloudPending())
     }
+
+    @Test
+    fun kidsProfilesMayOnlyOpenChildRatedTitles() {
+        db.upsertMediaBatch(
+            listOf(
+                item("toy:1995", version("31", "Toy Story (1995)")).copy(cleanTitle = "Toy Story", certification = "G"),
+                item("heat:1995", version("11")).copy(certification = "R"),
+                item("none:2000", version("41", "Unrated (2000)")).copy(cleanTitle = "Unrated", certification = "")
+            ),
+            markNewIfInserted = false, mergeVersions = true
+        )
+        assertEquals(true, db.isKidsAllowed("toy:1995"))
+        assertEquals(false, db.isKidsAllowed("heat:1995"))
+        assertEquals(false, db.isKidsAllowed("none:2000"))
+        assertEquals(false, db.isKidsAllowed("missing:0"))
+    }
 }

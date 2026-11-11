@@ -473,6 +473,8 @@ class AppApiRouter(
         val activeProf = getActiveUserProfile()
         val dedupKey = queryParams["dedupKey"] ?: queryParams["id"] ?: ""
         val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
+        // Kids profiles cannot open a title that is not child-rated, even through a saved link or watchlist entry
+        if (activeProf.isKids && !db.isKidsAllowed(dedupKey)) return """{"ok":false,"error":"This title is not available in Kids mode."}"""
         val mlt = db.getMoreLikeThis(
             item,
             isKids = activeProf.isKids,
@@ -1212,6 +1214,9 @@ class AppApiRouter(
             }.toString()
         }
         val kind = when (obj.optString("kind")) { "series" -> "series"; "live" -> "live"; else -> "movie" }
+        if (kind == "live" && getActiveUserProfile().isKids) {
+            return JSONObject().apply { put("ok", false); put("error", "kids"); put("message", "Live TV is not available in Kids mode.") }.toString()
+        }
         val id = obj.optString("id").trim()
         if (id.isBlank()) {
             return JSONObject().apply { put("ok", false); put("error", "no_id"); put("message", "This title has no playable stream.") }.toString()

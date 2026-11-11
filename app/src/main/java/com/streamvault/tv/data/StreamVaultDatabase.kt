@@ -1106,6 +1106,14 @@ class StreamVaultDatabase(context: Context) :
         return langs.toList()
     }
 
+    /** Kids profiles may only open titles with a young-child rating that are not 18+ / Extras. */
+    fun isKidsAllowed(dedupKey: String): Boolean {
+        readableDatabase.rawQuery(
+            "SELECT 1 FROM media_items m WHERE m.dedup_key = ? AND m.is_adult = 0 AND m.is_extra = 0 AND ${ContentCertifications.kidsClause("m.certification")}",
+            arrayOf(dedupKey)
+        ).use { return it.moveToFirst() }
+    }
+
     fun isAdultItem(dedupKey: String): Boolean {
         val db = readableDatabase
         db.rawQuery("SELECT (is_adult OR is_extra) FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->

@@ -955,7 +955,7 @@
   <div style="background:#120E24;border:1.5px solid #F59E0B;border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
     <div style="font-size:20px;font-weight:900;color:#FBBF24;margin-bottom:8px;">Clear all search history?</div>
     <div style="font-size:14px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
-      All recent search queries will be permanently cleared. Your watch history, watchlist, and ratings will remain untouched.
+      This clears your recent searches only. Your watch history, watchlist and ratings stay.
     </div>
     <div style="display:flex;gap:12px;justify-content:center;">
       <button tabindex="0" id="btnCancelClearAllHistory" class="btn tv-focusable" style="padding:10px 22px;" onclick="closeClearAllHistoryModal()">Cancel</button>
@@ -969,7 +969,7 @@
   <div style="background:#120E24;border:1.5px solid #EF4444;border-radius:16px;max-width:440px;width:90%;padding:28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
     <div style="font-size:20px;font-weight:900;color:#FCA5A5;margin-bottom:8px;">Sign Out of Account?</div>
     <div style="font-size:13.5px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
-      This will unlink this TV from your Cloud account and reset active session data. You can re-link anytime using your 6-digit code.
+      This signs this TV out of your account. You can sign in again any time.
     </div>
     <div id="signOutUnsyncedWarning" style="display:none;font-size:13px;color:#FCD34D;background:rgba(245,158,11,0.12);border:1px solid #F59E0B;border-radius:10px;padding:10px 12px;line-height:1.45;margin-bottom:16px;"></div>
     <div style="display:flex;gap:12px;justify-content:center;">
@@ -989,29 +989,9 @@
     </div>
     <div id="voiceSearchStatusTitle" style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:8px;">Listening...</div>
     <div id="voiceSearchStatusText" style="font-size:13.5px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
-      Speak a movie, TV series, genre, or actor into your remote microphone.
+      Say a movie, series, genre or actor name.
     </div>
     <button tabindex="0" id="btnCancelVoiceSearch" class="btn tv-focusable" style="padding:9px 24px;" onclick="closeVoiceSearchModal()">Cancel</button>
-  </div>
-</div>
-<div id="deleteProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
-  <div style="background:#120E24;border:1.5px solid #EF4444;border-radius:16px;max-width:440px;width:90%;padding:26px 28px;box-shadow:0 24px 60px rgba(0,0,0,0.95);text-align:center;">
-    <div style="font-size:20px;font-weight:900;color:#FCA5A5;margin-bottom:8px;">Delete Profile?</div>
-    <div id="deleteProfileModalText" style="font-size:13px;color:#D1D5DB;line-height:1.45;margin-bottom:14px;">
-      Are you sure you want to delete this profile? Watch history and watchlist will be permanently removed.
-    </div>
-    <div style="margin-bottom:16px;">
-      <label style="display:block;font-size:10.5px;font-weight:700;color:#9CA3AF;margin-bottom:6px;">Enter Master PIN to confirm deletion</label>
-      <input id="deleteProfilePinInput" type="password" maxlength="4" class="search-field tv-focusable"
-             readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
-             onkeydown="onInputKeyDown(this, event)"
-             style="width:130px;font-size:16px;letter-spacing:6px;text-align:center;padding:7px 10px;margin:0 auto;display:block;" placeholder="••••" />
-      <div id="deleteProfileErrorMsg" style="font-size:11px;color:#EF4444;height:16px;margin-top:4px;"></div>
-    </div>
-    <div style="display:flex;gap:12px;justify-content:center;">
-      <button tabindex="0" id="btnCancelDeleteProfile" class="btn tv-focusable" style="background:#262A38;border-color:#374151;color:#FFFFFF;padding:9px 22px;" onclick="closeDeleteProfileModal()">Cancel</button>
-      <button tabindex="0" id="btnConfirmDeleteProfile" class="btn tv-focusable" style="background:#DC2626;border-color:#EF4444;color:#FFFFFF;padding:9px 22px;font-weight:800;" onclick="confirmDeleteProfile()">Confirm Delete</button>
-    </div>
   </div>
 </div>
 
@@ -1053,7 +1033,7 @@
 <div id="resetPinModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100010;align-items:center;justify-content:center;">
   <div style="background:#120E24;border:1.5px solid var(--theme-border);border-radius:16px;max-width:440px;width:90%;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
     <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Reset Master PIN</div>
-    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Enter your StreamVault account password, or choose "Email me a code" and type the 6-digit code we send you.</div>
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Enter your StreamVault password, or tap "Email me a code" and type the 6-digit code we send.</div>
 
     <div style="margin-bottom:10px;text-align:left;">
       <label style="display:block;font-size:10px;font-weight:700;color:#D1D5DB;margin-bottom:4px;">Account Password</label>
@@ -1095,7 +1075,7 @@
 <div id="addProfileModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#120E24;border:1.5px solid var(--theme-border);border-radius:16px;max-width:440px;width:90%;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
     <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Add New Profile</div>
-    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Create a separate profile with its own watchlist and recommendations</div>
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">A separate profile with its own watchlist and suggestions.</div>
     
     <div style="margin-bottom:12px;text-align:left;">
       <label style="display:block;font-size:10px;font-weight:700;color:#D1D5DB;margin-bottom:4px;">Profile Name</label>
@@ -1120,7 +1100,7 @@
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;margin-bottom:12px;border-top:1px solid rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.06);text-align:left;">
       <div>
         <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Kids Profile</div>
-        <div style="font-size:9.5px;color:#9CA3AF;">Restricts to young-child certifications (G, PG, TV-Y, TV-G, TV-PG)</div>
+        <div style="font-size:9.5px;color:#9CA3AF;">Shows only young-child ratings (G, PG, TV-Y, TV-G, TV-PG).</div>
       </div>
       <button tabindex="0" id="btnAddProfileKidsToggle" class="btn tv-focusable" style="padding:4px 10px;font-size:10px;background:#262A38;border-color:#374151;color:#9CA3AF;" onclick="toggleNewProfileKids()">Disabled</button>
     </div>
@@ -1140,7 +1120,7 @@
     <div style="width:40px;height:40px;border-radius:50%;background:rgba(239,68,68,0.15);border:1.5px solid #EF4444;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;color:#F87171;font-size:18px;">🗑️</div>
     <div style="font-size:18px;font-weight:900;color:#F87171;margin-bottom:6px;">Delete Profile</div>
     <div style="font-size:12px;color:#D1D5DB;line-height:1.4;margin-bottom:18px;">
-      Delete profile <span id="deleteProfileNameSpan" style="color:#FFFFFF;font-weight:800;"></span>? All watch progress, watchlist, and ratings for this profile will be permanently removed.
+      Delete profile <span id="deleteProfileNameSpan" style="color:#FFFFFF;font-weight:800;"></span>? Its watch history, watchlist and ratings will be removed for good.
     </div>
     <div style="display:flex;gap:10px;justify-content:center;">
       <button tabindex="0" id="btnCancelDeleteProfile" class="btn tv-focusable" style="padding:6px 16px;font-size:11px;" onclick="closeDeleteProfileModal()">Cancel</button>
@@ -1156,7 +1136,7 @@
       <div style="width:48px;height:48px;border-radius:50%;background:rgba(239,68,68,0.15);border:1.5px solid #EF4444;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:#F87171;font-size:22px;">⚠️</div>
       <div style="font-size:22px;font-weight:900;color:#F87171;margin-bottom:8px;">Factory Reset</div>
       <div style="font-size:13.5px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
-        This will permanently reset all watch history, resume bookmarks, and local preferences to clean defaults.
+        This clears all watch history, resume points and saved settings on this TV.
       </div>
       <div style="display:flex;gap:12px;justify-content:center;">
         <button tabindex="0" id="btnCancelReset" class="btn tv-focusable" style="padding:10px 22px;" onclick="closeFactoryResetModal()">Cancel</button>
@@ -1188,7 +1168,7 @@
         Your Cinema.<br>Synced Everywhere.
       </div>
       <div style="font-size:12px;color:#9CA3AF;line-height:1.45;margin-bottom:16px;">
-        Hardware-accelerated 4K IPTV client with automatic TMDB enrichment and instant multi-device cloud synchronization.
+        An IPTV app for your TV, with automatic movie details and syncing across your devices.
       </div>
 
       <!-- Live Bedside QR Code Card -->
@@ -1213,7 +1193,7 @@
     <div style="background:#130E26;border:1.5px solid #281F4B;border-radius:16px;padding:24px 26px;box-shadow:0 20px 50px rgba(0,0,0,0.8);display:flex;flex-direction:column;gap:12px;">
       <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:2px;">Get Started</div>
       <div style="font-size:11.5px;color:#9CA3AF;line-height:1.4;margin-bottom:4px;">
-        Sign in to automatically load your profiles, continue watching history, watchlist, and IPTV playlist.
+        Sign in to bring your profiles, continue-watching list, watchlist and IPTV playlist to this TV.
       </div>
 
       <button tabindex="0" id="welcomeBtnSignIn" class="btn btn-primary tv-focusable" style="padding:11px 14px;font-size:13.5px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:10px;" onclick="openCloudAuthModal('login')">
@@ -1227,7 +1207,7 @@
       </button>
 
       <div style="font-size:10px;color:#6B7280;text-align:center;line-height:1.35;margin-top:6px;">
-        Cloud accounts sync securely via Cloudflare Workers + D1 Serverless Database.
+        Your account is stored securely online, so it works on all your TVs.
       </div>
     </div>
   </div>
@@ -1286,7 +1266,7 @@
     <div id="cloudAuthFormPane">
       <div id="cloudAuthTitle" style="font-size:20px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Sign In to Account</div>
       <div id="cloudAuthDesc" style="font-size:12.5px;color:#9CA3AF;line-height:1.4;margin-bottom:16px;">
-        Access your synchronized profiles, watchlist, ratings, and IPTV playlists across all your TVs and phones.
+        Sign in to see your profiles, watchlist, ratings and IPTV playlist on every TV and phone.
       </div>
 
       <form onsubmit="handleCloudAuthSubmit(event)">
@@ -1358,7 +1338,7 @@
       <div id="playlistModalTitle" style="font-size:18px;font-weight:900;color:#FFFFFF;">Add IPTV Playlist</div>
     </div>
     <div style="font-size:11.5px;color:#9CA3AF;line-height:1.4;margin-bottom:14px;">
-      Enter your Xtream Codes or M3U provider credentials. Titles will enrich in the background without affecting your watch history.
+      Enter your IPTV provider's server, username and password. Details and ratings are added in the background.
     </div>
 
     <div id="playlistReplaceNote" style="display:none;font-size:11.5px;color:#FCD34D;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.4);border-radius:8px;padding:8px 10px;margin-bottom:12px;line-height:1.4;"></div>
@@ -4394,7 +4374,7 @@ function renderLatest(vp, focusFirst = false) {
     const on = latestPanel === id;
     return `<button tabindex="0" id="latestPanel${id}" class="filter-pill-btn tv-focusable ${on ? 'active' : ''}" style="flex-shrink:0;${on ? 'background:rgba(var(--theme-accent-rgb),0.35);border-color:var(--theme-accent);color:#fff;' : ''}" onclick="selectLatestPanel('${id}')">${label} (${n})</button>`;
   };
-  const empty = '<div style="padding:40px;color:var(--muted);text-align:center;">Nothing new yet. New titles from your provider show up here for 14 days.</div>';
+  const empty = '<div style="padding:40px;color:var(--muted);text-align:center;">Nothing new yet. New titles appear here for 14 days.</div>';
   const cards = (arr) => `<div class="results-grid" id="filterResultsGrid">${arr.map((m) => renderPosterCard(m)).join('')}</div>`;
   let body;
   if (groups[latestPanel]) {
@@ -4770,7 +4750,7 @@ async function catalogNoticeHtml() {
   }
   if (sync.isSyncing || total === 0) {
     const phase = sync.phase ? escapeHtml(String(sync.phase)) : 'Getting started...';
-    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:8px;">Loading your catalog…</div><div style="font-size:13px;color:var(--theme-border);">${phase}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;max-width:560px;margin-left:auto;margin-right:auto;">The first time can take a few minutes. Titles appear as soon as they are ready, and you can keep using the app.</div></div>`;
+    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:8px;">Loading your catalog…</div><div style="font-size:13px;color:var(--theme-border);">${phase}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;max-width:560px;margin-left:auto;margin-right:auto;">The first load can take a few minutes. Titles appear as they are ready, so you can browse meanwhile.</div></div>`;
   }
   return '';
 }
@@ -5485,7 +5465,7 @@ async function executeFilterQuery(append = false) {
       }
     }
     if (items.length === 0) {
-      grid.innerHTML = '<div style="grid-column:1/-1;padding:60px 20px;color:var(--muted);text-align:center;font-size:15px;">No matching titles found for current filter combination.<br/><span style="font-size:13px;color:var(--theme-accent);cursor:pointer;margin-top:8px;display:inline-block;" onclick="resetFilterState()">Click here to reset all filters</span></div>';
+      grid.innerHTML = '<div style="grid-column:1/-1;padding:60px 20px;color:var(--muted);text-align:center;font-size:15px;">No titles match these filters.<br/><span style="font-size:13px;color:var(--theme-accent);cursor:pointer;margin-top:8px;display:inline-block;" onclick="resetFilterState()">Click here to reset all filters</span></div>';
       return;
     }
     grid.innerHTML = items.map((m) => renderPosterCard(m)).join('');
@@ -5656,7 +5636,7 @@ async function loadWatchlist(vp) {
       <div style="padding:34px 44px;">
         <div style="font-size:24px;font-weight:900;margin-bottom:18px;">My List (${items.length})</div>
         ${items.length === 0
-          ? '<div style="color:var(--muted);font-size:15px;margin-top:20px;">Your watchlist is currently empty. Open any movie or series and click "+ Add to List" to save it here.</div>'
+          ? '<div style="color:var(--muted);font-size:15px;margin-top:20px;">Your watchlist is empty. Open a title and choose "+ Add to List".</div>'
           : `<div class="results-grid">${items.map((m) => renderPosterCard(m)).join('')}</div>`}
       </div>
     `;
@@ -5817,7 +5797,7 @@ async function loadProfile(vp) {
             <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Kids Mode Restriction</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Locks adult channels and restricts to family ratings</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Hides adult channels and shows family ratings only.</div>
               </div>
               <button tabindex="0" id="btnToggleKidsMode" class="btn tv-focusable" style="padding:3px 10px;font-size:10px;${activeProf.isKids ? 'background:#059669;border-color:#10B981;color:#fff;' : 'background:#262A38;border-color:#374151;color:#9CA3AF;'}" onclick="toggleProfileKidsMode()">${activeProf.isKids ? 'Enabled' : 'Disabled'}</button>
             </div>
@@ -5872,7 +5852,7 @@ async function loadProfile(vp) {
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">18+ Adult</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Needs Master PIN. Locks again when you leave it, after 30 min, or on standby</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Needs your Master PIN. Locks again when you leave, after 30 minutes, or when the TV sleeps.</div>
               </div>
               <button tabindex="0" id="btnToggleParentalLock" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="toggleParentalLockSession()">Unlock</button>
             </div>
@@ -5907,15 +5887,25 @@ async function loadProfile(vp) {
 }
 
 // 5. COMPREHENSIVE SETTINGS (Account, IPTV Playlists, Hardware & System)
-async function loadSettings(vp) {
+// The screen is drawn at once from what the TV already knows; the cloud list is fetched in the background and the
+// screen is redrawn only if it differs (the focus stays on the same button).
+const playlistSig = (list) => (list || []).map((p) => { const l = playlistLiveStatus(p); return [p.playlist_id, p.name, p.username, p.server_url, p.status, l.status, l.error].join('|'); }).join(';');
+async function loadSettings(vp, skipFetch = false) {
   const localAccount = JSON.parse(localStorage.getItem('streamvault_account') || '{}');
   const isLinked = Boolean(localAccount && localAccount.email);
   const accountEmail = localAccount.email || 'Guest Mode (Local Only)';
 
-  let playlists = [];
-  try {
-    playlists = await loadPlaylistsData();
-  } catch (_) {}
+  const playlists = cachedPlaylists.slice();
+  if (!skipFetch) {
+    const shownSig = playlistSig(playlists);
+    loadPlaylistsData().then((fresh) => {
+      if (currentTab !== 'SETTINGS' || vp !== document.getElementById('mainViewport')) return;
+      if (playlistSig(fresh) === shownSig) return;
+      const focusedId = document.activeElement && document.activeElement.id;
+      loadSettings(vp, true);
+      if (focusedId) setTimeout(() => { const el = document.getElementById(focusedId); if (el) el.focus(); }, 30);
+    }).catch(() => {});
+  }
 
   vp.innerHTML = `
     <div style="padding:8px 24px 22px 24px;max-width:1440px;margin:0 auto;box-sizing:border-box;max-height:100vh;overflow:hidden;">
@@ -6001,7 +5991,7 @@ async function loadSettings(vp) {
                 <div style="font-size:9.5px;color:#9CA3AF;margin-top:3px;">Watch history and lists sync across your TVs.</div>
               </div>
             ` : `
-              <div style="background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:10px 12px;margin-bottom:6px;font-size:11px;color:#D1D5DB;">Not signed in. Sign in to keep your lists and history across TVs.</div>
+              <div style="background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:10px 12px;margin-bottom:6px;font-size:11px;color:#D1D5DB;">Not signed in. Sign in to keep your lists and history on all your TVs.</div>
             `}
           </div>
 
@@ -6695,7 +6685,7 @@ function updateCloudAuthUi() {
     if (nameRow) nameRow.style.display = 'block';
   } else {
     if (title) title.innerText = 'Sign In to Account';
-    if (desc) desc.innerText = 'Access your synchronized profiles, watchlist, ratings, and IPTV playlists across all your TVs and phones.';
+    if (desc) desc.innerText = 'Sign in to see your profiles, watchlist, ratings and IPTV playlist on every TV and phone.';
     if (submitBtn) submitBtn.innerText = 'Sign In';
     if (toggleLink) toggleLink.innerText = "Don't have an account? Sign Up";
     if (nameRow) nameRow.style.display = 'none';
@@ -7743,6 +7733,12 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
   try {
     const res = await fetch(`/api/detail?dedupKey=${encodeURIComponent(dedupKey)}&matchMode=${currentMltMode}&hideWatched=${currentMltHideWatched}`);
     const data = await res.json();
+    if (!data || !data.item) {      // for example a Kids profile opening a title that is not child-rated
+      ov.style.display = 'none'; ov.innerHTML = '';
+      showToast((data && data.error) || 'Could not open this title.');
+      if (lastContentFocusTarget && lastContentFocusTarget.focus) { try { lastContentFocusTarget.focus(); } catch (_) {} }
+      return;
+    }
     const item = data.item;
     const related = data.related || [];
     selectedDetailItem = item;
@@ -10619,7 +10615,7 @@ function openVoiceSearchModal() {
   const title = document.getElementById('voiceSearchStatusTitle');
   const text = document.getElementById('voiceSearchStatusText');
   if (title) title.innerText = 'Listening...';
-  if (text) text.innerText = 'Speak a movie, TV series, genre, or actor into your remote microphone.';
+  if (text) text.innerText = 'Say a movie, series, genre or actor name.';
   if (modal) {
     modal.style.display = 'flex';
     const cancelBtn = document.getElementById('btnCancelVoiceSearch');
