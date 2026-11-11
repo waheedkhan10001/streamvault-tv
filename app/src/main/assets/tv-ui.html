@@ -6062,7 +6062,11 @@ async function changeParentalPin() {
 function openFactoryResetModal() {
   playNavSound();
   const m = document.getElementById('factoryResetModal');
-  if (m) m.style.display = 'flex';
+  if (m) {
+    m.style.display = 'flex';
+    // Land on the SAFE button: before, focus stayed on a button behind the popup, so pressing OK would have used that one
+    setTimeout(() => document.getElementById('btnCancelReset')?.focus(), 40);
+  }
 }
 
 function updateUserProfileUI() {
@@ -8505,6 +8509,8 @@ function openResetPinModal() {
 function closeResetPinModal() {
   const m = document.getElementById('resetPinModal');
   if (m) m.style.display = 'none';
+  const lockBtn = document.getElementById('btnToggleParentalLock') || document.getElementById('btnToggleKidsMode');
+  if (lockBtn && lockBtn.offsetParent !== null) lockBtn.focus();
 }
 
 // Asks the cloud server to email a 6-digit PIN-reset code to the signed-in account's own address.
@@ -8593,6 +8599,10 @@ async function submitResetPin() {
 
 // 9. GLOBAL BACK KEY HANDLER (Industry Standard Leanback Navigation)
 window.handleAppBackKey = function() {
+  // 0. The popup on top always closes first
+  const topPopupForBack = getTopPopup();
+  if (topPopupForBack && closeTopPopup(topPopupForBack)) return true;
+
   // 1. Modals
   if (document.getElementById('playlistModal') && document.getElementById('playlistModal').style.display === 'flex') {
     closePlaylistModal();
@@ -8714,6 +8724,51 @@ function getActiveSidebarElement() {
          document.getElementById('sidebarUserProfilePill');
 }
 
+// Every popup that can open over the app. The one on top (highest layer, then latest in the page,
+// exactly what is painted in front) owns the remote control: arrows stay inside it and Back closes it.
+const POPUP_IDS = ['playlistModal', 'cloudAuthModal', 'resetPinModal', 'parentalPinModal', 'signOutModal', 'factoryResetModal',
+  'userProfileModal', 'addProfileModal', 'deleteProfileModal', 'deleteHistoryModal', 'clearAllHistoryModal', 'voiceSearchModal'];
+
+function getTopPopup() {
+  let best = null, bestZ = -Infinity;
+  for (const id of POPUP_IDS) {
+    const el = document.getElementById(id);
+    if (!el || el.style.display !== 'flex') continue;
+    const z = parseInt(getComputedStyle(el).zIndex, 10) || 0;
+    const later = best && (best.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    if (z > bestZ || (z === bestZ && later)) { best = el; bestZ = z; }
+  }
+  return best;
+}
+
+// Back key for the popup on top. Returns true when it handled the key.
+function closeTopPopup(el) {
+  switch (el.id) {
+    case 'cloudAuthModal': {
+      const vp = document.getElementById('cloudAuthVerifyPane');
+      if (vp && vp.style.display !== 'none' && vp.style.display !== '') switchCloudAuthPane('form'); else closeCloudAuthModal();
+      return true;
+    }
+    case 'playlistModal': closePlaylistModal(); return true;
+    case 'resetPinModal': closeResetPinModal(); return true;
+    case 'parentalPinModal': closeParentalPinModal(); return true;
+    case 'signOutModal': closeSignOutModal(); return true;
+    case 'factoryResetModal': closeFactoryResetModal(); return true;
+    case 'userProfileModal': {
+      closeUserProfileModal();
+      const pill = document.querySelector('.user-profile-pill');
+      if (pill) { pill.focus(); playNavSound(); }
+      return true;
+    }
+    case 'addProfileModal': closeAddProfileModal(); return true;
+    case 'deleteProfileModal': closeDeleteProfileModal(); return true;
+    case 'deleteHistoryModal': closeDeleteHistoryModal(); return true;
+    case 'clearAllHistoryModal': closeClearAllHistoryModal(); return true;
+    case 'voiceSearchModal': closeVoiceSearchModal(); return true;
+  }
+  return false;
+}
+
 // Sign-in / sign-up popup. Rows are listed in the order they appear on screen; Up/Down change row,
 // Left/Right move inside a row. Focus can never leave the popup (it sits above the welcome screen).
 function cloudAuthNavigate(current, key) {
@@ -8753,9 +8808,14 @@ function fastNavigate(current, key) {
   // 0.0. Sign-in / sign-up popup (checked first: it is on top of everything else)
   if (cloudAuthNavigate(current, key)) return true;
 
+  // Any other popup on top: it owns the remote. If focus slipped outside it, navigateSpatial pulls it back in,
+  // and the overlays underneath (welcome, profile picker, detail "focus trap") must not grab focus back.
+  const topPopup = getTopPopup();
+  if (topPopup && topPopup.id !== 'playlistModal' && !topPopup.contains(current)) return false;
+
   // 0.1. Welcome Screen Overlay Navigation Flow
   const welcomeOverlay = document.getElementById('welcomeScreenOverlay');
-  if (welcomeOverlay && welcomeOverlay.style.display === 'flex') {
+  if (!topPopup && welcomeOverlay && welcomeOverlay.style.display === 'flex') {
     if (!welcomeOverlay.contains(current)) {
       const firstBtn = document.getElementById('welcomeBtnSignIn');
       if (firstBtn) { firstBtn.focus(); playNavSound(); return true; }
@@ -8773,7 +8833,7 @@ function fastNavigate(current, key) {
 
   // 0.15. Profile Picker Overlay Navigation Flow
   const pickerOverlay = document.getElementById('profilePickerOverlay');
-  if (pickerOverlay && pickerOverlay.style.display === 'flex') {
+  if (!topPopup && pickerOverlay && pickerOverlay.style.display === 'flex') {
     const cards = Array.from(pickerOverlay.querySelectorAll('.profile-picker-card'));
     const idx = cards.indexOf(current);
     if (idx === -1) {
@@ -8833,7 +8893,7 @@ function fastNavigate(current, key) {
 
   // 0.5. Detail Modal Navigation Flow
   const detailOverlay = document.getElementById('detailOverlay');
-  const isDetailActive = detailOverlay && detailOverlay.style.display !== 'none';
+  const isDetailActive = !topPopup && detailOverlay && detailOverlay.style.display !== 'none';
   if (isDetailActive) {
     // Focus Trap: If somehow activeElement is NOT inside detailOverlay, snap it right back!
     if (!detailOverlay.contains(current)) {
@@ -9909,6 +9969,8 @@ function navigateSpatial(key) {
   let container = document;
   if (activeDropdownId && document.getElementById(activeDropdownId) && document.getElementById(activeDropdownId).style.display === 'block') {
     container = document.getElementById(activeDropdownId);
+  } else if (getTopPopup()) {
+    container = getTopPopup();
   } else if (document.getElementById('playlistModal') && document.getElementById('playlistModal').style.display === 'flex') {
     container = document.getElementById('playlistModal');
   } else if (document.getElementById('cloudAuthModal') && document.getElementById('cloudAuthModal').style.display === 'flex') {
