@@ -4013,12 +4013,19 @@ async function resendVerificationCode(e) {
     statusMsg.innerText = 'Sending new code...';
   }
   try {
-    const res = await fetch(CLOUD_SYNC_BASE + '/api/auth/signup', {
+    const res = await fetch(CLOUD_SYNC_BASE + '/api/auth/resend-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: currentPendingVerifyEmail, password: 'resend_request_' + Date.now() })
+      body: JSON.stringify({ email: currentPendingVerifyEmail })
     });
     const data = await res.json();
+    if (!res.ok) {
+      if (statusMsg) {
+        statusMsg.style.color = '#EF4444';
+        statusMsg.innerText = data.error || 'Failed to resend code';
+      }
+      return;
+    }
     if (statusMsg) {
       statusMsg.style.color = '#10B981';
       statusMsg.innerText = '✓ New 6-digit code sent to your email!';

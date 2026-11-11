@@ -67,6 +67,7 @@ class AppApiRouter(
 
                 // 8. Media Details (Movie / Series + Episodes + More Like This)
                 method == "GET" && path == "/api/detail" -> handleGetDetail(queryParams)
+                method == "GET" && path == "/api/probe-versions" -> handleProbeVersions(queryParams)
 
                 // 9. Live TV
                 method == "GET" && path == "/api/live" -> handleGetLive(queryParams)
@@ -449,6 +450,156 @@ class AppApiRouter(
             put("episodes", epArr)
             put("moreLikeThis", mediaListToJsonArray(mlt))
         }.toString()
+    }
+
+    private fun handleProbeVersions(queryParams: Map<String, String>): String {
+        val dedupKey = queryParams["dedupKey"] ?: ""
+        if (dedupKey.isBlank()) {
+            return JSONObject().apply {
+                put("ok", true)
+                put("versions", JSONArray())
+            }.toString()
+        }
+
+        val activeProf = getActiveUserProfile()
+        val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id)
+        if (item == null || item.versions.size <= 1) {
+            val vArr = JSONArray()
+            item?.versions?.forEach { v ->
+                vArr.put(JSONObject().apply {
+                    put("streamId", v.streamId)
+                    put("rawTitle", v.rawTitle)
+                    put("languageTag", v.languageTag)
+                    put("qualityTag", v.qualityTag)
+                    put("containerExtension", v.containerExtension)
+                    put("fileSizeBytes", 0L)
+                    put("fileSizeStr", "")
+                    put("qualityScore", 10)
+                    put("isCam", rawTitleMatchesCam(v.rawTitle))
+                })
+            }
+            return JSONObject().apply {
+                put("ok", true)
+                put("versions", vArr)
+            }.toString()
+        }
+
+        val creds = prefs.loadCredentials()
+        val updatedVersions = mutableListOf<JSONObject>()
+
+        for (v in item.versions) {
+            var fileSizeBytes = 0L
+            var fileSizeStr = ""
+            var qualityScore = 10
+
+            if (creds.serverUrl.isNotBlank() && creds.username.isNotBlank() && creds.password.isNotBlank()) {
+                val size = probeStreamSize(creds.serverUrl, creds.username, creds.password, v.streamId, v.containerExtension)
+                if (size > 0L) {
+                    fileSizeBytes = size
+                    fileSizeStr = formatBytes(size)
+                    val mb = size / (1024L * 1024L)
+                    qualityScore = when {
+                        mb > 2500 -> 30
+                        mb > 1500 -> 22
+                        mb > 800 -> 15
+                        else -> 10
+                    }
+                }
+            }
+
+            val isCam = rawTitleMatchesCam(v.rawTitle)
+            if (isCam) {
+                qualityScore = 1
+            }
+
+            val obj = JSONObject().apply {
+                put("streamId", v.streamId)
+                put("rawTitle", v.rawTitle)
+                put("languageTag", v.languageTag)
+                put("qualityTag", v.qualityTag)
+                put("containerExtension", v.containerExtension)
+                put("fileSizeBytes", fileSizeBytes)
+                put("fileSizeStr", fileSizeStr)
+                put("qualityScore", qualityScore)
+                put("isCam", isCam)
+            }
+            updatedVersions.add(obj)
+        }
+
+        updatedVersions.sortByDescending { it.optInt("qualityScore", 0) }
+
+        val resArr = JSONArray()
+        for (uv in updatedVersions) {
+            resArr.put(uv)
+        }
+
+        return JSONObject().apply {
+            put("ok", true)
+            put("versions", resArr)
+        }.toString()
+    }
+
+    private fun probeStreamSize(
+        serverUrl: String,
+        username: String,
+        pass: String,
+        streamId: String,
+        ext: String
+    ): Long {
+        return try {
+            val base = serverUrl.trimEnd('/')
+            val safeBase = if (!base.startsWith("http://", ignoreCase = true) && !base.startsWith("https://", ignoreCase = true)) {
+                "http://$base"
+            } else base
+            val safeExt = ext.ifBlank { "mp4" }
+            val urlStr = "$safeBase/movie/$username/$pass/$streamId.$safeExt"
+            val url = java.net.URL(urlStr)
+            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Range", "bytes=0-10")
+                setRequestProperty("User-Agent", "IPTVSmartersPlayer/1.0")
+                connectTimeout = 3000
+                readTimeout = 3000
+                instanceFollowRedirects = true
+            }
+            try {
+                val code = conn.responseCode
+                if (code in 200..299) {
+                    val cr = conn.getHeaderField("Content-Range") ?: ""
+                    val m = Regex("""/(\d+)$""").find(cr)
+                    if (m != null) {
+                        m.groupValues[1].toLongOrNull() ?: 0L
+                    } else {
+                        val cl = conn.contentLengthLong
+                        if (cl > 1000L) cl else 0L
+                    }
+                } else 0L
+            } finally {
+                conn.disconnect()
+            }
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        if (bytes <= 0L) return ""
+        val gb = bytes / (1024.0 * 1024.0 * 1024.0)
+        if (gb >= 1.0) {
+            return String.format(Locale.US, "%.1f GB", gb)
+        }
+        val mb = bytes / (1024L * 1024L)
+        if (mb >= 1L) {
+            return "$mb MB"
+        }
+        val kb = bytes / 1024L
+        return "$kb KB"
+    }
+
+    private fun rawTitleMatchesCam(rawTitle: String): Boolean {
+        val lower = rawTitle.lowercase(Locale.ROOT)
+        return lower.contains("cam") || lower.contains("hdcam") || lower.contains("telesync") ||
+                Regex("""\b(cam|hdcam|ts|dragon money)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawTitle)
     }
 
     private fun handleGetLive(queryParams: Map<String, String>): String {
@@ -874,6 +1025,7 @@ class AppApiRouter(
             put("versions", JSONArray(item.versions.map { v ->
                 JSONObject().apply {
                     put("streamId", v.streamId)
+                    put("rawTitle", v.rawTitle)
                     put("languageTag", v.languageTag)
                     put("qualityTag", v.qualityTag)
                     put("containerExtension", v.containerExtension)

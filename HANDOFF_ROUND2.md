@@ -3,24 +3,24 @@
 ## 0. Start Here for a New Chat
 
 ### Repo Layout
-- **`app/`**: Android TV application (Android 11+, Leanback TV wrapper, Room SQLite, ExoPlayer).
-  - `app/src/main/assets/tv-ui.html`: Standalone TV Web UI running inside native WebView (spatial nav, profiles, video player UI).
+- **`app/`**: Android TV application (Android 11+, Leanback TV wrapper, Room/SQLite, ExoPlayer).
+  - `app/src/main/assets/tv-ui.html`: Standalone TV Web UI running inside native WebView (spatial nav, profiles, video player UI, multi-version stream selector).
   - `app/src/main/java/com/streamvault/tv/data/`: Native data layer:
-    - `AppDatabase.kt`: Room database (`profiles`, `profile_media_state`, `catalog_items`, `stream_versions`, `playlists`).
-    - `AppApiRouter.kt`: Native HTTP server intercepting `/api/*` calls from `tv-ui.html` (auth gates, profile CRUD, sync, credentials).
+    - `StreamVaultDatabase.kt`: Room/SQLite database (`profiles`, `profile_media_state`, `media_items`, `series_episodes`, `live_channels`, `pinned_smart_rows`).
+    - `AppApiRouter.kt`: Native HTTP server intercepting `/api/*` calls from `tv-ui.html` (auth gates, profile CRUD, `/api/probe-versions`, sync, credentials).
     - `CatalogSyncEngine.kt`: Batched 25-item catalogue sync with exponential backoff and 14-day soft delete.
     - `PreferencesManager.kt`: Encrypted and persistent device preferences (auth token, last profile, dedupKey index).
   - `app/src/main/java/com/streamvault/tv/MainActivity.kt`: Hardware Back key interceptor and WebView container.
 - **`cloud-sync/`**: Cloudflare Worker backend and D1 database schema.
-  - `src/worker.js`: Auth API (PBKDF2 SHA-256), Brevo v3 transactional email, TMDB proxy with D1 cache, catalog and profile delta sync.
-  - `schema.sql`: D1 relational schema (`accounts`, `profiles`, `profile_media_state`, `playlists`, `catalog_items`, `stream_versions`, `tmdb_cache`).
+  - `src/worker.js`: Auth API (PBKDF2 SHA-256), Brevo v3 transactional email, per-IP and per-email rate limits, `/api/auth/resend-code`, TMDB proxy with D1 cache, catalog and profile delta sync.
+  - `schema.sql`: D1 relational schema (`accounts`, `profiles`, `profile_media_state`, `playlists`, `catalog_items`, `stream_versions`, `tmdb_cache`, `email_codes`).
 - **`pc-runner/`**: Desktop test harness for headless and browser-based debugging (`server.js`, `tv-ui.html`).
 - **`tests/`**: Automated Puppeteer / Node.js test suites (`phaseA.test.mjs` through `phaseE.test.mjs`).
 - **`.toolchain/`**: Local portable Android SDK (build-tools 34.0.0, platforms android-34) and OpenJDK.
 
 ### How to Run the Tests
 ```bash
-# Run complete test suite (36/36 assertions across all phases):
+# Run complete test suite (42/42 assertions across all phases):
 node tests/phaseA.test.mjs
 node tests/phaseB.test.mjs
 node tests/phaseC.test.mjs
@@ -35,10 +35,8 @@ node tests/phaseE.test.mjs
 ```
 
 ### Open Gaps
-1. **Phase E Item 3 (Rate-limiting & Resend)**: IP rate-limiting is implemented in `cloud-sync/src/worker.js`, but per-email rate limiting and a dedicated `/api/auth/resend-code` route remain to be implemented.
-2. **Phase E Item 4 (`/api/probe-versions`)**: Stream file size probing via HTTP HEAD is invoked by `tv-ui.html` and stubbed in `pc-runner/server.js`, but not yet implemented in native `AppApiRouter.kt`.
-3. **Phase E Item 5 (Compose Cleanup)**: Jetpack Compose dependencies remain in `app/build.gradle.kts` and unreferenced legacy screens remain in `app/src/main/java/com/streamvault/tv/ui/` (`StreamVaultTvApp.kt`, `StreamVaultPlayerScreen.kt`).
-4. **Physical TV Verification**: Visual D-pad smoothness on 55" display, hardware ExoPlayer video playback (MKV/MP4/HLS MPEG-TS), real-time cross-device sync between two TVs, and 60,000-title catalog memory pressure testing on physical 2 GB RAM TV hardware.
+1. **Phase E Items 3, 4, 5**: **ALL COMPLETED** (Per-email rate limiting & `/api/auth/resend-code` implemented; `/api/probe-versions` implemented in `AppApiRouter.kt`; Jetpack Compose completely purged and APK reduced to ~2.96 MB).
+2. **Physical TV Verification (Phase F)**: Visual D-pad smoothness on 55" display, hardware ExoPlayer video playback (MKV/MP4/HLS MPEG-TS), real-time cross-device sync between two TVs, and 60,000-title catalog memory pressure testing on physical 2 GB RAM TV hardware.
 
 ### Secrets & Variables Needed
 - `BREVO_API_KEY`: Brevo v3 API key (`xkeysib-...`) for sending 6-digit verification codes.
@@ -52,31 +50,31 @@ node tests/phaseE.test.mjs
 ## 1. Quick Audit & User Questions
 
 ### Question 1: Phase E Items 3, 4, 5 Status
-- **Item 3 (Rate-limit)**: Partially done; IP limits enforced for signup/login/verify in `cloud-sync/src/worker.js`, but per-email rate limiting and `/api/auth/resend-code` are not implemented.
-- **Item 4 (`/api/probe-versions`)**: Not done; invoked in `app/src/main/assets/tv-ui.html` and stubbed in `pc-runner/server.js`, but unhandled in `app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt`.
-- **Item 5 (Compose cleanup)**: Not done; Compose dependencies remain in `app/build.gradle.kts` and unused screens remain in `app/src/main/java/com/streamvault/tv/ui/` (`StreamVaultTvApp.kt`, `StreamVaultPlayerScreen.kt`).
+- **Item 3 (Rate-limit & Resend)**: **DONE**; IP and per-email limits enforced on signup (3/min), login (5/min), verify (5/min), and resend (3/min) in `cloud-sync/src/worker.js`, plus `/api/auth/resend-code` route fully implemented and wired to `tv-ui.html`.
+- **Item 4 (`/api/probe-versions`)**: **DONE**; implemented in `app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt` using fast HTTP Range bytes 0-10, size formatting, and CAM rip detection.
+- **Item 5 (Compose cleanup)**: **DONE**; all Jetpack Compose dependencies removed from `app/build.gradle.kts` and legacy screens deleted from `app/src/main/java/com/streamvault/tv/ui/` (`StreamVaultTvApp.kt`, `StreamVaultPlayerScreen.kt`), shrinking APK from 4.11 MB to ~2.96 MB.
 
 ### Question 2: Phase F Verification Status Breakdown
-- **Ran & Passed (Headless Puppeteer)**: Sign-in gate & 401s (PASS), Profile CRUD & Kids/Vault privacy (PASS), Spatial nav & Back key (PASS), Cloud sync & dedup re-linking (PASS), Auth hardening & Brevo email (PASS), 960x540 zero console errors (PASS) — 36/36 tests passed.
+- **Ran & Passed (Headless Puppeteer)**: Sign-in gate & 401s (PASS), Profile CRUD & Kids/Vault privacy (PASS), Spatial nav & Back key (PASS), Cloud sync & dedup re-linking (PASS), Auth hardening, per-email rate limits & Brevo email (PASS), 960x540 zero console errors (PASS) — 42/42 tests passed.
 - **Needs TV**: Physical D-pad remote feel on 55" display, ExoPlayer hardware video playback (MKV/MP4/HLS MPEG-TS), cross-device real-time sync between two TVs, and 14-day soft-delete visual restore confirmation.
 - **Not Run**: 60,000-title catalogue memory pressure stress test on physical 2 GB RAM TV hardware.
 
 ### Question 3: APK Signature & Version Code
 - **Signed**: Yes, signed with release keystore (`release.keystore`) via APK Signature Scheme v2.
 - **`apksigner` Result**: `Verifies: true`, `Verified using v2 scheme (APK Signature Scheme v2): true`, `Number of signers: 1`.
-- **`versionCode`**: `versionCode='3'`, `versionName='2.8.0'` (verified via `apksigner`, `aapt2 dump badging`, and `output-metadata.json`).
+- **`versionCode`**: `versionCode='3'`, `versionName='2.8.0'`, size 2,960,072 bytes (~2.96 MB, down from 4.11 MB).
 
 ---
 
 ## 2. Overview & Current State
 
 - **Version**: `2.8.0` (versionCode `3`)
-- **APK Artifact**: `app/build/outputs/apk/release/app-release.apk` (~4.11 MB, R8 minified, release signed)
+- **APK Artifact**: `app/build/outputs/apk/release/app-release.apk` (~2.96 MB, R8 minified, release signed)
 - **Target Device**: TCL 55P635 (Android 11, ATV, 2GB RAM, 960x540 viewport, ADB `192.168.100.42:5555`)
 - **Git State**:
   - Baseline Tag: `before-round2` (`a724f06`)
   - Release Tag: `v2.8.0`
-  - Active Branch: `main` (merged from `round2-fixes`)
+  - Active Branch: `main`
 
 ---
 
@@ -96,7 +94,7 @@ node tests/phaseE.test.mjs
 
 ### Phase B — Real Profiles & Content Rules (commit `796e4dc`)
 - **Files Touched**:
-  - `app/src/main/java/com/streamvault/tv/data/AppDatabase.kt`
+  - `app/src/main/java/com/streamvault/tv/data/StreamVaultDatabase.kt`
   - `app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt`
   - `app/src/main/assets/tv-ui.html` & `pc-runner/tv-ui.html`
   - `tests/phaseB.test.mjs`
@@ -137,24 +135,32 @@ node tests/phaseE.test.mjs
   - Real sync Settings UI ("Just now", "All synced").
   - Universal `dedupKey` anchoring retains 100% of user profile data across playlist swaps.
 
-### Phase E — Auth Hardening & Brevo Email (commit `d224aa5`)
+### Phase E — Auth Hardening, Resend Route, Probe Versions & Compose Cleanup
 - **Files Touched**:
   - `cloud-sync/src/worker.js`
   - `cloud-sync/README.md`
+  - `app/build.gradle.kts`
+  - `app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt`
+  - `app/src/main/assets/tv-ui.html` & `pc-runner/tv-ui.html`
+  - `app/src/main/java/com/streamvault/tv/ui/StreamVaultPlayerScreen.kt` (deleted)
+  - `app/src/main/java/com/streamvault/tv/ui/StreamVaultTvApp.kt` (deleted)
   - `tests/phaseE.test.mjs`
 - **What Changed**:
   - Removed `devCode` leak from signup response in production; only returned when `DEV_MODE=true` is explicitly configured.
   - Migrated email dispatch to Brevo v3 Transactional Email API (`https://api.brevo.com/v3/smtp/email`, send-only, no contact lists).
-  - Configurable sender (`BREVO_SENDER_EMAIL` / `BREVO_SENDER_NAME`, defaulting to `noreply@streamvault.tv` / `StreamVault TV`).
+  - Per-email rate limits on signup (3/min), login (5/min), verify (5/min), and resend (3/min).
+  - Implemented `/api/auth/resend-code` route in `worker.js` and wired to TV UI (`resendVerificationCode`).
+  - Implemented `/api/probe-versions` in native `AppApiRouter.kt` using fast HTTP Range bytes 0-10, size formatting, and CAM rip detection.
+  - Completely purged unused Jetpack Compose dependencies and legacy screen files, reducing APK size from 4.11 MB to ~2.96 MB.
 
 ---
 
 ## 4. What Failed or Was Skipped
 
-- **Failures**: 0 failures. All 36 automated assertions across 5 test suites passed cleanly.
+- **Failures**: 0 failures. All 42 automated assertions across 5 test suites passed cleanly.
 - **Skipped / Held on Owner Request**:
-  - Step 2 (ADB install to TCL 55P635) held.
-  - Step 3 (Cloudflare Worker production deployment) held.
+  - ADB install to TCL 55P635 held.
+  - Cloudflare Worker production deployment held.
 
 ---
 
@@ -166,8 +172,8 @@ node tests/phaseE.test.mjs
 | **Phase B** | Profiles CRUD, scoped data, Kids Mode, Master PIN, Vault | `node tests/phaseB.test.mjs` | **7/7 PASSED** |
 | **Phase C** | Spatial navigation, element reachability, Leanback Back key | `node tests/phaseC.test.mjs` | **8/8 PASSED** |
 | **Phase D** | TMDB proxy, catalog up/down, profile sync, dedup re-link | `node tests/phaseD.test.mjs` | **8/8 PASSED** |
-| **Phase E** | `devCode` omission, Brevo transactional email conform | `node tests/phaseE.test.mjs` | **6/6 PASSED** |
-| **Full Run** | Complete regression suite (Phases A through E) | `node tests/phaseA.test.mjs; node tests/phaseB.test.mjs; node tests/phaseC.test.mjs; node tests/phaseD.test.mjs; node tests/phaseE.test.mjs` | **36/36 PASSED** |
+| **Phase E** | `devCode` omission, Brevo email, per-email limits, resend route, probe-versions, Compose removal | `node tests/phaseE.test.mjs` | **12/12 PASSED** |
+| **Full Run** | Complete regression suite (Phases A through E) | `node tests/phaseA.test.mjs; node tests/phaseB.test.mjs; node tests/phaseC.test.mjs; node tests/phaseD.test.mjs; node tests/phaseE.test.mjs` | **42/42 PASSED** |
 
 ---
 

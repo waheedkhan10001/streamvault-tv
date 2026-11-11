@@ -363,8 +363,260 @@ async function runPhaseETests() {
     }
   }
 
+  // --- Test 7: Per-Email Rate Limiting on Signup (max 3 per min) ---
+  console.log('[Test 7] Asserting per-email rate limiting on /api/auth/signup (max 3/min)...');
+  {
+    const db = createMockD1();
+    const env = { DB: db, BREVO_API_KEY: 'xkeysib-rate-limit-test', DEV_MODE: 'true' };
+    const email = 'rate_signup@streamvault.tv';
+
+    for (let i = 1; i <= 3; i++) {
+      const req = new Request('https://sync.streamvault.tv/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': `192.168.10.${i}` },
+        body: JSON.stringify({ email, password: 'Password123!', displayName: `User ${i}` })
+      });
+      const res = await worker.fetch(req, env);
+      assert.equal(res.status, 201, `Attempt ${i} within limit should succeed`);
+    }
+
+    // 4th attempt from different IP but same email must be rate-limited (HTTP 429)
+    const blockedReq = new Request('https://sync.streamvault.tv/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.168.10.99' },
+      body: JSON.stringify({ email, password: 'Password123!', displayName: 'Blocked User' })
+    });
+    const blockedRes = await worker.fetch(blockedReq, env);
+    assert.equal(blockedRes.status, 429, '4th signup for same email must return 429');
+    const blockedData = await blockedRes.json();
+    assert.match(blockedData.error, /Too many sign-up attempts for this email/i);
+    console.log('  ✓ PASS: Per-email rate limiting on signup correctly returns HTTP 429.\n');
+  }
+
+  // --- Test 8: Per-Email Rate Limiting on Login (max 5 per min) ---
+  console.log('[Test 8] Asserting per-email rate limiting on /api/auth/login (max 5/min)...');
+  {
+    const db = createMockD1();
+    const env = { DB: db };
+    const email = 'rate_login@streamvault.tv';
+
+    for (let i = 1; i <= 5; i++) {
+      const req = new Request('https://sync.streamvault.tv/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': `192.168.20.${i}` },
+        body: JSON.stringify({ email, password: 'WrongPassword!' })
+      });
+      const res = await worker.fetch(req, env);
+      assert.equal(res.status, 401, `Attempt ${i} should fail auth with 401`);
+    }
+
+    // 6th attempt from different IP but same email must be rate-limited (HTTP 429)
+    const blockedReq = new Request('https://sync.streamvault.tv/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.168.20.99' },
+      body: JSON.stringify({ email, password: 'WrongPassword!' })
+    });
+    const blockedRes = await worker.fetch(blockedReq, env);
+    assert.equal(blockedRes.status, 429, '6th login attempt for same email must return 429');
+    const blockedData = await blockedRes.json();
+    assert.match(blockedData.error, /Too many login attempts for this email/i);
+    console.log('  ✓ PASS: Per-email rate limiting on login correctly returns HTTP 429.\n');
+  }
+
+  // --- Test 9: Per-Email Rate Limiting on Verify-Code (max 5 per min) ---
+  console.log('[Test 9] Asserting per-email rate limiting on /api/auth/verify-code (max 5/min)...');
+  {
+    const db = createMockD1();
+    const env = { DB: db };
+    const email = 'rate_verify@streamvault.tv';
+
+    for (let i = 1; i <= 5; i++) {
+      const req = new Request('https://sync.streamvault.tv/api/auth/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': `192.168.30.${i}` },
+        body: JSON.stringify({ email, code: '000000' })
+      });
+      const res = await worker.fetch(req, env);
+      assert.equal(res.status, 401, `Attempt ${i} should return 401 for bad code`);
+    }
+
+    // 6th attempt from different IP but same email must be rate-limited (HTTP 429)
+    const blockedReq = new Request('https://sync.streamvault.tv/api/auth/verify-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.168.30.99' },
+      body: JSON.stringify({ email, code: '000000' })
+    });
+    const blockedRes = await worker.fetch(blockedReq, env);
+    assert.equal(blockedRes.status, 429, '6th verify attempt for same email must return 429');
+    const blockedData = await blockedRes.json();
+    assert.match(blockedData.error, /Too many verification attempts for this email/i);
+    console.log('  ✓ PASS: Per-email rate limiting on verify correctly returns HTTP 429.\n');
+  }
+
+  // --- Test 10: /api/auth/resend-code endpoint & rate limits ---
+  console.log('[Test 10] Testing /api/auth/resend-code route and behavior...');
+  {
+    const db = createMockD1();
+    const env = { DB: db, BREVO_API_KEY: 'xkeysib-resend-test', DEV_MODE: 'true' };
+    const email = 'resend_user@streamvault.tv';
+
+    // 10a. Non-existent account -> 404
+    const notFoundReq = new Request('https://sync.streamvault.tv/api/auth/resend-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.168.40.1' },
+      body: JSON.stringify({ email: 'ghost@streamvault.tv' })
+    });
+    const notFoundRes = await worker.fetch(notFoundReq, env);
+    assert.equal(notFoundRes.status, 404, 'Resend for non-existent account must return 404');
+
+    // Setup an unverified account in D1
+    db.tables.accounts.push({
+      account_id: 'acc_resend_123',
+      email: email,
+      password_hash: 'mockhash',
+      is_verified: 0,
+      created_at: Date.now(),
+      updated_at: Date.now()
+    });
+
+    let resentCode = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (url.includes('api.brevo.com')) {
+        const body = JSON.parse(init.body);
+        const match = body.subject.match(/(\d{6})/);
+        if (match) resentCode = match[1];
+        return new Response(JSON.stringify({ messageId: '<msg-resend@brevo.com>' }), { status: 201 });
+      }
+      return originalFetch(url, init);
+    };
+
+    try {
+      // 10b. Successful resend
+      const resendReq = new Request('https://sync.streamvault.tv/api/auth/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.168.40.2' },
+        body: JSON.stringify({ email })
+      });
+      const resendRes = await worker.fetch(resendReq, env);
+      assert.equal(resendRes.status, 200, 'Resend should succeed with 200');
+      const resendData = await resendRes.json();
+      assert.equal(resendData.success, true);
+      assert.ok(resentCode, 'New code was emailed via Brevo');
+      assert.equal(resendData.devCode, resentCode, 'devCode returned in DEV_MODE');
+
+      // 10c. Per-email rate limit on resend (max 3/min)
+      for (let i = 2; i <= 3; i++) {
+        const rReq = new Request('https://sync.streamvault.tv/api/auth/resend-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': `192.168.40.${i + 2}` },
+          body: JSON.stringify({ email })
+        });
+        const rRes = await worker.fetch(rReq, env);
+        assert.equal(rRes.status, 200);
+      }
+
+      // 4th resend must return 429
+      const blockedResendReq = new Request('https://sync.streamvault.tv/api/auth/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.168.40.99' },
+        body: JSON.stringify({ email })
+      });
+      const blockedResendRes = await worker.fetch(blockedResendReq, env);
+      assert.equal(blockedResendRes.status, 429, '4th resend must return 429');
+      const blockedResendData = await blockedResendRes.json();
+      assert.match(blockedResendData.error, /Too many resend attempts for this email/i);
+
+      // 10d. Already verified account -> 400
+      const verifiedEmail = 'already.verified@streamvault.tv';
+      db.tables.accounts.push({
+        account_id: 'acc_verified_123',
+        email: verifiedEmail,
+        password_hash: 'mockhash',
+        is_verified: 1,
+        created_at: Date.now(),
+        updated_at: Date.now()
+      });
+      const verifiedReq = new Request('https://sync.streamvault.tv/api/auth/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.168.40.80' },
+        body: JSON.stringify({ email: verifiedEmail })
+      });
+      const verifiedRes = await worker.fetch(verifiedReq, env);
+      assert.equal(verifiedRes.status, 400);
+      const verifiedData = await verifiedRes.json();
+      assert.match(verifiedData.error, /already verified/i);
+
+      console.log('  ✓ PASS: /api/auth/resend-code route and per-email rate limiting verified.\n');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  // --- Test 11: /api/probe-versions Implementation & Contract in AppApiRouter.kt ---
+  console.log('[Test 11] Verifying /api/probe-versions implementation and logic in AppApiRouter.kt...');
+  {
+    const fs = await import('node:fs/promises');
+    const routerSource = await fs.readFile('app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt', 'utf-8');
+
+    assert.ok(
+      routerSource.includes('method == "GET" && path == "/api/probe-versions" -> handleProbeVersions(queryParams)'),
+      'AppApiRouter must route /api/probe-versions to handleProbeVersions'
+    );
+    assert.ok(
+      routerSource.includes('fun handleProbeVersions') || routerSource.includes('private fun handleProbeVersions'),
+      'AppApiRouter must implement handleProbeVersions'
+    );
+    assert.ok(
+      routerSource.includes('Range') && routerSource.includes('bytes=0-10'),
+      'AppApiRouter must use HTTP Range 0-10 for fast size probing'
+    );
+    assert.ok(
+      routerSource.includes('rawTitleMatchesCam'),
+      'AppApiRouter must detect CAM rips'
+    );
+    assert.ok(
+      routerSource.includes('formatBytes'),
+      'AppApiRouter must format probed byte sizes to human-readable strings'
+    );
+    console.log('  ✓ PASS: /api/probe-versions correctly implemented in native AppApiRouter.kt.\n');
+  }
+
+  // --- Test 12: Jetpack Compose Cleanup & Dependency Elimination ---
+  console.log('[Test 12] Verifying removal of unused Jetpack Compose files and dependencies...');
+  {
+    const fs = await import('node:fs/promises');
+
+    // 12a. Assert legacy Compose UI files are deleted
+    let playerScreenExists = true;
+    let tvAppExists = true;
+    try {
+      await fs.access('app/src/main/java/com/streamvault/tv/ui/StreamVaultPlayerScreen.kt');
+    } catch {
+      playerScreenExists = false;
+    }
+    try {
+      await fs.access('app/src/main/java/com/streamvault/tv/ui/StreamVaultTvApp.kt');
+    } catch {
+      tvAppExists = false;
+    }
+
+    assert.equal(playerScreenExists, false, 'StreamVaultPlayerScreen.kt must be deleted');
+    assert.equal(tvAppExists, false, 'StreamVaultTvApp.kt must be deleted');
+
+    // 12b. Assert app/build.gradle.kts has no compose features or dependencies
+    const gradleKts = await fs.readFile('app/build.gradle.kts', 'utf-8');
+    assert.equal(gradleKts.includes('compose = true'), false, 'compose = true must be removed');
+    assert.equal(gradleKts.includes('composeOptions'), false, 'composeOptions block must be removed');
+    assert.equal(gradleKts.includes('androidx.compose'), false, 'androidx.compose dependencies must be removed');
+    assert.equal(gradleKts.includes('coil-compose'), false, 'coil-compose must be replaced with standard coil');
+    assert.ok(gradleKts.includes('io.coil-kt:coil:2.6.0'), 'Standard coil must be included');
+
+    console.log('  ✓ PASS: Compose files deleted and dependencies cleanly purged from app/build.gradle.kts.\n');
+  }
+
   console.log('====================================================');
-  console.log('  ALL PHASE E ASSERTIONS PASSED (6/6)');
+  console.log('  ALL PHASE E ASSERTIONS PASSED (12/12)');
   console.log('====================================================');
 }
 

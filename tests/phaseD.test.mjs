@@ -346,6 +346,14 @@ async function runPhaseDTests() {
         });
       }
 
+      // 8. Cloud status
+      if (url.includes('/api/cloud/status')) {
+        return new Response(JSON.stringify({ activeCode: { code: 'SV-TEST' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
       return originalFetch.apply(this, arguments);
     };
   });
@@ -578,7 +586,7 @@ async function runPhaseDTests() {
   await page.evaluate(async () => {
     await window.navigateToTab('SETTINGS');
   });
-  await new Promise(r => setTimeout(r, 400));
+  await page.waitForSelector('#syncPendingLabel', { timeout: 3000 });
 
   const uiSyncResults = await page.evaluate(async () => {
     // Add 1 pending item to queue

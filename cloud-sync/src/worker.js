@@ -336,6 +336,9 @@ export default {
         if (password.length < 6) {
           return errorResponse('Password must be at least 6 characters', 400, corsHeaders);
         }
+        if (!checkRateLimit(cleanEmail, 'email_signup', 3, 60)) {
+          return errorResponse('Too many sign-up attempts for this email. Please wait 1 minute.', 429, corsHeaders);
+        }
 
         // Check if account already exists
         const existing = await env.DB.prepare('SELECT account_id, is_verified FROM accounts WHERE email = ?').bind(cleanEmail).first();
@@ -406,6 +409,9 @@ export default {
         if (!email || !code) return errorResponse('Email and code are required', 400, corsHeaders);
         const cleanEmail = email.trim().toLowerCase();
         const cleanCode = String(code).trim();
+        if (!checkRateLimit(cleanEmail, 'email_verify', 5, 60)) {
+          return errorResponse('Too many verification attempts for this email. Please wait 1 minute.', 429, corsHeaders);
+        }
         const now = Date.now();
 
         const codeRecord = await env.DB.prepare(
@@ -461,6 +467,60 @@ export default {
         }, 200, corsHeaders);
       }
 
+      // B.1 Resend Email Verification Code
+      if (method === 'POST' && pathname === '/api/auth/resend-code') {
+        if (!checkRateLimit(clientIp, 'resend', 5, 60)) {
+          return errorResponse('Too many requests. Please wait 1 minute.', 429, corsHeaders);
+        }
+        const { email } = await request.json().catch(() => ({}));
+        if (!email) return errorResponse('Email is required', 400, corsHeaders);
+        const cleanEmail = email.trim().toLowerCase();
+        if (cleanEmail.length < 5 || !cleanEmail.includes('@')) {
+          return errorResponse('Please enter a valid email address', 400, corsHeaders);
+        }
+
+        if (!checkRateLimit(cleanEmail, 'email_resend', 3, 60)) {
+          return errorResponse('Too many resend attempts for this email. Please wait 1 minute.', 429, corsHeaders);
+        }
+
+        const account = await env.DB.prepare(
+          `SELECT account_id, is_verified FROM accounts WHERE email = ?`
+        ).bind(cleanEmail).first();
+
+        if (!account) {
+          return errorResponse('No account found with this email. Please sign up.', 404, corsHeaders);
+        }
+
+        if (account.is_verified === 1) {
+          return errorResponse('Account is already verified. Please sign in.', 400, corsHeaders);
+        }
+
+        const now = Date.now();
+        const codeNum = Math.floor(100000 + Math.random() * 900000);
+        const codeStr = String(codeNum);
+        const codeId = crypto.randomUUID();
+        const expiresAt = now + 10 * 60 * 1000; // 10 minutes
+
+        await env.DB.prepare(
+          `INSERT INTO email_codes (code_id, email, code, purpose, attempts, is_used, expires_at, created_at)
+           VALUES (?, ?, ?, 'verify_email', 0, 0, ?, ?)`
+        ).bind(codeId, cleanEmail, codeStr, expiresAt, now).run();
+
+        await sendVerificationEmail(cleanEmail, codeStr, env);
+
+        const isDevMode = env.DEV_MODE === true || env.DEV_MODE === 'true' || env.DEV_MODE === '1';
+        const resData = {
+          success: true,
+          email: cleanEmail,
+          message: 'Verification code resent successfully'
+        };
+        if (isDevMode) {
+          resData.devCode = codeStr;
+        }
+
+        return jsonResponse(resData, 200, corsHeaders);
+      }
+
       // C. Sign In (PBKDF2 Check + Session Issue)
       if (method === 'POST' && pathname === '/api/auth/login') {
         if (!checkRateLimit(clientIp, 'login', 8, 60)) {
@@ -470,6 +530,9 @@ export default {
         if (!email || !password) return errorResponse('Email and password are required', 400, corsHeaders);
 
         const cleanEmail = email.trim().toLowerCase();
+        if (!checkRateLimit(cleanEmail, 'email_login', 5, 60)) {
+          return errorResponse('Too many login attempts for this email. Please wait 1 minute.', 429, corsHeaders);
+        }
         const account = await env.DB.prepare(
           `SELECT account_id, email, password_hash, is_verified FROM accounts WHERE email = ?`
         ).bind(cleanEmail).first();
