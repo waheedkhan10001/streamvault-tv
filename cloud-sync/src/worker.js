@@ -395,6 +395,48 @@ async function sendVerificationEmail(email, code, env, purpose = 'verify_email')
 // Worker Request Router
 // --------------------------------------------------------------------
 
+
+// ---- Shared TMDB cache: keep only the fields the TV uses, so 60,000 titles fit comfortably in the database ----
+const TMDB_DETAIL_APPEND = 'credits,external_ids,release_dates,content_ratings';
+function slimTmdbDetail(text) {
+  try {
+    const o = JSON.parse(text);
+    if (!o || typeof o !== 'object' || !o.id) return text;
+    const credits = o.credits || {};
+    return JSON.stringify({
+      id: o.id,
+      overview: o.overview || '',
+      vote_average: o.vote_average,
+      vote_count: o.vote_count,
+      runtime: o.runtime,
+      episode_run_time: o.episode_run_time,
+      release_date: o.release_date,
+      first_air_date: o.first_air_date,
+      original_language: o.original_language,
+      genres: (o.genres || []).map((g) => ({ id: g.id, name: g.name })),
+      poster_path: o.poster_path,
+      backdrop_path: o.backdrop_path,
+      imdb_id: o.imdb_id || (o.external_ids && o.external_ids.imdb_id) || '',
+      credits: {
+        cast: (credits.cast || []).slice(0, 8).map((c) => ({ name: c.name })),
+        crew: (credits.crew || []).filter((c) => c.job === 'Director').slice(0, 2).map((c) => ({ name: c.name, job: 'Director' }))
+      },
+      release_dates: {
+        results: ((o.release_dates && o.release_dates.results) || [])
+          .filter((r) => r.iso_3166_1 === 'US')
+          .map((r) => ({ iso_3166_1: 'US', release_dates: (r.release_dates || []).map((d) => ({ certification: d.certification || '' })) }))
+      },
+      content_ratings: {
+        results: ((o.content_ratings && o.content_ratings.results) || [])
+          .filter((r) => r.iso_3166_1 === 'US')
+          .map((r) => ({ iso_3166_1: 'US', rating: r.rating || '' }))
+      }
+    });
+  } catch (_) {
+    return text;
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -1339,6 +1381,32 @@ export default {
       // SHARED TMDB PROXY & CACHE (Proxy TMDB so key is not in APK)
       // ----------------------------------------------------------------
 
+      // Many cached titles in one call (cache only: never calls TMDB). Used by a TV that is signing in.
+      if (method === 'POST' && pathname === '/api/tmdb/batch') {
+        const body = await request.json().catch(() => ({}));
+        const items = Array.isArray(body.items) ? body.items.slice(0, 200) : [];
+        const qs = new URLSearchParams({ append_to_response: TMDB_DETAIL_APPEND }).toString();
+        const keyToName = new Map();
+        for (const it of items) {
+          const type = it && it.type;
+          const id = Number(it && it.id);
+          if ((type === 'movie' || type === 'tv') && Number.isInteger(id) && id > 0) keyToName.set(`${type}/${id}:${qs}`, `${type}:${id}`);
+        }
+        const results = {};
+        const keys = [...keyToName.keys()];
+        const now = Date.now();
+        for (let i = 0; i < keys.length; i += 50) {
+          const part = keys.slice(i, i + 50);
+          const rows = await env.DB.prepare(
+            `SELECT cache_key, response_json FROM tmdb_cache WHERE cache_key IN (${part.map(() => '?').join(',')}) AND expires_at > ?`
+          ).bind(...part, now).all();
+          for (const row of rows.results || []) {
+            try { results[keyToName.get(row.cache_key)] = JSON.parse(slimTmdbDetail(row.response_json)); } catch (_) {}
+          }
+        }
+        return jsonResponse({ success: true, results, requested: keys.length, found: Object.keys(results).length }, 200, corsHeaders);
+      }
+
       if (method === 'GET' && pathname.startsWith('/api/tmdb/')) {
         const subPath = pathname.replace('/api/tmdb/', '');
         // No built-in fallback key: the key is a Worker secret and must be configured.
@@ -1377,17 +1445,19 @@ export default {
         });
         const resText = await tmdbRes.text();
 
+        const isDetail = /^(movie|tv)\/\d+$/.test(subPath);
+        const toStore = (tmdbRes.ok && isDetail) ? slimTmdbDetail(resText) : resText;
         if (tmdbRes.ok) {
-          // Cache response for 7 days
-          const expiresAt = now + 7 * 86400 * 1000;
+          // Titles change rarely: details are kept 90 days, searches 7 days
+          const expiresAt = now + (isDetail ? 90 : 7) * 86400 * 1000;
           await env.DB.prepare(
             `INSERT INTO tmdb_cache (cache_key, endpoint, response_json, expires_at, updated_at)
              VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(cache_key) DO UPDATE SET response_json = excluded.response_json, expires_at = excluded.expires_at, updated_at = excluded.updated_at`
-          ).bind(cacheKey, subPath, resText, expiresAt, now).run();
+          ).bind(cacheKey, subPath, toStore, expiresAt, now).run();
         }
 
-        return new Response(resText, {
+        return new Response(toStore, {
           status: tmdbRes.status,
           headers: {
             ...corsHeaders,

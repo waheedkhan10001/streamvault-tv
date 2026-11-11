@@ -537,7 +537,7 @@ class StreamVaultDatabase(context: Context) :
         val cursor = db.rawQuery(
             """
             SELECT * FROM media_items
-            WHERE is_enriched = 0
+            WHERE is_enriched = 0 AND is_adult = 0 AND is_extra = 0
             ORDER BY year DESC, rating DESC, added_timestamp DESC
             LIMIT ?
             """.trimIndent(),
@@ -555,7 +555,7 @@ class StreamVaultDatabase(context: Context) :
         val db = readableDatabase
         var total = 0
         var enriched = 0
-        db.rawQuery("SELECT COUNT(*), SUM(CASE WHEN is_enriched = 1 THEN 1 ELSE 0 END) FROM media_items", null).use { c ->
+        db.rawQuery("SELECT COUNT(*), SUM(CASE WHEN is_enriched = 1 THEN 1 ELSE 0 END) FROM media_items WHERE is_adult = 0 AND is_extra = 0", null).use { c ->
             if (c.moveToFirst()) {
                 total = c.getInt(0)
                 enriched = c.getInt(1)

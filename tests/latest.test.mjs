@@ -31,14 +31,14 @@ async function newApp(browser, kids = false) {
       handleApiRequestWithAuth: (method, path, body) => {
         const S = window.__s; const p = path.split('?')[0]; const J = o => JSON.stringify(o);
         const pc = () => ({ isLocked: !S.adult, showAdult: S.adult, showExtras: S.extras, hasPin: true, hasCustomPin: true });
-        if (p === '/api/state') return J({ ok: true, totalCatalogCount: 12, credentials: { serverUrl: 'http://x', username: 'u' }, parentalControl: pc() });
+        if (p === '/api/state') return J({ ok: true, totalCatalogCount: window.__empty ? 0 : 12, syncStatus: window.__sync || {}, credentials: { serverUrl: 'http://x', username: 'u' }, parentalControl: pc() });
         if (p === '/api/status') return J({ ok: true, credentials: { serverUrl: 'http://x', username: 'u', password: 'p' }, catalogCount: 12 });
         if (p === '/api/session') return J({ ok: true, authenticated: true, token: TOKEN });
         if (p === '/api/auth/me') return J({ ok: true, account, token: TOKEN });
         if (p === '/api/profiles') return J({ ok: true, profiles, activeProfileId: 'p1' });
         if (p === '/api/playlists') return J({ ok: true, playlists: [] });
-        if (p === '/api/home') return J({ hero: catalog[0], rows: [{ title: 'Featured', items: catalog }] });
-        if (p === '/api/query') { S.queries.push(JSON.parse(body || '{}')); return J({ items: catalog, totalMatched: 12, hasMore: false }); }
+        if (p === '/api/home') return window.__empty ? J({ hero: null, rows: [] }) : J({ hero: catalog[0], rows: [{ title: 'Featured', items: catalog }] });
+        if (p === '/api/query') { S.queries.push(JSON.parse(body || '{}')); return window.__empty ? J({ items: [], totalMatched: 0, hasMore: false }) : J({ items: catalog, totalMatched: 12, hasMore: false }); }
         if (p === '/api/latest') { const k = (n, s) => Array.from({ length: n }, (_, i) => ({ ...mk(i, s), cleanTitle: (s ? 'New Series ' : 'New Movie ') + i })); return J({ ok: true, movies: k(5, false), series: k(3, true), live: KIDS ? [] : [{ streamId: '9', name: 'New Channel', categoryName: 'X' }], days: 14 }); }
         if (p === '/api/live') { S.lives.push(path); return J({ ok: true, tabs: [{ id: 'ALL', label: 'All' }], channels: [{ streamId: '1', name: 'Chan', categoryName: 'X' }] }); }
         if (p === '/api/search-history') { if (method === 'POST') S.history.push(body); return J({ ok: true, history: [], items: [] }); }
@@ -88,6 +88,20 @@ async function run() {
   const kbar = await kp.evaluate(() => [...document.querySelectorAll('#latestPanelBar button')].map(b => b.innerText.trim()));
   check('Kids mode: Movies and Series only, no Live TV panel', kbar.join() === 'Movies (5),Series (3)', kbar.join());
   check('no JavaScript errors (Kids)', kp.errors.length === 0, kp.errors.join(' | '));
+  console.log('\nEmpty catalog while downloading');
+  const ep = await newApp(browser);
+  await ep.evaluate(() => { window.__empty = true; window.__sync = { isSyncing: true, phase: 'Parsed 12,000 Movies (11,000 unique cards)...' }; });
+  await go(ep, 'HOME');
+  let txt = await ep.evaluate(() => document.getElementById('mainViewport').innerText);
+  check('Home says "Loading your catalog" and shows the progress', /Loading your catalog/.test(txt) && /Parsed 12,000 Movies/.test(txt), txt.slice(0, 120));
+  await go(ep, 'MOVIES');
+  txt = await ep.evaluate(() => document.getElementById('mainViewport').innerText);
+  check('Movies says the same instead of "No matching titles"', /Loading your catalog/.test(txt) && !/No matching titles/.test(txt), txt.slice(0, 120));
+  await ep.evaluate(() => { window.__sync = { isSyncing: false, phase: '', error: 'The IPTV server refused the login (HTTP 403). Check username and password' }; });
+  await go(ep, 'HOME');
+  txt = await ep.evaluate(() => document.getElementById('mainViewport').innerText);
+  check('a failed download shows the reason and where to fix it', /Could not load your catalog/.test(txt) && /refused the login/.test(txt) && /IPTV Playlists/.test(txt), txt.slice(0, 160));
+  check('no JavaScript errors (loading)', ep.errors.length === 0, ep.errors.join(' | '));
   await browser.close();
   const failed = results.filter(r => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

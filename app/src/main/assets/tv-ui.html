@@ -4657,6 +4657,21 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
 }
 
 // 1. HOME SCREEN (Punchy Rows + Hero + Horizontal Strips)
+// Shown on empty Home / Movies / Series while the catalog is still downloading (or when the download failed)
+async function catalogNoticeHtml() {
+  try { await refreshAppStatus(); } catch (_) {}
+  const sync = (appStatus && appStatus.syncStatus) || {};
+  const total = Number((appStatus && appStatus.totalCatalogCount) || 0);
+  if (sync.error && !sync.isSyncing) {
+    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#F87171;margin-bottom:8px;">Could not load your catalog</div><div style="font-size:13px;color:#D1D5DB;max-width:560px;margin:0 auto;">${escapeHtml(String(sync.error))}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;">Check your IPTV details in Settings &rarr; IPTV Playlists, then use Refresh Now.</div></div>`;
+  }
+  if (sync.isSyncing || total === 0) {
+    const phase = sync.phase ? escapeHtml(String(sync.phase)) : 'Getting started...';
+    return `<div id="catalogNotice" style="padding:60px 24px;text-align:center;"><div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:8px;">Loading your catalog…</div><div style="font-size:13px;color:#A78BFA;">${phase}</div><div style="font-size:11px;color:#9CA3AF;margin-top:10px;max-width:560px;margin-left:auto;margin-right:auto;">The first time can take a few minutes. Titles appear as soon as they are ready, and you can keep using the app.</div></div>`;
+  }
+  return '';
+}
+
 async function loadHome(vp) {
   try {
     const res = await fetch('/api/home');
@@ -4668,6 +4683,15 @@ async function loadHome(vp) {
 
   const hero = homeData.hero;
   const rows = (homeData.rows || []).filter((r) => r.title !== 'My List');
+
+  if (!hero && rows.every((r) => !(r.items || []).length)) {
+    const notice = await catalogNoticeHtml();
+    if (notice) {
+      vp.innerHTML = notice;
+      setTimeout(() => { if (currentTab === 'HOME' && document.getElementById('catalogNotice')) loadHome(document.getElementById('mainViewport')); }, 5000);
+      return;
+    }
+  }
 
   let htmlStr = '';
   if (hero) {
@@ -5330,6 +5354,14 @@ async function executeFilterQuery(append = false) {
 
     renderSearchSuggestions(filterState.searchQuery, data.autoChips || []);
 
+    if (items.length === 0 && !isVaultTab(currentTab) && !filterState.searchQuery) {
+      const notice = await catalogNoticeHtml();
+      if (notice) {
+        grid.innerHTML = '<div style="grid-column:1/-1;">' + notice + '</div>';
+        setTimeout(() => { if (document.getElementById('catalogNotice') && document.getElementById('filterResultsGrid')) executeFilterQuery(false); }, 5000);
+        return;
+      }
+    }
     if (items.length === 0) {
       grid.innerHTML = '<div style="grid-column:1/-1;padding:60px 20px;color:var(--muted);text-align:center;font-size:15px;">No matching titles found for current filter combination.<br/><span style="font-size:13px;color:#8B5CF6;cursor:pointer;margin-top:8px;display:inline-block;" onclick="resetFilterState()">Click here to reset all filters</span></div>';
       return;

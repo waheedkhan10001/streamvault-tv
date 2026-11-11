@@ -500,7 +500,7 @@ class CatalogSyncEngine(
             val apiKey = creds.tmdbApiKey.ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY }
 
             while (isActive) {
-                val queue = db.getUnenrichedMediaQueue(creds.preferredLanguages, limit = 150)
+                val queue = db.getUnenrichedMediaQueue(creds.preferredLanguages, limit = 600)
                 if (queue.isEmpty()) {
                     val (enriched, total) = db.getEnrichmentCounts()
                     _syncState.value = _syncState.value.copy(
@@ -513,8 +513,20 @@ class CatalogSyncEngine(
 
                 var updatedInBatch = 0
                 val enrichedBatch = mutableListOf<MediaItem>()
+                // Step 1: titles any TV on the cloud has already looked up come back 200 at a time (no TMDB calls)
+                val fromCache = if (apiKey == XtreamCredentials.DEFAULT_TMDB_KEY || apiKey.isBlank()) prefillFromSharedCache(queue) else emptySet()
+                if (fromCache.isNotEmpty()) {
+                    val (enriched, total) = db.getEnrichmentCounts()
+                    _syncState.value = _syncState.value.copy(
+                        phase = "Loading details: $enriched / $total Titles",
+                        enrichedCount = enriched,
+                        totalToEnrich = total
+                    )
+                    onProgress()
+                }
                 for (item in queue) {
                     if (!isActive) break
+                    if (item.dedupKey in fromCache) continue
                     val enrichedOk = enrichSingleItemFromTmdb(item, apiKey)
                     if (!enrichedOk && !prefs.isPlaybackActive.get() && creds.isConfigured) {
                         // Gentle fallback to IPTV server VOD info only when not playing video
@@ -801,117 +813,158 @@ class CatalogSyncEngine(
                 }
                 if (!resp.isSuccessful) return false
                 val obj = JSONObject(resp.body?.string() ?: "{}")
+                val obj = JSONObject(resp.body?.string() ?: "{}")
+                return applyTmdbDetail(item, obj, endpointType, resolvedTmdbId)
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
 
-                val plot = obj.optString("overview", item.plot)
-                val voteCount = obj.optInt("vote_count", item.voteCount)
-                val rating = weightedRating(obj.optDouble("vote_average", 0.0), voteCount)
-                val runtime = obj.optInt("runtime", 0).let { rt ->
-                    if (rt > 0) rt else obj.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
+    /** Asks the shared cloud cache for many titles at once. Returns the dedupKeys it filled in. */
+    private fun prefillFromSharedCache(queue: List<MediaItem>): Set<String> {
+        val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return emptySet()
+        val cloudBase = prefs.getCloudSyncBaseUrl()
+        val done = mutableSetOf<String>()
+        // Adult titles are never sent anywhere
+        val candidates = queue.filter { it.tmdbId > 0 && !it.isAdult }
+        for (chunk in candidates.chunked(200)) {
+            try {
+                val itemsArr = JSONArray()
+                chunk.forEach {
+                    itemsArr.put(JSONObject().put("type", if (it.mediaType == MediaType.SERIES) "tv" else "movie").put("id", it.tmdbId))
                 }
-                val releaseDate = obj.optString("release_date").ifBlank { obj.optString("first_air_date") }
-                val year = releaseDate.take(4).toIntOrNull() ?: item.year
-                val origLangCode = obj.optString("original_language", "en")
-                val resolvedLang = isoLangMap[origLangCode] ?: item.language
-
-                val genresList = mutableListOf<String>()
-                obj.optJSONArray("genres")?.let { gArr ->
-                    for (i in 0 until gArr.length()) {
-                        val gObj = gArr.getJSONObject(i)
-                        val gId = gObj.optInt("id")
-                        val gName = tmdbGenreMap[gId] ?: gObj.optString("name")
-                        if (gName.isNotBlank()) genresList.add(gName)
+                val payload = JSONObject().put("items", itemsArr).toString()
+                val req = Request.Builder()
+                    .url("$cloudBase/api/tmdb/batch")
+                    .header("Authorization", "Bearer $token")
+                    .post(payload.toRequestBody("application/json".toMediaTypeOrNull()))
+                    .build()
+                httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val res = JSONObject(resp.body?.string() ?: "{}").optJSONObject("results") ?: return@use
+                    for (entry in chunk) {
+                        val type = if (entry.mediaType == MediaType.SERIES) "tv" else "movie"
+                        val obj = res.optJSONObject("$type:${entry.tmdbId}") ?: continue
+                        if (applyTmdbDetail(entry, obj, type, entry.tmdbId)) done.add(entry.dedupKey)
                     }
                 }
+            } catch (_: Exception) {
+                // the cache is only a shortcut; anything not found is looked up one by one below
+            }
+        }
+        return done
+    }
 
-                val castList = mutableListOf<String>()
-                var directorName = item.director
-                obj.optJSONObject("credits")?.let { credits ->
-                    credits.optJSONArray("cast")?.let { cArr ->
-                        for (i in 0 until minOf(8, cArr.length())) {
-                            val actor = cArr.getJSONObject(i).optString("name")
-                            if (actor.isNotBlank()) castList.add(actor)
-                        }
-                    }
-                    credits.optJSONArray("crew")?.let { crewArr ->
-                        for (i in 0 until crewArr.length()) {
-                            val member = crewArr.getJSONObject(i)
-                            if (member.optString("job").equals("Director", ignoreCase = true)) {
-                                directorName = member.optString("name")
-                                break
-                            }
-                        }
+    /** Turns one TMDB detail answer (full, or the slim copy kept in the shared cloud cache) into the stored title details. */
+    private fun applyTmdbDetail(item: MediaItem, obj: JSONObject, endpointType: String, resolvedTmdbId: Int): Boolean {
+
+        val plot = obj.optString("overview", item.plot)
+        val voteCount = obj.optInt("vote_count", item.voteCount)
+        val rating = weightedRating(obj.optDouble("vote_average", 0.0), voteCount)
+        val runtime = obj.optInt("runtime", 0).let { rt ->
+            if (rt > 0) rt else obj.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
+        }
+        val releaseDate = obj.optString("release_date").ifBlank { obj.optString("first_air_date") }
+        val year = releaseDate.take(4).toIntOrNull() ?: item.year
+        val origLangCode = obj.optString("original_language", "en")
+        val resolvedLang = isoLangMap[origLangCode] ?: item.language
+
+        val genresList = mutableListOf<String>()
+        obj.optJSONArray("genres")?.let { gArr ->
+            for (i in 0 until gArr.length()) {
+                val gObj = gArr.getJSONObject(i)
+                val gId = gObj.optInt("id")
+                val gName = tmdbGenreMap[gId] ?: gObj.optString("name")
+                if (gName.isNotBlank()) genresList.add(gName)
+            }
+        }
+
+        val castList = mutableListOf<String>()
+        var directorName = item.director
+        obj.optJSONObject("credits")?.let { credits ->
+            credits.optJSONArray("cast")?.let { cArr ->
+                for (i in 0 until minOf(8, cArr.length())) {
+                    val actor = cArr.getJSONObject(i).optString("name")
+                    if (actor.isNotBlank()) castList.add(actor)
+                }
+            }
+            credits.optJSONArray("crew")?.let { crewArr ->
+                for (i in 0 until crewArr.length()) {
+                    val member = crewArr.getJSONObject(i)
+                    if (member.optString("job").equals("Director", ignoreCase = true)) {
+                        directorName = member.optString("name")
+                        break
                     }
                 }
+            }
+        }
 
-                val imdbId = obj.optString("imdb_id").ifBlank {
-                    obj.optJSONObject("external_ids")?.optString("imdb_id") ?: ""
-                }
+        val imdbId = obj.optString("imdb_id").ifBlank {
+            obj.optJSONObject("external_ids")?.optString("imdb_id") ?: ""
+        }
 
-                var certification = item.certification
-                if (endpointType == "movie") {
-                    obj.optJSONObject("release_dates")?.optJSONArray("results")?.let { results ->
-                        for (i in 0 until results.length()) {
-                            val rObj = results.getJSONObject(i)
-                            if (rObj.optString("iso_3166_1").equals("US", ignoreCase = true)) {
-                                val dates = rObj.optJSONArray("release_dates")
-                                if (dates != null && dates.length() > 0) {
-                                    for (j in 0 until dates.length()) {
-                                        val cert = dates.getJSONObject(j).optString("certification")
-                                        if (cert.isNotBlank()) {
-                                            certification = cert
-                                            break
-                                        }
-                                    }
-                                }
-                                if (certification.isNotBlank()) break
-                            }
-                        }
-                    }
-                } else {
-                    obj.optJSONObject("content_ratings")?.optJSONArray("results")?.let { results ->
-                        for (i in 0 until results.length()) {
-                            val rObj = results.getJSONObject(i)
-                            if (rObj.optString("iso_3166_1").equals("US", ignoreCase = true)) {
-                                val cert = rObj.optString("rating")
+        var certification = item.certification
+        if (endpointType == "movie") {
+            obj.optJSONObject("release_dates")?.optJSONArray("results")?.let { results ->
+                for (i in 0 until results.length()) {
+                    val rObj = results.getJSONObject(i)
+                    if (rObj.optString("iso_3166_1").equals("US", ignoreCase = true)) {
+                        val dates = rObj.optJSONArray("release_dates")
+                        if (dates != null && dates.length() > 0) {
+                            for (j in 0 until dates.length()) {
+                                val cert = dates.getJSONObject(j).optString("certification")
                                 if (cert.isNotBlank()) {
                                     certification = cert
                                     break
                                 }
                             }
                         }
+                        if (certification.isNotBlank()) break
                     }
                 }
-
-                val posterPath = obj.optString("poster_path")
-                val backdropPath = obj.optString("backdrop_path")
-                val fullPoster = if (posterPath.startsWith("/")) "https://image.tmdb.org/t/p/w500$posterPath" else item.posterUrl
-                val fullBackdrop = if (backdropPath.startsWith("/")) "https://image.tmdb.org/t/p/w1280$backdropPath" else item.backdropUrl
-
-                db.updateEnrichedMetadata(
-                    dedupKey = item.dedupKey,
-                    tmdbId = resolvedTmdbId,
-                    imdbId = imdbId,
-                    year = year,
-                    rating = rating,
-                    voteCount = voteCount,
-                    genres = genresList,
-                    plot = plot,
-                    cast = castList,
-                    director = directorName,
-                    runtimeMins = runtime,
-                    posterUrl = fullPoster,
-                    backdropUrl = fullBackdrop,
-                    language = resolvedLang,
-                    hasEmbeddedSubs = item.hasEmbeddedSubtitles,
-                    embeddedSubLangs = item.embeddedSubtitleLanguages,
-                    embeddedAudioLangs = item.embeddedAudioLanguages,
-                    certification = certification
-                )
-                true
             }
-        } catch (_: Exception) {
-            false
+        } else {
+            obj.optJSONObject("content_ratings")?.optJSONArray("results")?.let { results ->
+                for (i in 0 until results.length()) {
+                    val rObj = results.getJSONObject(i)
+                    if (rObj.optString("iso_3166_1").equals("US", ignoreCase = true)) {
+                        val cert = rObj.optString("rating")
+                        if (cert.isNotBlank()) {
+                            certification = cert
+                            break
+                        }
+                    }
+                }
+            }
         }
+
+        val posterPath = obj.optString("poster_path")
+        val backdropPath = obj.optString("backdrop_path")
+        val fullPoster = if (posterPath.startsWith("/")) "https://image.tmdb.org/t/p/w500$posterPath" else item.posterUrl
+        val fullBackdrop = if (backdropPath.startsWith("/")) "https://image.tmdb.org/t/p/w1280$backdropPath" else item.backdropUrl
+
+        db.updateEnrichedMetadata(
+            dedupKey = item.dedupKey,
+            tmdbId = resolvedTmdbId,
+            imdbId = imdbId,
+            year = year,
+            rating = rating,
+            voteCount = voteCount,
+            genres = genresList,
+            plot = plot,
+            cast = castList,
+            director = directorName,
+            runtimeMins = runtime,
+            posterUrl = fullPoster,
+            backdropUrl = fullBackdrop,
+            language = resolvedLang,
+            hasEmbeddedSubs = item.hasEmbeddedSubtitles,
+            embeddedSubLangs = item.embeddedSubtitleLanguages,
+            embeddedAudioLangs = item.embeddedAudioLanguages,
+            certification = certification
+        )
+        return true
     }
 
     private fun enrichFallbackFromXtreamServer(item: MediaItem, creds: XtreamCredentials) {
