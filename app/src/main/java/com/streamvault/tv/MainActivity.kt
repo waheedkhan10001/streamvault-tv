@@ -1384,7 +1384,7 @@ class MainActivity : Activity() {
             }
         }
         // Auto-lock adult content on TV standby / background
-        prefs.setAdultVaultUnlocked(false)
+        prefs.lockAllVaults()
         val lockJs = "if(window.lockParentalControls){ window.lockParentalControls(); }"
         webView.evaluateJavascript(lockJs, null)
     }
@@ -1402,7 +1402,7 @@ class MainActivity : Activity() {
                 webView.evaluateJavascript(js, null)
             }
         }
-        prefs.setAdultVaultUnlocked(false)
+        prefs.lockAllVaults()
         val lockJs = "if(window.lockParentalControls){ window.lockParentalControls(); }"
         webView.evaluateJavascript(lockJs, null)
     }

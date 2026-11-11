@@ -145,6 +145,7 @@ class AppApiRouter(
         val parentalObj = JSONObject().apply {
             put("isLocked", prefs.isParentalLocked())
             put("showAdult", prefs.isAdultVaultUnlocked())
+            put("showExtras", prefs.isExtrasUnlocked())
             put("hasCustomPin", prefs.hasCustomParentalPin())
         }
 
@@ -377,6 +378,7 @@ class AppApiRouter(
 
         val activeProf = getActiveUserProfile()
         val isVaultTab = parsed.optBoolean("adultOnly", false) || queryParams["tab"] == "VAULT_18"
+        val isExtrasTab = parsed.optBoolean("extrasOnly", false) || queryParams["tab"] == "EXTRAS"
 
         val total = IntArray(1)
         val items = db.queryMedia(
@@ -386,6 +388,8 @@ class AppApiRouter(
             isKids = activeProf.isKids,
             isAdultVaultUnlocked = prefs.isAdultVaultUnlocked(),
             isVaultTab = isVaultTab,
+            isExtrasUnlocked = prefs.isExtrasUnlocked(),
+            isExtrasTab = isExtrasTab,
             offset = offset,
             totalOut = total
         )
@@ -644,8 +648,15 @@ class AppApiRouter(
         val activeProf = getActiveUserProfile()
         val cat = queryParams["category"]
         val search = queryParams["search"] ?: ""
-        val channels = db.getLiveChannels(categoryName = cat, searchQuery = search, profileId = activeProf.id, isKids = activeProf.isKids)
-        val categories = db.getLiveCategories()
+        // Live TV: hidden completely in Kids mode; adult / extras channels only in their own unlocked tab.
+        val group = when {
+            activeProf.isKids -> "normal"
+            queryParams["group"] == "adult" && prefs.isAdultVaultUnlocked() -> "adult"
+            queryParams["group"] == "extras" && prefs.isExtrasUnlocked() -> "extras"
+            else -> "normal"
+        }
+        val channels = if (activeProf.isKids) emptyList() else db.getLiveChannels(categoryName = cat, searchQuery = search, profileId = activeProf.id, isKids = false, group = group)
+        val categories = if (activeProf.isKids) listOf("All Channels") else db.getLiveCategories(group)
 
         val chArr = JSONArray()
         for (ch in channels) {
@@ -728,6 +739,7 @@ class AppApiRouter(
                     put("success", true)
                     put("isLocked", !prefs.isAdultVaultUnlocked())
                     put("showAdult", prefs.isAdultVaultUnlocked())
+                    put("showExtras", prefs.isExtrasUnlocked())
                     put("hasCustomPin", prefs.hasCustomParentalPin())
                     put("hasPin", prefs.hasCustomParentalPin())
                     put("isLockedOut", System.currentTimeMillis() < prefs.getPinLockoutUntil())
@@ -736,14 +748,24 @@ class AppApiRouter(
                 }.toString()
             }
             "lock" -> {
-                prefs.setAdultVaultUnlocked(false)
+                // target: "adult", "extras" or (default) both
+                when (obj.optString("target", "all")) {
+                    "adult" -> prefs.setAdultVaultUnlocked(false)
+                    "extras" -> prefs.setExtrasUnlocked(false)
+                    else -> prefs.lockAllVaults()
+                }
                 JSONObject().apply {
                     put("success", true)
-                    put("isLocked", true)
-                    put("showAdult", false)
+                    put("isLocked", !prefs.isAdultVaultUnlocked())
+                    put("showAdult", prefs.isAdultVaultUnlocked())
+                    put("showExtras", prefs.isExtrasUnlocked())
                 }.toString()
             }
             "unlock" -> {
+                // Kids mode can never open Adult or Extras; the profile must leave Kids mode first (needs the PIN).
+                if (getActiveUserProfile().isKids) {
+                    return """{"success":false,"error":"Not available in Kids mode"}"""
+                }
                 if (!prefs.hasCustomParentalPin()) {
                     return """{"success":false,"requireSetPin":true,"error":"Master PIN must be set before accessing 18+ Vault"}"""
                 }
@@ -752,11 +774,13 @@ class AppApiRouter(
                 }
                 val ok = prefs.verifyParentalPin(pin)
                 if (ok) {
-                    prefs.setAdultVaultUnlocked(true)
+                    val target = obj.optString("target", "adult")
+                    if (target == "extras") prefs.setExtrasUnlocked(true) else prefs.setAdultVaultUnlocked(true)
                     JSONObject().apply {
                         put("success", true)
-                        put("isLocked", false)
-                        put("showAdult", true)
+                        put("isLocked", !prefs.isAdultVaultUnlocked())
+                        put("showAdult", prefs.isAdultVaultUnlocked())
+                        put("showExtras", prefs.isExtrasUnlocked())
                     }.toString()
                 } else {
                     val lockedOut = System.currentTimeMillis() < prefs.getPinLockoutUntil()
@@ -982,7 +1006,7 @@ class AppApiRouter(
             if (prefs.getActiveProfileId() == id) {
                 val primary = db.getPrimaryProfile()
                 prefs.setActiveProfileId(primary.id)
-                prefs.setAdultVaultUnlocked(false)
+                prefs.lockAllVaults()
             }
             return """{"success":true,"ok":true}"""
         }
@@ -996,7 +1020,7 @@ class AppApiRouter(
 
         prefs.setActiveProfileId(prof.id)
         // Phase B Rule: Re-lock 18+ Vault in memory on profile switch!
-        prefs.setAdultVaultUnlocked(false)
+        prefs.lockAllVaults()
 
         return JSONObject().apply {
             put("success", true)
@@ -1057,7 +1081,7 @@ class AppApiRouter(
         prefs.clearAuthSession()
         prefs.saveCredentials(XtreamCredentials())
         prefs.clearRecentSearches()
-        prefs.setAdultVaultUnlocked(false)
+        prefs.lockAllVaults()
         db.clearCatalog()
         return """{"ok":true,"message":"Factory reset complete"}"""
     }
@@ -1066,7 +1090,7 @@ class AppApiRouter(
         prefs.clearAuthSession()
         prefs.saveCredentials(XtreamCredentials())
         prefs.clearRecentSearches()
-        prefs.setAdultVaultUnlocked(false)
+        prefs.lockAllVaults()
         db.clearCatalog()
         return """{"ok":true,"message":"Signed out successfully"}"""
     }

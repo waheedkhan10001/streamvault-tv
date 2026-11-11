@@ -21,6 +21,7 @@ class PreferencesManager(context: Context) {
 
     // Session-only 18+ Vault Unlock (Never persisted to disk, localStorage or cloud!)
     private val adultVaultUnlockedSession = AtomicBoolean(false)
+    private val extrasUnlockedSession = AtomicBoolean(false)
 
     private val _credentialsFlow = MutableStateFlow(loadCredentials())
     val credentialsFlow: StateFlow<XtreamCredentials> = _credentialsFlow
@@ -137,6 +138,7 @@ class PreferencesManager(context: Context) {
             .remove("pin_lockout_until")
             .apply()
         adultVaultUnlockedSession.set(false)
+        extrasUnlockedSession.set(false)
     }
 
     var lastFullSyncTimestamp: Long
@@ -294,5 +296,18 @@ class PreferencesManager(context: Context) {
     fun setAdultVaultUnlocked(unlocked: Boolean) {
         adultVaultUnlockedSession.set(unlocked)
         // Session-only! Never persisted to disk.
+    }
+
+    fun isExtrasUnlocked(): Boolean = extrasUnlockedSession.get()
+
+    fun setExtrasUnlocked(unlocked: Boolean) {
+        extrasUnlockedSession.set(unlocked)
+        // Session-only! Never persisted to disk.
+    }
+
+    /** Locks both the 18+ Vault and Extras (profile switch, app background, TV standby, sign-out). */
+    fun lockAllVaults() {
+        adultVaultUnlockedSession.set(false)
+        extrasUnlockedSession.set(false)
     }
 }

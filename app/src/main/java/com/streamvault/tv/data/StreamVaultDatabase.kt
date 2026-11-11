@@ -38,6 +38,31 @@ class StreamVaultDatabase(context: Context) :
             )
             return tokens.any { text.contains(it) }
         }
+
+        // "Extras": content that is not mainstream movies or shows (naats, dance, stage drama clips,
+        // cartoon packs, WWE, song/explainer compilations). Matched on the provider's CATEGORY name only.
+        private val EXTRA_CATEGORY_TOKENS = listOf(
+            "naat", "islamic", "dance |", "dance mix", "stage drama", "dasi muj", "songs |",
+            "explained movies", "motu patlu", "chacha bhatija", "vir: the robot boy", "chhota bheem",
+            "tom & jerry", "scooby-doo", "wwe", "24/7 dance", "vibe stage drama", "cartoon kids"
+        )
+
+        fun checkIsExtra(categoryName: String): Boolean {
+            val c = categoryName.lowercase(Locale.ROOT)
+            if (c.isBlank()) return false
+            return EXTRA_CATEGORY_TOKENS.any { c.contains(it) }
+        }
+
+        /** SQL condition on live_channels.category_name for the three live groups. */
+        fun liveGroupClause(group: String): String {
+            val adult = "(lower(lc.category_name) LIKE '%xxx%' OR lower(lc.category_name) LIKE '%18+%' OR lower(lc.category_name) LIKE '%adult%' OR lower(lc.category_name) LIKE '%porn%')"
+            val extra = "(" + listOf("wwe", "24/7 dance", "vibe stage drama", "stage drama").joinToString(" OR ") { "lower(lc.category_name) LIKE '%$it%'" } + ")"
+            return when (group) {
+                "adult" -> adult
+                "extras" -> "($extra AND NOT $adult)"
+                else -> "(NOT $adult AND NOT $extra)"
+            }
+        }
     }
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -52,6 +77,8 @@ class StreamVaultDatabase(context: Context) :
 
     fun ensureSchemaUpdated(db: SQLiteDatabase) {
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_adult INTEGER DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_extra INTEGER DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("UPDATE media_items SET is_extra = 1 WHERE is_extra = 0 AND is_adult = 0 AND (" + EXTRA_CATEGORY_TOKENS.joinToString(" OR ") { "lower(category_name) LIKE '%${it.replace("'", "''")}%'" } + ")") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN certification TEXT DEFAULT ''") } catch (_: Exception) {}
 
         db.execSQL(
@@ -151,6 +178,7 @@ class StreamVaultDatabase(context: Context) :
                 versions_json TEXT DEFAULT '[]',
                 search_blob TEXT DEFAULT '',
                 is_adult INTEGER DEFAULT 0,
+                is_extra INTEGER DEFAULT 0,
                 certification TEXT DEFAULT ''
             )
             """.trimIndent()
@@ -163,6 +191,7 @@ class StreamVaultDatabase(context: Context) :
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_enriched ON media_items(is_enriched, rating DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_lang ON media_items(language)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_adult ON media_items(is_adult)")
+        try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_extra ON media_items(is_extra)") } catch (_: Exception) {}
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_cert ON media_items(certification)")
 
         db.execSQL(
@@ -397,6 +426,7 @@ class StreamVaultDatabase(context: Context) :
                     put("versions_json", versionsJson)
                     put("search_blob", searchBlob)
                     put("is_adult", if (isAdult) 1 else 0)
+                    put("is_extra", if (!isAdult && checkIsExtra(item.categoryName)) 1 else 0)
                     put("certification", finalCert)
                 }
 
@@ -489,6 +519,7 @@ class StreamVaultDatabase(context: Context) :
             put("is_enriched", 1)
             put("search_blob", searchBlob)
             put("is_adult", if (finalIsAdult) 1 else 0)
+            put("is_extra", if (!finalIsAdult && checkIsExtra(catName)) 1 else 0)
             if (certification.isNotBlank()) put("certification", certification.trim().uppercase(Locale.ROOT))
         }
         db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
@@ -556,6 +587,8 @@ class StreamVaultDatabase(context: Context) :
         isKids: Boolean = false,
         isAdultVaultUnlocked: Boolean = false,
         isVaultTab: Boolean = false,
+        isExtrasUnlocked: Boolean = false,
+        isExtrasTab: Boolean = false,
         offset: Int = 0,
         totalOut: IntArray? = null
     ): List<MediaItem> {
@@ -569,10 +602,15 @@ class StreamVaultDatabase(context: Context) :
 
         // Adult filter rule:
         // Excluded from EVERY query unless session is unlocked, not in kids mode, and request comes from Vault tab
+        // Extras follow the same rule with their own unlock. Kids profiles never see either.
         if (isVaultTab && isAdultVaultUnlocked && !isKids) {
             whereClauses.add("m.is_adult = 1")
+        } else if (isExtrasTab && isExtrasUnlocked && !isKids) {
+            whereClauses.add("m.is_extra = 1")
+            whereClauses.add("m.is_adult = 0")
         } else {
             whereClauses.add("m.is_adult = 0")
+            whereClauses.add("m.is_extra = 0")
         }
 
         // Kids mode rule:
@@ -758,7 +796,7 @@ class StreamVaultDatabase(context: Context) :
         db.rawQuery(
             """
             SELECT clean_title FROM media_items
-            WHERE is_adult = 0 $kidsClause AND (clean_title LIKE ? OR clean_title LIKE ?)
+            WHERE is_adult = 0 AND is_extra = 0 $kidsClause AND (clean_title LIKE ? OR clean_title LIKE ?)
             ORDER BY CASE WHEN clean_title LIKE ? THEN 0 ELSE 1 END, rating DESC
             LIMIT ?
             """.trimIndent(),
@@ -774,7 +812,7 @@ class StreamVaultDatabase(context: Context) :
             db.rawQuery(
                 """
                 SELECT cast_text, director FROM media_items
-                WHERE is_adult = 0 $kidsClause AND (cast_text LIKE ? OR director LIKE ?)
+                WHERE is_adult = 0 AND is_extra = 0 $kidsClause AND (cast_text LIKE ? OR director LIKE ?)
                 LIMIT 25
                 """.trimIndent(),
                 arrayOf("%$clean%", "%$clean%")
@@ -838,7 +876,7 @@ class StreamVaultDatabase(context: Context) :
         args.addAll(condArgs)
 
         val cursor = db.rawQuery(
-            "SELECT $selectSql FROM $fromSql WHERE m.dedup_key != ? AND m.is_adult = 0 $kidsClause " +
+            "SELECT $selectSql FROM $fromSql WHERE m.dedup_key != ? AND m.is_adult = 0 AND m.is_extra = 0 $kidsClause " +
                 "AND (" + conds.joinToString(" OR ") + ") ORDER BY m.rating DESC, m.year DESC LIMIT 300",
             args.toTypedArray()
         )
@@ -879,7 +917,7 @@ class StreamVaultDatabase(context: Context) :
             "Documentary", "Drama", "Family", "Fantasy", "History",
             "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"
         )
-        db.rawQuery("SELECT DISTINCT genres_text FROM media_items WHERE genres_text != '' AND is_adult = 0 LIMIT 1000", null).use { c ->
+        db.rawQuery("SELECT DISTINCT genres_text FROM media_items WHERE genres_text != '' AND is_adult = 0 AND is_extra = 0 LIMIT 1000", null).use { c ->
             while (c.moveToNext()) {
                 c.getString(0)?.split("|")?.forEach { g ->
                     if (g.isNotBlank()) genres.add(g.trim())
@@ -892,7 +930,7 @@ class StreamVaultDatabase(context: Context) :
     fun getAllDistinctLanguages(): List<String> {
         val db = readableDatabase
         val langs = linkedSetOf("English", "Hindi", "Urdu", "Multi-Audio", "Arabic", "Korean", "Turkish", "Spanish", "French", "Japanese")
-        db.rawQuery("SELECT DISTINCT language FROM media_items WHERE language != '' AND is_adult = 0", null).use { c ->
+        db.rawQuery("SELECT DISTINCT language FROM media_items WHERE language != '' AND is_adult = 0 AND is_extra = 0", null).use { c ->
             while (c.moveToNext()) {
                 c.getString(0)?.takeIf { it.isNotBlank() }?.let { langs.add(it) }
             }
@@ -902,7 +940,7 @@ class StreamVaultDatabase(context: Context) :
 
     fun isAdultItem(dedupKey: String): Boolean {
         val db = readableDatabase
-        db.rawQuery("SELECT is_adult FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
+        db.rawQuery("SELECT (is_adult OR is_extra) FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
             if (c.moveToFirst()) return c.getInt(0) == 1
         }
         return false
@@ -926,7 +964,7 @@ class StreamVaultDatabase(context: Context) :
                 WHERE pms.profile_id = ?
                   AND pms.resume_position_ms > 15000
                   AND pms.is_watched = 0
-                  AND m.is_adult = 0
+                  AND m.is_adult = 0 AND m.is_extra = 0
                   $kidsClause
                 ORDER BY pms.updated_at DESC
                 LIMIT ?
@@ -936,7 +974,7 @@ class StreamVaultDatabase(context: Context) :
         } else {
             val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
             Pair(
-                "SELECT * FROM media_items WHERE resume_position_ms > 15000 AND is_watched = 0 AND is_adult = 0 $kidsClause ORDER BY added_timestamp DESC LIMIT ?",
+                "SELECT * FROM media_items WHERE resume_position_ms > 15000 AND is_watched = 0 AND is_adult = 0 AND is_extra = 0 $kidsClause ORDER BY added_timestamp DESC LIMIT ?",
                 arrayOf(limit.toString())
             )
         }
@@ -961,7 +999,7 @@ class StreamVaultDatabase(context: Context) :
                 JOIN media_items m ON m.dedup_key = pms.dedup_key
                 WHERE pms.profile_id = ?
                   AND pms.in_watchlist = 1
-                  AND m.is_adult = 0
+                  AND m.is_adult = 0 AND m.is_extra = 0
                   $kidsClause
                 ORDER BY m.clean_title ASC
                 """.trimIndent(),
@@ -970,7 +1008,7 @@ class StreamVaultDatabase(context: Context) :
         } else {
             val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
             Pair(
-                "SELECT * FROM media_items WHERE in_watchlist = 1 AND is_adult = 0 $kidsClause ORDER BY clean_title ASC",
+                "SELECT * FROM media_items WHERE in_watchlist = 1 AND is_adult = 0 AND is_extra = 0 $kidsClause ORDER BY clean_title ASC",
                 emptyArray<String>()
             )
         }
@@ -1287,8 +1325,11 @@ class StreamVaultDatabase(context: Context) :
         categoryName: String? = null,
         searchQuery: String = "",
         profileId: String = "",
-        isKids: Boolean = false
+        isKids: Boolean = false,
+        group: String = "normal"
     ): List<LiveChannel> {
+        // Kids mode: Live TV is hidden completely.
+        if (isKids) return emptyList()
         val db = readableDatabase
         val clauses = mutableListOf<String>()
         val args = mutableListOf<String>()
@@ -1313,15 +1354,11 @@ class StreamVaultDatabase(context: Context) :
             args.add("%$searchQuery%")
         }
 
-        // Kids mode: hide adult/mature live channels!
-        if (isKids) {
-            clauses.add("lc.category_name NOT LIKE '%xxx%'")
-            clauses.add("lc.category_name NOT LIKE '%18+%'")
-            clauses.add("lc.category_name NOT LIKE '%adult%'")
-            clauses.add("lc.category_name NOT LIKE '%porn%'")
+        // Adult and Extras live channels only ever appear in their own unlocked tab, never in normal Live TV.
+        clauses.add(liveGroupClause(group))
+        if (group != "adult") {
             clauses.add("lc.name NOT LIKE '%xxx%'")
             clauses.add("lc.name NOT LIKE '%18+%'")
-            clauses.add("lc.name NOT LIKE '%adult%'")
         }
 
         val where = if (clauses.isEmpty()) "" else "WHERE " + clauses.joinToString(" AND ")
@@ -1366,10 +1403,10 @@ class StreamVaultDatabase(context: Context) :
         return list
     }
 
-    fun getLiveCategories(): List<String> {
+    fun getLiveCategories(group: String = "normal"): List<String> {
         val db = readableDatabase
         val cats = mutableListOf("All Channels", "★ Favorites")
-        db.rawQuery("SELECT DISTINCT category_name FROM live_channels WHERE category_name != '' ORDER BY category_name ASC", null).use { c ->
+        db.rawQuery("SELECT DISTINCT lc.category_name FROM live_channels lc WHERE lc.category_name != '' AND ${liveGroupClause(group)} ORDER BY lc.category_name ASC", null).use { c ->
             while (c.moveToNext()) {
                 c.getString(0)?.takeIf { it.isNotBlank() }?.let { cats.add(it) }
             }
