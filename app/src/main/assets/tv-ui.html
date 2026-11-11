@@ -7823,6 +7823,8 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
             item.versions = d.versions;
             const vContainer = document.getElementById('detailVersionsContainer');
             if (vContainer) {
+              // keep the remote's focus on the same version pill when the row is redrawn with the sizes
+              const keepIdx = Array.from(vContainer.querySelectorAll('.detail-version-pill')).indexOf(document.activeElement);
               vContainer.innerHTML = `
                 <span style="font-size:11px;font-weight:700;color:var(--muted);margin-right:2px;">Versions (${item.versions.length}):</span>
                 ${item.versions.map((v, vIdx) => {
@@ -7846,6 +7848,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
                   `;
                 }).join('')}
               `;
+              if (keepIdx >= 0) { const np = vContainer.querySelectorAll('.detail-version-pill')[keepIdx]; if (np) np.focus(); }
             }
           }
         }).catch(() => {});
@@ -9355,8 +9358,9 @@ function fastNavigate(current, key) {
     }
 
     // 3. Action Buttons Container (Play / Resume, Restart, Add to List, Mark Watched)
-    if (current.closest('#detailActionButtonsContainer')) {
-      const btns = Array.from(detailOverlay.querySelectorAll('#detailActionButtonsContainer button.tv-focusable'));
+    // (version pills sit inside this container too, but have their own handler below: without this, Down from a pill jumped back to the first pill)
+    if (current.closest('#detailActionButtonsContainer') && !current.classList.contains('detail-version-pill')) {
+      const btns = Array.from(detailOverlay.querySelectorAll('#detailActionButtonsContainer button.tv-focusable:not(.detail-version-pill)'));
       const idx = btns.indexOf(current);
       if (key === 'ArrowUp') {
         const star = detailOverlay.querySelector('#detailStarRatingRow .star-btn.gold') ||
@@ -9403,12 +9407,8 @@ function fastNavigate(current, key) {
       const pills = Array.from(detailOverlay.querySelectorAll('#detailVersionsContainer .detail-version-pill'));
       const idx = pills.indexOf(current);
       if (key === 'ArrowUp') {
-        const firstVersionPill = detailOverlay.querySelector('#detailVersionsContainer .detail-version-pill');
-        if (firstVersionPill && firstVersionPill.offsetParent !== null) {
-          firstVersionPill.focus(); playNavSound(); return true;
-        }
         const watchBtn = detailOverlay.querySelector('#detailActionButtonsContainer .btn-primary') ||
-                         detailOverlay.querySelector('#detailActionButtonsContainer button');
+                         detailOverlay.querySelector('#detailActionButtonsContainer button:not(.detail-version-pill)');
         if (watchBtn) { watchBtn.focus(); playNavSound(); return true; }
       } else if (key === 'ArrowDown') {
         const epTab = detailOverlay.querySelector('.detail-lower-tab.active') || detailOverlay.querySelector('.detail-lower-tab');
