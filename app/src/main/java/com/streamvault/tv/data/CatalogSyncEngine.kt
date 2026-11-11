@@ -813,7 +813,6 @@ class CatalogSyncEngine(
                 }
                 if (!resp.isSuccessful) return false
                 val obj = JSONObject(resp.body?.string() ?: "{}")
-                val obj = JSONObject(resp.body?.string() ?: "{}")
                 return applyTmdbDetail(item, obj, endpointType, resolvedTmdbId)
             }
         } catch (_: Exception) {
