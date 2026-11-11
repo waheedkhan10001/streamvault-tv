@@ -3794,6 +3794,11 @@ const NAV_ITEMS = [
     svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`
   },
   {
+    id: 'LATEST',
+    label: 'New',
+    svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`
+  },
+  {
     id: 'SEARCH',
     label: 'Search',
     svg: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`
@@ -4291,6 +4296,73 @@ async function init() {
 }
 
 
+// ===== LATEST ADDED: what the provider added in the last 14 days (Movies / Series / Live TV) =====
+let latestData = null;
+let latestPanel = 'MOVIES';
+
+async function loadLatest(vp, focusFirst = false) {
+  vp.innerHTML = '<div style="padding:40px;color:var(--muted);">Loading...</div>';
+  try {
+    const res = await fetch('/api/latest');
+    latestData = await res.json();
+  } catch (err) {
+    vp.innerHTML = `<div style="padding:40px;color:#EF4444;">Could not load the latest titles: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+  const kids = Boolean(currentActiveProfile && currentActiveProfile.isKids);
+  if (kids && latestPanel === 'LIVE') latestPanel = 'MOVIES';
+  renderLatest(vp, focusFirst);
+}
+
+function renderLatest(vp, focusFirst = false) {
+  const kids = Boolean(currentActiveProfile && currentActiveProfile.isKids);
+  const d = latestData || {};
+  const lists = { MOVIES: d.movies || [], SERIES: d.series || [], LIVE: kids ? [] : (d.live || []) };
+  const mk = (id, label) => {
+    const on = latestPanel === id;
+    return `<button tabindex="0" id="latestPanel${id}" class="filter-pill-btn tv-focusable ${on ? 'active' : ''}" style="flex-shrink:0;${on ? 'background:rgba(139,92,246,0.35);border-color:#8B5CF6;color:#fff;' : ''}" onclick="selectLatestPanel('${id}')">${label} (${lists[id].length})</button>`;
+  };
+  const items = lists[latestPanel];
+  let body;
+  if (items.length === 0) {
+    body = '<div style="padding:40px;color:var(--muted);text-align:center;">Nothing new yet. New titles from your provider show up here for 14 days.</div>';
+  } else if (latestPanel === 'LIVE') {
+    body = `<div class="live-grid" id="latestLiveGrid">${items.map((ch) => `
+      <div class="live-channel-card">
+        <div class="channel-left">
+          ${renderChannelBadge(ch)}
+          <div class="channel-info">
+            <div class="channel-name" title="${escapeHtml(ch.name)}">${escapeHtml(ch.name)}</div>
+            <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+              <span class="badge-genre" style="font-size:10px;padding:1px 6px;">${escapeHtml(ch.categoryName || 'General')}</span>
+              <span class="badge-quality" style="font-size:9px;padding:1px 4px;">NEW</span>
+            </div>
+          </div>
+        </div>
+        <button tabindex="0" class="btn btn-primary tv-focusable" style="padding:7px 14px;font-size:12px;" onclick="startLivePlayback('${ch.streamId}', '${escapeHtml(ch.name)}')">Watch</button>
+      </div>`).join('')}</div>`;
+  } else {
+    body = `<div class="results-grid" id="filterResultsGrid">${items.map((m) => renderPosterCard(m)).join('')}</div>`;
+  }
+  vp.innerHTML = `
+    <div style="padding:0 0 6px 0;">
+      <div style="font-size:18px;font-weight:900;color:#fff;margin-bottom:4px;">Latest added</div>
+      <div style="font-size:11px;color:#9CA3AF;margin-bottom:10px;">Added by your provider in the last 14 days, newest first.</div>
+      <div id="latestPanelBar" class="filter-pill-row" style="margin:0 0 12px 0;gap:8px;">${mk('MOVIES', 'Movies')}${mk('SERIES', 'Series')}${kids ? '' : mk('LIVE', 'Live TV')}</div>
+      ${body}
+    </div>`;
+  if (focusFirst) {
+    setTimeout(() => { const c = document.querySelector('#filterResultsGrid .poster-card'); if (c) { c.focus(); playNavSound(); } }, 300);
+  }
+}
+
+function selectLatestPanel(panel) {
+  playNavSound();
+  latestPanel = panel;
+  renderLatest(document.getElementById('mainViewport'));
+  setTimeout(() => { const b = document.getElementById('latestPanel' + panel); if (b) b.focus(); }, 60);
+}
+
 // ===== 18+ ADULT and EXTRAS: separate locked areas, each with Movies / Series / Live TV panels =====
 const VAULT_IDLE_MS = 30 * 60 * 1000;      // auto-lock after 30 minutes without a button press
 let vaultIdleTimer = null;
@@ -4566,6 +4638,8 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
       return;
     }
     openVaultPanel(vp, 'EXTRAS', focusFirstCard);
+  } else if (tabId === 'LATEST') {
+    await loadLatest(vp, focusFirstCard);
   } else if (tabId === 'LIVE_TV') {
     if (currentActiveProfile && currentActiveProfile.isKids) {
       showToast('Live TV is not available in Kids Mode');

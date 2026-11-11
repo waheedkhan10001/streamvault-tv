@@ -78,6 +78,7 @@ class StreamVaultDatabase(context: Context) :
     fun ensureSchemaUpdated(db: SQLiteDatabase) {
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_adult INTEGER DEFAULT 0") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_extra INTEGER DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE live_channels ADD COLUMN added_timestamp INTEGER DEFAULT 0") } catch (_: Exception) {}
         try { db.execSQL("UPDATE media_items SET is_extra = 1 WHERE is_extra = 0 AND is_adult = 0 AND (" + EXTRA_CATEGORY_TOKENS.joinToString(" OR ") { "lower(category_name) LIKE '%${it.replace("'", "''")}%'" } + ")") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN certification TEXT DEFAULT ''") } catch (_: Exception) {}
 
@@ -226,7 +227,8 @@ class StreamVaultDatabase(context: Context) :
                 current_program TEXT DEFAULT '',
                 current_program_time TEXT DEFAULT '',
                 next_program TEXT DEFAULT '',
-                is_favorite INTEGER DEFAULT 0
+                is_favorite INTEGER DEFAULT 0,
+                added_timestamp INTEGER DEFAULT 0
             )
             """.trimIndent()
         )
@@ -1291,16 +1293,30 @@ class StreamVaultDatabase(context: Context) :
     }
 
     // Live TV Channels
+    // Set by the sync before a live import: false on the very first import (nothing is "new"), true afterwards
+    @Volatile var treatNewLiveAsNew: Boolean = false
+
+    fun hasLiveChannels(): Boolean = readableDatabase.rawQuery("SELECT 1 FROM live_channels LIMIT 1", null).use { it.moveToFirst() }
+
     fun upsertLiveChannels(channels: List<LiveChannel>) {
         if (channels.isEmpty()) return
         val db = writableDatabase
+        val hadLiveChannelsBefore = treatNewLiveAsNew
         db.beginTransactionNonExclusive()
         try {
             for (ch in channels) {
                 var fav = ch.isFavorite
-                db.rawQuery("SELECT is_favorite FROM live_channels WHERE stream_id = ?", arrayOf(ch.streamId)).use { c ->
-                    if (c.moveToFirst()) fav = c.getInt(0) == 1
+                // First time we see a channel without a provider date = now, so "new since last refresh" works
+                var added = if (ch.addedTimestamp > 0L) ch.addedTimestamp else 0L
+                var seenBefore = false
+                db.rawQuery("SELECT is_favorite, added_timestamp FROM live_channels WHERE stream_id = ?", arrayOf(ch.streamId)).use { c ->
+                    if (c.moveToFirst()) {
+                        seenBefore = true
+                        fav = c.getInt(0) == 1
+                        if (added == 0L) added = c.getLong(1)
+                    }
                 }
+                if (added == 0L && !seenBefore && hadLiveChannelsBefore) added = System.currentTimeMillis() / 1000
                 val cv = ContentValues().apply {
                     put("stream_id", ch.streamId)
                     put("name", ch.name)
@@ -1312,6 +1328,7 @@ class StreamVaultDatabase(context: Context) :
                     put("current_program_time", ch.currentProgramTime)
                     put("next_program", ch.nextProgramTitle)
                     put("is_favorite", if (fav) 1 else 0)
+                    put("added_timestamp", added)
                 }
                 db.insertWithOnConflict("live_channels", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
             }
@@ -1409,6 +1426,50 @@ class StreamVaultDatabase(context: Context) :
             }
         }
         return list
+    }
+
+    /** Latest added titles: last [days] days, newest first, at most [maxItems]; if fewer than [minItems], the newest [fillTo]. */
+    fun getLatestAdded(mediaType: String, isKids: Boolean, days: Int = 14, maxItems: Int = 50, minItems: Int = 10, fillTo: Int = 30): List<MediaItem> {
+        val db = readableDatabase
+        val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
+        val cutoff = System.currentTimeMillis() / 1000 - days * 86400L
+        fun run(extra: String, args: Array<String>, limit: Int): List<MediaItem> =
+            db.rawQuery(
+                "SELECT * FROM media_items WHERE media_type = ? AND is_adult = 0 AND is_extra = 0 $kidsClause $extra " +
+                    "ORDER BY added_timestamp DESC, rating DESC LIMIT $limit",
+                arrayOf(mediaType) + args
+            ).use { readMediaList(it) }
+        val recent = run("AND added_timestamp > ?", arrayOf(cutoff.toString()), maxItems)
+        return if (recent.size >= minItems) recent else run("AND added_timestamp > 0", emptyArray(), fillTo)
+    }
+
+    fun getLatestLiveChannels(days: Int = 14, maxItems: Int = 50, minItems: Int = 10, fillTo: Int = 30): List<LiveChannel> {
+        val db = readableDatabase
+        val cutoff = System.currentTimeMillis() / 1000 - days * 86400L
+        fun run(extra: String, args: Array<String>, limit: Int): List<LiveChannel> {
+            val out = mutableListOf<LiveChannel>()
+            db.rawQuery(
+                "SELECT lc.* FROM live_channels lc WHERE ${liveGroupClause("normal")} AND lc.name NOT LIKE '%xxx%' AND lc.name NOT LIKE '%18+%' $extra " +
+                    "ORDER BY lc.added_timestamp DESC, lc.name ASC LIMIT $limit",
+                args
+            ).use { c ->
+                while (c.moveToNext()) {
+                    out.add(
+                        LiveChannel(
+                            streamId = c.getString(c.getColumnIndexOrThrow("stream_id")),
+                            name = c.getString(c.getColumnIndexOrThrow("name")),
+                            logoUrl = c.getString(c.getColumnIndexOrThrow("logo_url")) ?: "",
+                            categoryId = c.getString(c.getColumnIndexOrThrow("category_id")) ?: "",
+                            categoryName = c.getString(c.getColumnIndexOrThrow("category_name")) ?: "",
+                            addedTimestamp = c.getLong(c.getColumnIndexOrThrow("added_timestamp"))
+                        )
+                    )
+                }
+            }
+            return out
+        }
+        val recent = run("AND lc.added_timestamp > ?", arrayOf(cutoff.toString()), maxItems)
+        return if (recent.size >= minItems) recent else run("AND lc.added_timestamp > 0", emptyArray(), fillTo)
     }
 
     fun getLiveCategories(group: String = "normal"): List<String> {

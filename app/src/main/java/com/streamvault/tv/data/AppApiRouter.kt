@@ -72,6 +72,7 @@ class AppApiRouter(
 
                 // 9. Live TV
                 method == "GET" && path == "/api/live" -> handleGetLive(queryParams)
+                method == "GET" && path == "/api/latest" -> handleGetLatest()
                 method == "POST" && path == "/api/live/favorite" -> handleToggleLiveFavorite(bodyStr)
 
                 // 10. Search History
@@ -737,6 +738,32 @@ class AppApiRouter(
             put("currentTab", tab)
             put("channels", chArr)
             put("matchedCount", channels.size)
+        }.toString()
+    }
+
+    // "Latest added": last 14 days, newest first, max 50 per list (Movies, Series, Live TV)
+    private fun handleGetLatest(): String {
+        val activeProf = getActiveUserProfile()
+        val kids = activeProf.isKids
+        val movies = db.getLatestAdded("MOVIE", kids)
+        val series = db.getLatestAdded("SERIES", kids)
+        val live = if (kids) emptyList() else db.getLatestLiveChannels()
+        val liveArr = JSONArray()
+        for (ch in live) {
+            liveArr.put(JSONObject().apply {
+                put("streamId", ch.streamId)
+                put("name", ch.name)
+                put("logoUrl", ch.logoUrl)
+                put("categoryName", ch.categoryName)
+                put("addedTimestamp", ch.addedTimestamp)
+            })
+        }
+        return JSONObject().apply {
+            put("ok", true)
+            put("movies", mediaListToJsonArray(movies))
+            put("series", mediaListToJsonArray(series))
+            put("live", liveArr)
+            put("days", 14)
         }.toString()
     }
 

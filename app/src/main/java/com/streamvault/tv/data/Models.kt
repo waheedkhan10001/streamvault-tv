@@ -220,7 +220,8 @@ data class LiveChannel(
     val currentProgramTitle: String = "",
     val currentProgramTime: String = "",
     val nextProgramTitle: String = "",
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val addedTimestamp: Long = 0L
 )
 
 data class SuperFilterState(

@@ -424,6 +424,8 @@ class CatalogSyncEngine(
     private fun streamAndSaveLiveChannels(url: String, categoryMap: Map<String, String>) {
         val req = Request.Builder().url(url).header("User-Agent", "StreamVaultTV/1.0").build()
         val batch = mutableListOf<LiveChannel>()
+        // First ever import: nothing is "new". Later imports: channels we have not seen before count as new.
+        db.treatNewLiveAsNew = db.hasLiveChannels()
         httpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return
             val stream = resp.body?.byteStream() ?: return
@@ -440,6 +442,7 @@ class CatalogSyncEngine(
                 var icon = ""
                 var catId = ""
                 var epgId = ""
+                var liveAdded = 0L
                 reader.beginObject()
                 while (reader.hasNext()) {
                     when (reader.nextName()) {
@@ -448,6 +451,7 @@ class CatalogSyncEngine(
                         "stream_icon" -> icon = reader.nextStringOrNumber()
                         "category_id" -> catId = reader.nextStringOrNumber()
                         "epg_channel_id" -> epgId = reader.nextStringOrNumber()
+                        "added" -> liveAdded = reader.nextStringOrNumber().toLongOrNull() ?: 0L
                         else -> reader.skipValue()
                     }
                 }
@@ -460,7 +464,8 @@ class CatalogSyncEngine(
                             logoUrl = icon,
                             categoryId = catId,
                             categoryName = categoryMap[catId] ?: "Live TV",
-                            epgChannelId = epgId
+                            epgChannelId = epgId,
+                            addedTimestamp = liveAdded
                         )
                     )
                     if (batch.size >= 500) {
