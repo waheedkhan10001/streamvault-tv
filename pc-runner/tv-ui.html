@@ -146,7 +146,7 @@
     padding: var(--nav-pad, 13px) 14px; background: transparent; border: none; border-radius: 8px;
     border-left: 3.5px solid transparent; color: var(--muted);
     font-size: var(--nav-font, 14px); font-weight: 600; text-align: left;
-    transition: all 0.12s ease; cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease, opacity 0.12s ease; cursor: pointer;
     outline: none;
   }
   @media (max-height: 480px) { .brand-header { padding-bottom: 8px !important; margin-bottom: 4px !important; } .nav-btn { gap: 8px; } }
@@ -180,7 +180,7 @@
     background: #141722; border: 1.5px solid #232738;
     color: #E5E7EB; font-size: 13px; font-weight: 700;
     cursor: pointer; flex: 1; min-width: 0; outline: none;
-    transition: all 0.14s ease;
+    transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease, opacity 0.14s ease;
   }
   .user-profile-pill:focus, .user-profile-pill.tv-focused {
     border-color: #FFFFFF !important;
@@ -208,7 +208,7 @@
     background: #141722; border: 1.5px solid #232738;
     display: flex; align-items: center; justify-content: center;
     color: #9CA3AF; cursor: pointer; flex-shrink: 0; outline: none;
-    transition: all 0.14s ease;
+    transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease, opacity 0.14s ease;
   }
   .settings-icon-btn:focus, .settings-icon-btn.tv-focused {
     border-color: #FFFFFF !important;
@@ -462,7 +462,7 @@
     padding: 6px 6px; text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     opacity: 0; transform: translateY(100%);
-    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: background-color 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1), color 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     pointer-events: none; z-index: 10;
   }
   .poster-card:hover .card-match-banner,
@@ -669,7 +669,7 @@
   .mlt-chip {
     padding: 6px 14px; border-radius: 16px; font-size: 12px; font-weight: 700;
     background: #181B26; border: 1.5px solid #2C3144; color: #9CA3AF; cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   }
   .mlt-chip:hover {
     color: #FFFFFF; border-color: #4B5563; background: #232736;
@@ -773,7 +773,7 @@
     min-width: 240px; max-width: 240px; height: 110px; border-radius: 10px;
     background: #141124; border: 1.5px solid #282142;
     padding: 12px; display: flex; flex-direction: column; justify-content: space-between;
-    cursor: pointer; outline: none; transition: all 0.15s ease; flex-shrink: 0;
+    cursor: pointer; outline: none; transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease; flex-shrink: 0;
   }
   .episode-card:focus, .episode-card.tv-focused {
     border-color: var(--theme-border) !important;
@@ -797,7 +797,7 @@
   .season-pill {
     padding: 5px 14px; border-radius: 14px; font-size: 11px; font-weight: 700;
     background: #151128; border: 1.5px solid #2A2149; color: #9CA3AF;
-    cursor: pointer; outline: none; transition: all 0.15s ease;
+    cursor: pointer; outline: none; transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
   }
   .season-pill.active {
     background: var(--theme-deep) !important; border-color: var(--theme-accent) !important; color: #FFFFFF !important;
@@ -5143,7 +5143,7 @@ function toggleDropdown(dropId, event) {
       const selected = el.querySelector('.dropdown-option.selected') || el.querySelector('.dropdown-option');
       if (selected) {
         selected.focus();
-        selected.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(selected, { block: 'nearest' });
         playNavSound();
       }
     }, 40);
@@ -5304,6 +5304,8 @@ function selectAutoChip(term) {
 let currentFilterOffset = 0;
 let isLoadingMoreFilter = false;
 let hasMoreFilterResults = false;
+let pendingFilterDownCount = 0;
+let pendingFilterDownFrom = null;   // a Down press that arrived while more titles were still loading
 let currentTotalFilterMatched = 0;
 let cachedFilterItems = [];
 let windowStartIdx = 0;
@@ -5437,6 +5439,23 @@ async function executeFilterQuery(append = false) {
         }
       }
       isLoadingMoreFilter = false;
+      if (pendingFilterDownFrom) {
+        const from = pendingFilterDownFrom; const n = pendingFilterDownCount; pendingFilterDownFrom = null; pendingFilterDownCount = 0;
+        const list = Array.from(grid.querySelectorAll('.poster-card'));
+        const at = list.indexOf(from);
+        const c = getGridColumns(grid);
+        if (at >= 0 && document.activeElement === from) {
+          // every Down press that came in while loading counts: go down that many rows, as far as there are titles
+          const rowsAvailable = Math.floor((list.length - 1 - at) / c);
+          const rows = Math.min(n, rowsAvailable);
+          const tgt = list[at + rows * c];
+          if (tgt && rows > 0) { tgt.focus(); tvScrollIntoView(tgt, { block: 'nearest' }); }
+          if (n > rows && hasMoreFilterResults && tgt) {      // more presses than loaded titles: carry on after the next batch
+            pendingFilterDownFrom = tgt; pendingFilterDownCount = n - rows;
+            executeFilterQuery(true);
+          }
+        }
+      }
       const curCount = grid.querySelectorAll('.poster-card').length;
       if (countLbl) {
         countLbl.innerText = `Showing ${windowStartIdx + 1} - ${windowStartIdx + curCount} of ${matchCount.toLocaleString()} titles`;
@@ -5483,7 +5502,7 @@ async function executeFilterQuery(append = false) {
     };
   } catch (err) {
     if (countLbl) countLbl.innerText = 'Search error';
-    isLoadingMoreFilter = false;
+    isLoadingMoreFilter = false; pendingFilterDownFrom = null; pendingFilterDownCount = 0;
   }
 }
 
@@ -9184,6 +9203,18 @@ window.handleAppBackKey = function() {
 };
 
 // 10. FAST O(1) DIRECT SIBLING & ROW NAVIGATION (Zero Reflow Remote Response)
+
+// Scrolling to the focused card. One press glides; presses in quick succession (a held or fast-tapped arrow) jump straight
+// there, because restarting a glide on every press is what made fast scrolling feel stuck.
+let lastTvScrollAt = 0;
+function tvScrollIntoView(el, opts) {
+  if (!el || typeof el.scrollIntoView !== 'function') return;
+  const now = performance.now();
+  const rapid = now - lastTvScrollAt < 260;
+  lastTvScrollAt = now;
+  el.scrollIntoView(Object.assign({}, opts, { behavior: rapid ? 'auto' : 'smooth' }));
+}
+
 let lastContentFocusTarget = null;
 let lastMltFocusedCard = null;
 
@@ -9681,7 +9712,7 @@ function fastNavigate(current, key) {
       if (key === 'ArrowDown') {
         if (idx >= 0 && idx < options.length - 1) {
           options[idx + 1].focus();
-          options[idx + 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(options[idx + 1], { block: 'nearest' });
           playNavSound();
           return true;
         }
@@ -9689,7 +9720,7 @@ function fastNavigate(current, key) {
       } else if (key === 'ArrowUp') {
         if (idx > 0) {
           options[idx - 1].focus();
-          options[idx - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(options[idx - 1], { block: 'nearest' });
           playNavSound();
           return true;
         }
@@ -9799,7 +9830,7 @@ function fastNavigate(current, key) {
       } else if (key === 'ArrowUp') {
         if (idx >= 2) {
           const upBtn = cards[idx - 2]?.querySelector('button.tv-focusable');
-          if (upBtn) { upBtn.focus(); playNavSound(); upBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return true; }
+          if (upBtn) { upBtn.focus(); playNavSound();tvScrollIntoView(upBtn, { block: 'nearest' }); return true; }
         } else {
           const activeTab = document.querySelector('.live-tab-btn.active') || document.querySelector('.live-tab-btn');
           if (activeTab) { activeTab.focus(); playNavSound(); return true; }
@@ -9807,7 +9838,7 @@ function fastNavigate(current, key) {
       } else if (key === 'ArrowDown') {
         if (idx + 2 < cards.length) {
           const downBtn = cards[idx + 2]?.querySelector('button.tv-focusable');
-          if (downBtn) { downBtn.focus(); playNavSound(); downBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return true; }
+          if (downBtn) { downBtn.focus(); playNavSound();tvScrollIntoView(downBtn, { block: 'nearest' }); return true; }
         }
         return true;
       }
@@ -9925,7 +9956,7 @@ if (current.classList.contains('filter-pill-btn')) {
       if (inp) { inp.focus(); playNavSound(); return true; }
     } else if (key === 'ArrowDown') {
       const firstCard = document.querySelector('#filterResultsGrid .poster-card');
-      if (firstCard) { firstCard.focus(); playNavSound(); firstCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return true; }
+      if (firstCard) { firstCard.focus(); playNavSound();tvScrollIntoView(firstCard, { block: 'nearest' }); return true; }
     }
   }
 
@@ -9958,7 +9989,7 @@ if (current.classList.contains('filter-pill-btn')) {
       if (firstCard) {
         firstCard.focus();
         playNavSound();
-        firstCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(firstCard, { block: 'nearest' });
         return true;
       }
       return true;
@@ -10011,7 +10042,7 @@ if (current.classList.contains('filter-pill-btn')) {
           if (targetCard) {
             targetCard.focus();
             playNavSound();
-            targetCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(targetCard, { block: 'nearest' });
             return true;
           }
         }
@@ -10028,7 +10059,7 @@ if (current.classList.contains('filter-pill-btn')) {
           if (targetCard) {
             targetCard.focus();
             playNavSound();
-            targetCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(targetCard, { block: 'nearest' });
             return true;
           }
         } else {
@@ -10038,7 +10069,7 @@ if (current.classList.contains('filter-pill-btn')) {
             heroBtn.focus({ preventScroll: false });
             playNavSound();
             const heroEl = document.querySelector('.hero');
-            if (heroEl) heroEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (heroEl) tvScrollIntoView(heroEl, { block: 'start' });
             const vp = document.getElementById('mainViewport');
             if (vp) vp.scrollTo({ top: 0, behavior: 'smooth' });
             return true;
@@ -10090,7 +10121,7 @@ if (current.classList.contains('filter-pill-btn')) {
       // Jump into content area, restoring last focused element if valid
       if (lastContentFocusTarget && document.body.contains(lastContentFocusTarget) && lastContentFocusTarget.offsetParent !== null) {
         lastContentFocusTarget.focus();
-        lastContentFocusTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(lastContentFocusTarget, { block: 'nearest' });
         playNavSound();
         return true;
       }
@@ -10119,7 +10150,7 @@ if (current.classList.contains('filter-pill-btn')) {
       if (currentTab === 'PROFILE') {
         if (lastContentFocusTarget && document.body.contains(lastContentFocusTarget) && lastContentFocusTarget.offsetParent !== null && document.getElementById('mainViewport')?.contains(lastContentFocusTarget)) {
           lastContentFocusTarget.focus();
-          lastContentFocusTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(lastContentFocusTarget, { block: 'nearest' });
           playNavSound();
           return true;
         }
@@ -10160,7 +10191,7 @@ if (current.classList.contains('filter-pill-btn')) {
     } else if (key === 'ArrowRight') {
       if (lastContentFocusTarget && document.body.contains(lastContentFocusTarget) && lastContentFocusTarget.offsetParent !== null && document.getElementById('mainViewport')?.contains(lastContentFocusTarget)) {
         lastContentFocusTarget.focus();
-        lastContentFocusTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(lastContentFocusTarget, { block: 'nearest' });
         playNavSound();
         return true;
       }
@@ -10199,7 +10230,7 @@ if (current.classList.contains('filter-pill-btn')) {
         if (idx < cards.length - 1) {
           cards[idx + 1].focus();
           playNavSound();
-          cards[idx + 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(cards[idx + 1], { block: 'nearest' });
           return true;
         }
       } else if (key === 'ArrowLeft') {
@@ -10213,22 +10244,29 @@ if (current.classList.contains('filter-pill-btn')) {
         } else if (idx > 0) {
           cards[idx - 1].focus();
           playNavSound();
-          cards[idx - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(cards[idx - 1], { block: 'nearest' });
           return true;
         }
       } else if (key === 'ArrowDown') {
-        if (idx >= cards.length - (cols * 2) && hasMoreFilterResults && !isLoadingMoreFilter) {
+        // start loading well before the bottom (8 rows ahead) so fast scrolling does not catch up with the loaded titles
+        if (idx >= cards.length - (cols * 8) && hasMoreFilterResults && !isLoadingMoreFilter) {
           executeFilterQuery(true);
+        }
+        if (idx + cols >= cards.length && hasMoreFilterResults) {
+          // the next titles are still arriving: remember this press and move down as soon as they are here
+          pendingFilterDownFrom = current; pendingFilterDownCount++;
+          playNavSound();
+          return true;
         }
         if (idx + cols < cards.length) {
           cards[idx + cols].focus();
           playNavSound();
-          cards[idx + cols].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(cards[idx + cols], { block: 'nearest' });
           return true;
         } else if (idx < cards.length - 1) {
           cards[cards.length - 1].focus();
           playNavSound();
-          cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(cards[cards.length - 1], { block: 'nearest' });
           return true;
         } else {
           // Strictly clamp focus at the bottom of the grid. Prevent falling through to sidebar settings!
@@ -10239,7 +10277,7 @@ if (current.classList.contains('filter-pill-btn')) {
         if (idx - cols >= 0) {
           cards[idx - cols].focus();
           playNavSound();
-          cards[idx - cols].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(cards[idx - cols], { block: 'nearest' });
           return true;
         } else {
           // On top visible row: if windowStartIdx > 0, restore previous window batch!
@@ -10251,7 +10289,7 @@ if (current.classList.contains('filter-pill-btn')) {
               if (freshCards[targetIdx]) {
                 freshCards[targetIdx].focus();
                 playNavSound();
-                freshCards[targetIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+tvScrollIntoView(freshCards[targetIdx], { block: 'nearest' });
                 return true;
               }
             }
@@ -10457,7 +10495,7 @@ function setupKeyboardNavigation() {
 
   window.addEventListener('focusin', (e) => {
     if (e.target && typeof e.target.scrollIntoView === 'function' && !e.target.closest?.('.sidebar')) {
-      e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+tvScrollIntoView(e.target, { block: 'nearest', inline: 'nearest' });
     }
   });
 }
@@ -10571,7 +10609,7 @@ function navigateSpatial(key) {
     if (strip) {
       scrollStripToCard(strip, bestCandidate);
     } else {
-      bestCandidate.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+tvScrollIntoView(bestCandidate, { block: 'nearest', inline: 'nearest' });
     }
   }
 }
