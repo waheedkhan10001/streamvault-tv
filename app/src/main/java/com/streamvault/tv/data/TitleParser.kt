@@ -126,7 +126,9 @@ object TitleParser {
 
     private val YEAR_REGEX = Regex("""(?:^|[\s(\[._-])((?:19[2-9]\d|20[0-2]\d))(?:[\s)\]._-]|$)""")
     private val BRACKET_TAG_REGEX = Regex("""\[([^\]]+)]|\|([^|]+)\|""")
-    private val LEADING_PREFIX_REGEX = Regex("""^\s*(?:\|?([A-Za-z]{2,10})\|?\s*[-:|]\s*)+""")
+    private val LEADING_PREFIX_REGEX = Regex("""^\s*(?:\|?([A-Za-z]{2,10})\|?\s*([-:|])\s*)+""")
+    // Real English words that are also language codes: only a prefix when written "IT - Title", never "IT: Title"
+    private val COLON_AMBIGUOUS_PREFIXES = setOf("IT", "IN", "US", "UK", "BR", "DE", "PL", "ML", "TA", "TE", "FA", "IR", "AR", "ES")
     private val QUALITY_NOISE_REGEX = Regex(
         """(?i)\b(4K|UHD|2160p|FHD|1080p|HD|720p|480p|HEVC|x265|H\.?265|x264|H\.?264|HDR|HDR10|DV|Dolby\s*Vision|BluRay|WEB-?DL|WEBRip|BRRip|HDTS|CAM|MULTI-?SUB|ESUB|E-?SUB|SUBBED|DUBBED|DUAL\s*AUDIO|MULTI\s*AUDIO)\b"""
     )
@@ -154,6 +156,9 @@ object TitleParser {
             }
         }
 
+        // A year written in square brackets, "Title [2000]", is a year, not a tag
+        working = working.replace(Regex("""\[\s*((?:19[2-9]\d|20[0-2]\d))\s*]"""), " ($1) ")
+
         // 2. Inspect bracketed or piped tags e.g. |EN| [4K-HEVC] [MULTI-SUB]
         BRACKET_TAG_REGEX.findAll(working).forEach { match ->
             val token = (match.groups[1]?.value ?: match.groups[2]?.value ?: "").trim().uppercase(Locale.ROOT)
@@ -166,7 +171,9 @@ object TitleParser {
         val prefixMatch = LEADING_PREFIX_REGEX.find(working)
         if (prefixMatch != null) {
             val token = (prefixMatch.groups[1]?.value ?: "").trim().uppercase(Locale.ROOT)
-            LANGUAGE_PREFIX_MAP[token]?.let {
+            val separator = prefixMatch.groups[2]?.value ?: ""
+            val colonOnWord = separator == ":" && token in COLON_AMBIGUOUS_PREFIXES
+            LANGUAGE_PREFIX_MAP[token]?.takeIf { !colonOnWord }?.let {
                 detectedLanguage = it
                 working = working.substring(prefixMatch.range.last + 1)
             }
@@ -233,28 +240,27 @@ object TitleParser {
         )
     }
 
+    private val Q_4K = Regex("""(?<![A-Z0-9])(4K|UHD|2160P)(?![A-Z0-9])""")
+    private val Q_1080 = Regex("""(?<![A-Z0-9])(1080P|FHD)(?![A-Z0-9])""")
+    private val Q_720 = Regex("""(?<![A-Z0-9])720P(?![A-Z0-9])""")
+    private val Q_HEVC = Regex("""(?<![A-Z0-9])(HEVC|X265|H\.?265)(?![A-Z0-9])""")
+    private val Q_HDR = Regex("""(?<![A-Z0-9])(HDR10?|DOLBY\s*VISION|DV)(?![A-Z0-9])""")
+    private val Q_MULTI_AUDIO = Regex("""(?<![A-Z0-9])(DUAL[\s-]*AUDIO|MULTI[\s-]*AUDIO|DUAL)(?![A-Z0-9])""")
+    private val SUB_MULTI = Regex("""(?<![A-Z0-9])MULTI[\s-]?SUBS?(?![A-Z0-9])""")
+    private val SUB_ENGLISH = Regex("""(?<![A-Z0-9])(E-?SUBS?|ENG(LISH)?[\s-]*SUBS?)(?![A-Z0-9])""")
+    private val SUB_ANY = Regex("""(?<![A-Z0-9])(SUBS|SUBBED|SUBTITLED)(?![A-Z0-9])""")
+
     private fun extractQualityAndSubFromToken(upperText: String, qualities: MutableSet<String>): String? {
-        if (upperText.contains("4K") || upperText.contains("UHD") || upperText.contains("2160P")) {
-            qualities.add("4K")
-        }
-        if (upperText.contains("1080P") || upperText.contains("FHD")) {
-            qualities.add("1080p")
-        } else if (upperText.contains("720P")) {
-            qualities.add("720p")
-        }
-        if (upperText.contains("HEVC") || upperText.contains("265")) {
-            qualities.add("HEVC")
-        }
-        if (upperText.contains("HDR") || upperText.contains("DOLBY VISION") || upperText.contains(" DV ")) {
-            qualities.add("HDR")
-        }
-        if (upperText.contains("MULTI") && upperText.contains("AUDIO") || upperText.contains("DUAL")) {
-            qualities.add("Multi-Audio")
-        }
+        if (Q_4K.containsMatchIn(upperText)) qualities.add("4K")
+        if (Q_1080.containsMatchIn(upperText)) qualities.add("1080p")
+        else if (Q_720.containsMatchIn(upperText)) qualities.add("720p")
+        if (Q_HEVC.containsMatchIn(upperText)) qualities.add("HEVC")
+        if (Q_HDR.containsMatchIn(upperText)) qualities.add("HDR")
+        if (Q_MULTI_AUDIO.containsMatchIn(upperText)) qualities.add("Multi-Audio")
         return when {
-            upperText.contains("MULTI-SUB") || upperText.contains("MULTISUB") -> "Multi-Sub"
-            upperText.contains("ESUB") || upperText.contains("E-SUB") || upperText.contains("ENG SUB") -> "English Sub"
-            upperText.contains("SUB") -> "Subtitled"
+            SUB_MULTI.containsMatchIn(upperText) -> "Multi-Sub"
+            SUB_ENGLISH.containsMatchIn(upperText) -> "English Sub"
+            SUB_ANY.containsMatchIn(upperText) -> "Subtitled"
             else -> null
         }
     }

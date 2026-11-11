@@ -323,45 +323,72 @@ class AppApiRouter(
         }
 
         val minRating = filterObj.optDouble("minRating", queryParams["minRating"]?.toDoubleOrNull() ?: 0.0)
-        val limit = parsed.optInt("limit", filterObj.optInt("limit", 120))
+        val limit = parsed.optInt("limit", filterObj.optInt("limit", 120)).coerceIn(1, 500)
+        val offset = parsed.optInt("offset", filterObj.optInt("offset", 0)).coerceAtLeast(0)
 
-        val incGenres = mutableSetOf<String>()
-        val incArr = filterObj.optJSONArray("includedGenres")
-        if (incArr != null) {
-            for (i in 0 until incArr.length()) incGenres.add(incArr.getString(i))
+        fun stringSet(key: String): Set<String> {
+            val out = linkedSetOf<String>()
+            val arr = filterObj.optJSONArray(key)
+            if (arr != null) for (i in 0 until arr.length()) arr.optString(i, "").takeIf { it.isNotBlank() }?.let { out.add(it) }
+            return out
         }
+        fun intOrNull(key: String): Int? = if (filterObj.isNull(key) || !filterObj.has(key)) null else filterObj.optInt(key, 0).takeIf { it > 0 }
+
+        val incGenres = stringSet("includedGenres")
+        val excGenres = stringSet("excludedGenres")
+        val languages = stringSet("selectedLanguages")
+        val matchAll = filterObj.optBoolean("matchAllIncludedGenres", true)
+        val quality = filterObj.optString("qualityFilter", "").takeIf { it.isNotBlank() && it != "null" }
+        val decade = intOrNull("decade")
+        val exactYear = intOrNull("yearFilter")
+        // Studio / category chip (18+ Vault) is matched against the title/plot/cast text
+        val category = filterObj.optString("categoryFilter", "").takeIf { it.isNotBlank() && it != "null" }
+        val fullSearch = listOfNotNull(searchQuery.takeIf { it.isNotBlank() }, category).joinToString(" ")
 
         val sortStr = filterObj.optString("sortBy", "RELEASE_YEAR_DESC")
         val sortOption = when (sortStr) {
             "RATING_DESC" -> SortOption.RATING_DESC
             "TITLE_ASC" -> SortOption.TITLE_ASC
+            "RANDOM" -> SortOption.RANDOM
             "ADDED_DESC", "NEWLY_ADDED" -> SortOption.NEWLY_ADDED
             else -> SortOption.RELEASE_YEAR_DESC
         }
 
         val filter = SuperFilterState(
-            searchQuery = searchQuery,
+            searchQuery = fullSearch,
             mediaTypeFilter = mediaType,
-            minRating = minRating,
             includedGenres = incGenres,
+            excludedGenres = excGenres,
+            matchAllIncludedGenres = matchAll,
+            selectedLanguages = languages,
+            minYear = if (decade == null) exactYear else null,
+            maxYear = if (decade == null) exactYear else null,
+            decade = decade,
+            minRating = minRating,
+            qualityFilter = quality,
             sortBy = sortOption
         )
 
         val activeProf = getActiveUserProfile()
         val isVaultTab = parsed.optBoolean("adultOnly", false) || queryParams["tab"] == "VAULT_18"
 
+        val total = IntArray(1)
         val items = db.queryMedia(
             filter = filter,
             limit = limit,
             profileId = activeProf.id,
             isKids = activeProf.isKids,
             isAdultVaultUnlocked = prefs.isAdultVaultUnlocked(),
-            isVaultTab = isVaultTab
+            isVaultTab = isVaultTab,
+            offset = offset,
+            totalOut = total
         )
         return JSONObject().apply {
             put("ok", true)
             put("items", mediaListToJsonArray(items))
             put("totalCount", items.size)
+            put("totalMatched", total[0])
+            put("hasMore", offset + items.size < total[0])
         }.toString()
     }
 
@@ -426,7 +453,14 @@ class AppApiRouter(
         val activeProf = getActiveUserProfile()
         val dedupKey = queryParams["dedupKey"] ?: queryParams["id"] ?: ""
         val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
-        val mlt = db.getMoreLikeThis(item, isKids = activeProf.isKids, limit = 12)
+        val mlt = db.getMoreLikeThis(
+            item,
+            isKids = activeProf.isKids,
+            limit = 12,
+            matchMode = queryParams["matchMode"] ?: "everything",
+            hideWatched = queryParams["hideWatched"] == "true",
+            profileId = activeProf.id
+        )
         val episodes = if (item.mediaType == MediaType.SERIES) {
             db.getSeriesEpisodes(item.primaryStreamId)
         } else emptyList()
@@ -552,7 +586,7 @@ class AppApiRouter(
                 "http://$base"
             } else base
             val safeExt = ext.ifBlank { "mp4" }
-            val urlStr = "$safeBase/movie/$username/$pass/$streamId.$safeExt"
+            val urlStr = "$safeBase/movie/${android.net.Uri.encode(username)}/${android.net.Uri.encode(pass)}/${android.net.Uri.encode(streamId)}.$safeExt"
             val url = java.net.URL(urlStr)
             val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -596,11 +630,9 @@ class AppApiRouter(
         return "$kb KB"
     }
 
-    private fun rawTitleMatchesCam(rawTitle: String): Boolean {
-        val lower = rawTitle.lowercase(Locale.ROOT)
-        return lower.contains("cam") || lower.contains("hdcam") || lower.contains("telesync") ||
-                Regex("""\b(cam|hdcam|ts|dragon money)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawTitle)
-    }
+    // Whole-word match only: "American Gangster" or "Camelot" must not be flagged as a CAM copy.
+    private fun rawTitleMatchesCam(rawTitle: String): Boolean =
+        Regex("""(?<![A-Za-z0-9])(cam|camrip|hdcam|hd-cam|telesync|hdts|ts)(?![A-Za-z0-9])""", RegexOption.IGNORE_CASE).containsMatchIn(rawTitle)
 
     private fun handleGetLive(queryParams: Map<String, String>): String {
         val activeProf = getActiveUserProfile()

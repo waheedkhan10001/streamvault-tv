@@ -252,6 +252,7 @@ class MainActivity : Activity() {
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
         )
         apiRouter = com.streamvault.tv.data.AppApiRouter(this, db, prefs, syncEngine)
+        runCatching { syncEngine.resumeEnrichmentIfNeeded() }
 
         try {
             toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 65)

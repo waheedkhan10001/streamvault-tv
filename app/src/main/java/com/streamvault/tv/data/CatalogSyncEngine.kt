@@ -347,7 +347,13 @@ class CatalogSyncEngine(
                         posterUrl = bestPoster,
                         rating = bestRating,
                         addedTimestamp = bestAdded,
-                        versions = mergedVersions
+                        versions = mergedVersions,
+                        plot = existing.plot.ifBlank { plot },
+                        cast = if (existing.cast.isNotEmpty()) existing.cast else castStr.split(",").map { it.trim() }.filter { it.isNotBlank() },
+                        director = existing.director.ifBlank { director },
+                        backdropUrl = existing.backdropUrl.ifBlank { backdrop },
+                        tmdbId = if (existing.tmdbId > 0) existing.tmdbId else tmdbId,
+                        year = if (existing.year > 0) existing.year else finalYear
                     )
                 }
 
@@ -360,6 +366,28 @@ class CatalogSyncEngine(
                 }
             }
             reader.endArray()
+        }
+
+        // Same movie listed once WITH a TMDB id and once WITHOUT one gets two different keys: fold the second into the first
+        val byTitleKey = HashMap<String, String>()
+        for ((key, item) in dedupMap) {
+            if (key.startsWith("tmdb:")) byTitleKey[TitleParser.parse(item.rawTitle, item.categoryName).dedupKey] = key
+        }
+        if (byTitleKey.isNotEmpty()) {
+            for (key in dedupMap.keys.toList()) {
+                val target = byTitleKey[key] ?: continue
+                if (target == key) continue
+                val loose = dedupMap.remove(key) ?: continue
+                val keep = dedupMap[target] ?: continue
+                dedupMap[target] = keep.copy(
+                    qualityBadges = (keep.qualityBadges + loose.qualityBadges).distinct(),
+                    genres = (keep.genres + loose.genres).distinct(),
+                    versions = keep.versions + loose.versions,
+                    posterUrl = keep.posterUrl.ifBlank { loose.posterUrl },
+                    rating = maxOf(keep.rating, loose.rating),
+                    addedTimestamp = maxOf(keep.addedTimestamp, loose.addedTimestamp)
+                )
+            }
         }
 
         // Save in memory-safe chunks of 500
@@ -432,6 +460,12 @@ class CatalogSyncEngine(
      * Never touches the user's IPTV server unless a regional item is missing from TMDB
      * AND no video playback is currently active.
      */
+    /** App start: if the last enrichment was cut short (app closed, TV switched off), carry on where it stopped. */
+    fun resumeEnrichmentIfNeeded() {
+        val (enriched, total) = db.getEnrichmentCounts()
+        if (total > 0 && enriched < total) startBackgroundTmdbEnrichment()
+    }
+
     fun startBackgroundTmdbEnrichment(onProgress: () -> Unit = {}) {
         if (enrichJob?.isActive == true) return
         enrichJob = scope.launch(Dispatchers.IO) {

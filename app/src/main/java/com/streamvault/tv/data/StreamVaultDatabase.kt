@@ -286,7 +286,8 @@ class StreamVaultDatabase(context: Context) :
                     """
                     SELECT is_enriched, genres_text, plot, cast_text, director, runtime_mins,
                            backdrop_url, imdb_id, in_watchlist, is_watched, resume_position_ms,
-                           duration_ms, has_embedded_subtitles, embedded_sub_langs, embedded_audio_langs
+                           duration_ms, has_embedded_subtitles, embedded_sub_langs, embedded_audio_langs,
+                           certification, tmdb_id, vote_count, rating, year, poster_url
                     FROM media_items WHERE dedup_key = ?
                     """.trimIndent(),
                     arrayOf(item.dedupKey)
@@ -312,6 +313,12 @@ class StreamVaultDatabase(context: Context) :
                 val embAudioLangs = if (exists && !existingCursor.getString(14).isNullOrBlank()) {
                     existingCursor.getString(14)
                 } else item.embeddedAudioLanguages.joinToString("|")
+                val existingCert = if (exists) existingCursor.getString(15) ?: "" else ""
+                val existingTmdb = if (exists) existingCursor.getInt(16) else 0
+                val existingVotes = if (exists) existingCursor.getInt(17) else 0
+                val existingRating = if (exists) existingCursor.getDouble(18) else 0.0
+                val existingYear = if (exists) existingCursor.getInt(19) else 0
+                val existingPoster = if (exists) existingCursor.getString(20) ?: "" else ""
                 existingCursor.close()
 
                 if (!exists && markNewIfInserted) {
@@ -329,6 +336,14 @@ class StreamVaultDatabase(context: Context) :
                 val finalRuntime = if (keepEnriched && existingRuntime > 0) existingRuntime else item.runtimeMins
                 val finalBackdrop = if (keepEnriched && existingBackdrop.isNotBlank()) existingBackdrop else item.backdropUrl
                 val finalImdb = if (keepEnriched && existingImdb.isNotBlank()) existingImdb else item.imdbId
+                // A re-sync must never wipe what TMDB already filled in (age rating, id, votes, rating, year, poster):
+                // without the age rating, Kids profiles would suddenly hide those titles.
+                val finalCert = if (existingCert.isNotBlank()) existingCert else item.certification
+                val finalTmdb = if (item.tmdbId == 0 && existingTmdb > 0) existingTmdb else item.tmdbId
+                val finalVotes = if (keepEnriched && existingVotes > 0) existingVotes else item.voteCount
+                val finalRating = if (keepEnriched && existingRating > 0.0) existingRating else item.rating
+                val finalYear = if (keepEnriched && existingYear > 0) existingYear else item.year
+                val finalPoster = if (keepEnriched && existingPoster.isNotBlank()) existingPoster else item.posterUrl
 
                 val versionsJson = JSONArray().apply {
                     item.versions.forEach { put(it.toJson()) }
@@ -349,20 +364,20 @@ class StreamVaultDatabase(context: Context) :
                 val cv = ContentValues().apply {
                     put("dedup_key", item.dedupKey)
                     put("primary_stream_id", item.primaryStreamId)
-                    put("tmdb_id", item.tmdbId)
+                    put("tmdb_id", finalTmdb)
                     put("imdb_id", finalImdb)
                     put("media_type", item.mediaType.name)
                     put("clean_title", item.cleanTitle)
                     put("raw_title", item.rawTitle)
-                    put("year", item.year)
-                    put("rating", item.rating)
-                    put("vote_count", item.voteCount)
+                    put("year", finalYear)
+                    put("rating", finalRating)
+                    put("vote_count", finalVotes)
                     put("genres_text", finalGenres)
                     put("plot", finalPlot)
                     put("cast_text", finalCast)
                     put("director", finalDirector)
                     put("runtime_mins", finalRuntime)
-                    put("poster_url", item.posterUrl)
+                    put("poster_url", finalPoster)
                     put("backdrop_url", finalBackdrop)
                     put("language", item.language)
                     put("quality_badges", item.qualityBadges.distinct().joinToString("|"))
@@ -382,7 +397,7 @@ class StreamVaultDatabase(context: Context) :
                     put("versions_json", versionsJson)
                     put("search_blob", searchBlob)
                     put("is_adult", if (isAdult) 1 else 0)
-                    put("certification", item.certification)
+                    put("certification", finalCert)
                 }
 
                 db.insertWithOnConflict("media_items", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -540,7 +555,9 @@ class StreamVaultDatabase(context: Context) :
         profileId: String = "",
         isKids: Boolean = false,
         isAdultVaultUnlocked: Boolean = false,
-        isVaultTab: Boolean = false
+        isVaultTab: Boolean = false,
+        offset: Int = 0,
+        totalOut: IntArray? = null
     ): List<MediaItem> {
         val db = readableDatabase
         val whereClauses = mutableListOf<String>()
@@ -713,7 +730,14 @@ class StreamVaultDatabase(context: Context) :
             "media_items m"
         }
 
-        val sql = "SELECT $selectSql FROM $fromSql $whereSql $orderSql LIMIT $limit"
+        // Optional: how many titles match in total (for "Showing 1-120 of N" and for loading more pages)
+        if (totalOut != null && totalOut.isNotEmpty()) {
+            db.rawQuery("SELECT COUNT(*) FROM $fromSql $whereSql", args.toTypedArray()).use { c ->
+                totalOut[0] = if (c.moveToFirst()) c.getInt(0) else 0
+            }
+        }
+
+        val sql = "SELECT $selectSql FROM $fromSql $whereSql $orderSql LIMIT $limit OFFSET ${offset.coerceAtLeast(0)}"
         val cursor = db.rawQuery(sql, args.toTypedArray())
         return readMediaList(cursor)
     }
@@ -772,34 +796,80 @@ class StreamVaultDatabase(context: Context) :
     }
 
     /**
-     * Finds "More Like This" recommendations based on shared Genres, Director, and Cast.
-     * Adult titles NEVER appear in More Like This!
+     * "More Like This" for the Detail screen. matchMode picks what "like" means:
+     *  - everything:    shared genres + same director + shared cast (default)
+     *  - story:         shared genres + similar plot words + same age rating
+     *  - setting:       same language + similar era (within 10 years)
+     *  - cast_director: same director or shared actors only
+     * hideWatched drops titles this profile already watched. Adult titles NEVER appear here.
      */
-    fun getMoreLikeThis(item: MediaItem, isKids: Boolean = false, limit: Int = 12): List<MediaItem> {
-        if (item.genres.isEmpty() && item.director.isBlank()) return emptyList()
+    fun getMoreLikeThis(
+        item: MediaItem,
+        isKids: Boolean = false,
+        limit: Int = 12,
+        matchMode: String = "everything",
+        hideWatched: Boolean = false,
+        profileId: String = ""
+    ): List<MediaItem> {
+        if (item.genres.isEmpty() && item.director.isBlank() && item.cast.isEmpty()) return emptyList()
         val db = readableDatabase
-        val primaryGenre = item.genres.firstOrNull() ?: ""
-        val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
+        val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("m.certification") else ""
+
+        val conds = mutableListOf<String>()
+        val condArgs = mutableListOf<String>()
+        item.genres.take(3).forEach { conds.add("('|' || m.genres_text || '|' LIKE ?)"); condArgs.add("%|$it|%") }
+        if (item.director.isNotBlank()) { conds.add("(m.director != '' AND m.director = ?)"); condArgs.add(item.director) }
+        item.cast.take(3).forEach { conds.add("m.cast_text LIKE ?"); condArgs.add("%$it%") }
+        if (matchMode == "setting" && item.language.isNotBlank()) { conds.add("m.language = ?"); condArgs.add(item.language) }
+        if (conds.isEmpty()) return emptyList()
+
+        val hasProfile = profileId.isNotBlank()
+        val selectSql = if (hasProfile) {
+            "m.*, COALESCE(pms.in_watchlist, 0) AS p_in_watchlist, COALESCE(pms.is_watched, 0) AS p_is_watched, " +
+                "COALESCE(pms.resume_position_ms, 0) AS p_resume_position_ms, COALESCE(pms.duration_ms, 0) AS p_duration_ms, " +
+                "COALESCE(pms.user_rating, 0.0) AS p_user_rating"
+        } else "m.*"
+        val fromSql = if (hasProfile) {
+            "media_items m LEFT JOIN profile_media_state pms ON pms.dedup_key = m.dedup_key AND pms.profile_id = ?"
+        } else "media_items m"
+        val args = mutableListOf<String>()
+        if (hasProfile) args.add(profileId)
+        args.add(item.dedupKey)
+        args.addAll(condArgs)
 
         val cursor = db.rawQuery(
-            """
-            SELECT * FROM media_items
-            WHERE dedup_key != ?
-              AND is_adult = 0
-              $kidsClause
-              AND (genres_text LIKE ? OR (director != '' AND director = ?))
-            ORDER BY rating DESC, year DESC
-            LIMIT ?
-            """.trimIndent(),
-            arrayOf(item.dedupKey, "%$primaryGenre%", item.director, (limit * 2).toString())
+            "SELECT $selectSql FROM $fromSql WHERE m.dedup_key != ? AND m.is_adult = 0 $kidsClause " +
+                "AND (" + conds.joinToString(" OR ") + ") ORDER BY m.rating DESC, m.year DESC LIMIT 300",
+            args.toTypedArray()
         )
         val candidates = readMediaList(cursor)
-        return candidates.sortedByDescending { cand ->
-            val sharedGenres = cand.genres.intersect(item.genres.toSet()).size * 3
-            val sameDir = if (item.director.isNotBlank() && cand.director == item.director) 5 else 0
-            val sharedCast = cand.cast.intersect(item.cast.toSet()).size * 2
-            (sharedGenres + sameDir + sharedCast) * 10 + cand.rating.toInt()
-        }.take(limit)
+
+        fun words(t: String): Set<String> = t.lowercase(Locale.ROOT).split(Regex("[^a-z]+")).filter { it.length > 4 }.toSet()
+        val itemGenres = item.genres.toSet()
+        val itemCast = item.cast.toSet()
+        val itemWords = words(item.plot)
+
+        data class Scored(val m: MediaItem, val score: Int)
+        val scored = candidates.mapNotNull { cand ->
+            if (hideWatched && cand.isWatched) return@mapNotNull null
+            val sharedGenres = cand.genres.intersect(itemGenres).size
+            val sameDir = item.director.isNotBlank() && cand.director == item.director
+            val sharedCast = cand.cast.intersect(itemCast).size
+            val plotOverlap = if (matchMode == "story") words(cand.plot).intersect(itemWords).size else 0
+            val sameLang = cand.language == item.language
+            val eraClose = item.year > 0 && cand.year > 0 && Math.abs(cand.year - item.year) <= 10
+            val sameCert = item.certification.isNotBlank() && cand.certification == item.certification
+            when (matchMode) {
+                "story" -> if (sharedGenres == 0 && plotOverlap < 2) null
+                           else Scored(cand, sharedGenres * 3 + minOf(plotOverlap, 6) * 2 + (if (sameCert) 2 else 0))
+                "setting" -> if (!sameLang) null
+                             else Scored(cand, 6 + (if (eraClose) 4 else 0) + sharedGenres)
+                "cast_director" -> if (!sameDir && sharedCast == 0) null
+                                   else Scored(cand, (if (sameDir) 5 else 0) + sharedCast * 3)
+                else -> Scored(cand, sharedGenres * 3 + (if (sameDir) 5 else 0) + sharedCast * 2)
+            }
+        }
+        return scored.sortedByDescending { it.score * 10 + it.m.rating.toInt() }.take(limit).map { it.m }
     }
 
     fun getAllDistinctGenres(): List<String> {

@@ -1151,13 +1151,14 @@
           <img id="welcomeQrImg" src="" alt="Scan QR" style="width:110px;height:110px;display:block;border-radius:4px;" />
         </div>
         <div>
-          <div style="font-size:10px;font-weight:800;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.8px;">Quick Phone Pairing</div>
-          <div id="welcomeCodeDisplay" style="font-size:24px;font-weight:900;letter-spacing:2.5px;color:var(--theme-border, #A78BFA);margin:2px 0 4px;">SV-....</div>
-          <div style="font-size:11px;color:#D1D5DB;line-height:1.4;">
-            <div>1. Scan with phone camera</div>
-            <div>2. 1-tap instant TV sign in</div>
+          <div id="welcomePairTitle" style="font-size:10px;font-weight:800;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.8px;">Sign in with your phone</div>
+          <div style="font-size:11px;color:#D1D5DB;line-height:1.45;margin-top:3px;">
+            <div>1. Scan this QR with your phone camera</div>
+            <div>2. Sign in or create an account there</div>
+            <div>3. This TV signs in by itself</div>
           </div>
-          <div style="font-size:9.5px;color:var(--theme-accent, #8B5CF6);margin-top:4px;font-weight:700;">streamvault-app.workers.dev/link</div>
+          <div style="font-size:10px;color:#9CA3AF;margin-top:5px;">Or open <span style="color:var(--theme-accent, #8B5CF6);font-weight:700;">streamvault-sync.streamvault-app.workers.dev/link</span> and type the TV code:</div>
+          <div id="welcomeCodeDisplay" style="font-size:22px;font-weight:900;letter-spacing:2.5px;color:var(--theme-border, #A78BFA);margin-top:1px;">SV-....</div>
         </div>
       </div>
     </div>
@@ -1324,7 +1325,7 @@
         <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Server URL</label>
         <input id="inpPlaylistServer" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="http://example.com:8080" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+      <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:12px;">
         <div>
           <label style="display:block;font-size:10px;font-weight:700;color:#C4B5FD;margin-bottom:3px;text-transform:uppercase;">Username</label>
           <input id="inpPlaylistUser" type="text" class="tv-focusable search-field" style="width:100%;font-size:12px;padding:8px 10px;" placeholder="Username" required readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');" />
@@ -4064,29 +4065,44 @@ function hideWelcomeScreen() {
   if (sb) sb.style.display = 'flex';
 }
 
+function stopTvPairingPolling() {
+  if (tvPairingPollInterval) { clearInterval(tvPairingPollInterval); tvPairingPollInterval = null; }
+}
+
+// The code on screen is dead (expired, or the phone link could not be finished): show a fresh one.
+function refreshWelcomePairingCode() {
+  stopTvPairingPolling();
+  const ov = document.getElementById('welcomeScreenOverlay');
+  if (ov && ov.style.display === 'flex') loadWelcomePairingCode();
+}
+
 function startTvPairingPolling(code) {
-  if (tvPairingPollInterval) clearInterval(tvPairingPollInterval);
+  stopTvPairingPolling();
+  let busy = false;
   tvPairingPollInterval = setInterval(async () => {
+    if (busy) return;
+    busy = true;
     try {
       const res = await fetch('/api/auth/poll-code?code=' + encodeURIComponent(code)).catch(() => null);
       if (!res || !res.ok) return;
       const data = await res.json();
+      if (data.status === 'expired') { refreshWelcomePairingCode(); return; }
       if (data.status === 'paired' && data.exchangeToken) {
-        clearInterval(tvPairingPollInterval);
-        tvPairingPollInterval = null;
-        const exRes = await fetch('/api/auth/pair-exchange', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, exchangeToken: data.exchangeToken })
-        });
-        if (exRes.ok) {
-          const exData = await exRes.json();
-          if (exData.token) {
-            await handleSuccessfulAuth(exData);
-          }
-        }
+        stopTvPairingPolling();
+        let exData = null;
+        try {
+          const exRes = await fetch('/api/auth/pair-exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, exchangeToken: data.exchangeToken })
+          });
+          exData = exRes && exRes.ok ? await exRes.json() : null;
+        } catch (_) {}
+        if (exData && exData.token) await handleSuccessfulAuth(exData);
+        else { showToast('Could not finish linking. Showing a new code.'); refreshWelcomePairingCode(); }
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally { busy = false; }
   }, 3000);
 }
 
@@ -4248,6 +4264,7 @@ async function checkAuthAndRoute() {
   // If > 1 profile and not yet picked this session, show profile picker
   const isProfileActiveThisSession = sessionStorage.getItem('sv_session_profile_active') === 'true';
   if (profilesList.length > 1 && !isProfileActiveThisSession) {
+    setupKeyboardNavigation();   // the picker must answer the remote too (it used to appear before this was registered)
     showProfilePicker(profilesList, async (selectedProfile) => {
       await activateProfileAndEnterApp(selectedProfile);
     });
@@ -4828,6 +4845,15 @@ function onFilterBackgroundClick(e) {
   }
 }
 
+// After a choice the screen is rebuilt: put the remote back on the button of the dropdown that was just used.
+function focusFilterPill(dropId) {
+  setTimeout(() => {
+    const drop = document.getElementById(dropId);
+    const pill = drop && drop.parentElement && drop.parentElement.querySelector('.filter-pill-btn');
+    if (pill) pill.focus();
+  }, 40);
+}
+
 function selectFilterGenre(g) {
   if (!g) filterState.includedGenres = [];
   else {
@@ -4837,20 +4863,14 @@ function selectFilterGenre(g) {
   }
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'));
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="0"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill('dropGenre');
 }
 
 function selectFilterDecade(d) {
   filterState.decade = d;
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'));
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="1"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill('dropYear');
 }
 
 function selectFilterLang(l) {
@@ -4862,50 +4882,35 @@ function selectFilterLang(l) {
   }
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'));
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="2"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill('dropLang');
 }
 
 function selectFilterQuality(q) {
   filterState.qualityFilter = q;
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'));
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="3"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill('dropQuality');
 }
 
 function selectFilterRating(r) {
   filterState.minRating = r;
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'));
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="4"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill('dropRating');
 }
 
 function selectFilterSort(s) {
   filterState.sortBy = s;
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="3"] .filter-pill-btn') || document.querySelector('[data-pill-idx="5"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill('dropSort');
 }
 
 function selectFilterAdultCategory(cat) {
   filterState.categoryFilter = cat || null;
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'), '18+ Vault');
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="0"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill('dropAdultCat');
 }
 
 function selectFilterYear(yr) {
@@ -4918,10 +4923,7 @@ function selectFilterYear(yr) {
   }
   closeAllDropdowns();
   loadSuperFilter(document.getElementById('mainViewport'), currentTab === 'VAULT_18' ? '18+ Vault' : currentTab === 'SERIES' ? 'Series' : currentTab === 'MOVIES' ? 'Movies' : 'Search');
-  setTimeout(() => {
-    const pill = document.querySelector('[data-pill-idx="1"] .filter-pill-btn');
-    if (pill) pill.focus();
-  }, 40);
+  focusFilterPill((currentTab === 'VAULT_18' ? 'dropAdultYear' : 'dropYear'));
 }
 
 async function lockVaultAndReturnHome() {
@@ -5698,19 +5700,12 @@ async function loadSettings(vp) {
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <div>
-                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Enriched Local Database</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Room SQLite cache on TV</div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Catalog &amp; Posters</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Fills in automatically. Use this to re-download your playlist now.</div>
               </div>
-              <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Enrich Now</button>
+              <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Refresh Now</button>
             </div>
 
-            <div style="display:flex;justify-content:space-between;align-items:center;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);">
-              <div>
-                <div style="font-size:11px;font-weight:800;color:#F87171;">Factory Reset</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Wipes local database and preferences</div>
-              </div>
-              <button tabindex="0" id="btnFactoryReset" class="btn tv-focusable" style="border-color:#EF4444;color:#F87171;padding:2px 10px;font-size:10px;" onclick="openFactoryResetModal()">Reset</button>
-            </div>
           </div>
 
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.06);font-size:9.5px;color:#9CA3AF;">
@@ -5925,7 +5920,7 @@ async function deletePlaylist(playlistId) {
 function triggerFullEnrichmentSync() {
   playNavSound();
   fetch('/api/sync-now', { method: 'POST' }).then(() => {
-    showToast('✓ Background catalog enrichment started');
+    showToast('✓ Refreshing your catalog in the background');
   }).catch(() => {
     showToast('Sync initiated');
   });
@@ -5945,6 +5940,12 @@ function advanceToNextInput(currentInput) {
     if (next) { next.removeAttribute('readonly'); next.focus(); playNavSound(); return true; }
   } else if (currentInput.id === 'setConfirmPin') {
     const btn = document.getElementById('btnUpdatePin');
+    if (btn) { btn.focus(); playNavSound(); return true; }
+  }
+
+  // IPTV credentials popup: after Password, OK goes to Save & Connect (never Cancel)
+  if (currentInput.id === 'inpPlaylistPass') {
+    const btn = document.getElementById('btnSavePlaylist');
     if (btn) { btn.focus(); playNavSound(); return true; }
   }
 
@@ -7743,7 +7744,7 @@ async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episo
     }
   }
 
-  const directUrl = `${creds.serverUrl.replace(/\/+$/, '')}/${typePart}/${creds.username}/${creds.password}/${streamId}.${ext}`;
+  const directUrl = `${creds.serverUrl.replace(/\/+$/, '')}/${typePart}/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${encodeURIComponent(streamId)}.${ext}`;
   const movieDurationMs = (item.runtimeMins && item.runtimeMins > 0) ? (item.runtimeMins * 60 * 1000) : (item.durationMs > 0 ? item.durationMs : 0);
 
   const seekMs = startOffsetMs > 0 ? startOffsetMs : (item.resumePositionMs > 30000 ? item.resumePositionMs : 0);
@@ -7761,7 +7762,7 @@ async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episo
 function startLivePlayback(streamId, chName) {
   const creds = (appStatus && appStatus.credentials) || {};
   if (!creds.serverUrl || !creds.username || !creds.password) return alert('IPTV credentials required.');
-  const directUrl = `${creds.serverUrl.replace(/\/+$/, '')}/live/${creds.username}/${creds.password}/${streamId}.m3u8`;
+  const directUrl = `${creds.serverUrl.replace(/\/+$/, '')}/live/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${encodeURIComponent(streamId)}.m3u8`;
 
   if (window.AndroidApp && typeof window.AndroidApp.playStream === 'function') {
     window.AndroidApp.playStream(directUrl, chName, 0, 'live:' + streamId, 0, 'm3u8');
@@ -8771,6 +8772,30 @@ function closeTopPopup(el) {
 
 // Sign-in / sign-up popup. Rows are listed in the order they appear on screen; Up/Down change row,
 // Left/Right move inside a row. Focus can never leave the popup (it sits above the welcome screen).
+// Simple one-field-per-row popups: Up/Down walk the rows in order, Left/Right move inside a button row.
+function rowsNavigate(current, key, rows) {
+  const go = (id) => { const el = document.getElementById(id); if (el) { el.focus(); playNavSound(); } };
+  let r = -1, c = -1;
+  const id = current && current.id;
+  rows.forEach((row, i) => { const j = row.indexOf(id); if (j !== -1) { r = i; c = j; } });
+  if (r === -1) { go(rows[0][0]); return true; }
+  if (key === 'ArrowLeft' || key === 'ArrowRight') {
+    const nc = c + (key === 'ArrowRight' ? 1 : -1);
+    if (nc >= 0 && nc < rows[r].length) go(rows[r][nc]);
+    return true;
+  }
+  const nr = r + (key === 'ArrowDown' ? 1 : -1);
+  if (nr >= 0 && nr < rows.length) { const t = rows[nr]; go(t[t.length - 1]); }
+  return true;
+}
+
+function playlistModalNavigate(current, key) {
+  const modal = document.getElementById('playlistModal');
+  if (!modal || modal.style.display !== 'flex' || getTopPopup() !== modal) return false;
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return false;
+  return rowsNavigate(current, key, [['inpPlaylistName'], ['inpPlaylistServer'], ['inpPlaylistUser'], ['inpPlaylistPass'], ['btnCancelPlaylist', 'btnSavePlaylist']]);
+}
+
 function cloudAuthNavigate(current, key) {
   const modal = document.getElementById('cloudAuthModal');
   if (!modal || modal.style.display !== 'flex') return false;
@@ -8807,6 +8832,7 @@ function fastNavigate(current, key) {
 
   // 0.0. Sign-in / sign-up popup (checked first: it is on top of everything else)
   if (cloudAuthNavigate(current, key)) return true;
+  if (playlistModalNavigate(current, key)) return true;
 
   // Any other popup on top: it owns the remote. If focus slipped outside it, navigateSpatial pulls it back in,
   // and the overlays underneath (welcome, profile picker, detail "focus trap") must not grab focus back.
@@ -9896,7 +9922,11 @@ window.handleTvKeyEvent = function(k, code) {
 };
 
 let lastRemoteKeyTime = 0;
+let keyboardNavInstalled = false;
 function setupKeyboardNavigation() {
+  // Called after sign-in, profile switch, etc. Registering twice made every key press act twice.
+  if (keyboardNavInstalled) return;
+  keyboardNavInstalled = true;
   window.addEventListener('keydown', (e) => {
     const isEnter = e.key === 'Enter' || e.keyCode === 13 || e.key === 'Select';
     if (isEnter) {

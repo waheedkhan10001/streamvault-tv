@@ -446,8 +446,8 @@ async function runPhaseCTests() {
     window.handleTvKeyEvent('ArrowDown');
     const userInp = document.activeElement;
 
-    // Right to Pass
-    window.handleTvKeyEvent('ArrowRight');
+    // Down to Pass (Username and Password are stacked now, one per row)
+    window.handleTvKeyEvent('ArrowDown');
     const passInp = document.activeElement;
 
     // Down to Save

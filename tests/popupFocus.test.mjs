@@ -158,6 +158,39 @@ async function run() {
     await closeAll();
   }
 
+
+  console.log('\n5. IPTV credentials popup: Down/Up visit every field in order, Enter moves on, typing works');
+  {
+    await closeAll();
+    await page.evaluate(() => window.openAddPlaylistModal());
+    await sleep(400);
+    const order = ['inpPlaylistName', 'inpPlaylistServer', 'inpPlaylistUser', 'inpPlaylistPass', 'btnCancelPlaylist'];
+    let start = await describe();
+    if (start !== 'inpPlaylistName') { await page.evaluate(() => document.getElementById('inpPlaylistName').focus()); }
+    const seen = ['inpPlaylistName'];
+    for (let i = 0; i < 4; i++) { await press('ArrowDown'); seen.push(await describe()); }
+    check('Down goes Name -> Server -> Username -> Password -> buttons', seen.slice(0, 4).join(',') === order.slice(0, 4).join(',') && ['btnCancelPlaylist', 'btnSavePlaylist'].includes(seen[4]), seen.join(' > '));
+    for (let i = 0; i < 3; i++) await press('ArrowUp');
+    check('Up walks back through Password, Username to Server', (await describe()) === 'inpPlaylistServer', await describe());
+    // typing with the real keyboard, Enter to move on
+    await page.evaluate(() => document.getElementById('inpPlaylistServer').focus());
+    const flow = [['inpPlaylistServer', 'http://tv.example.com:8080'], ['inpPlaylistUser', 'myuser'], ['inpPlaylistPass', 'mypass']];
+    let ok = true, why = ''; const trail = [];
+    for (const [id, text] of flow) {
+      if ((await describe()) !== id) { ok = false; why = `expected focus on ${id}, was ${await describe()} (${trail.join(', ')})`; break; }
+      if (id === 'inpPlaylistServer') await press('Enter');   // OK opens the first box; the next ones open by themselves
+      await page.keyboard.type(text); await sleep(60);
+      await press('Enter');                       // OK again moves to the next box
+      trail.push(id + '->' + await describe());
+    }
+    const vals = await page.evaluate(() => ['inpPlaylistServer', 'inpPlaylistUser', 'inpPlaylistPass'].map(i => document.getElementById(i).value));
+    check('typing Server, Username, Password with Enter in between lands in the right boxes', ok && vals.join('|') === 'http://tv.example.com:8080|myuser|mypass', why || vals.join('|'));
+    check('after Password, Enter reaches a button inside the popup', await insideNow('playlistModal') && /btn/.test(await describe()), await describe());
+    const vis = await page.evaluate(() => { const r = document.getElementById('btnSavePlaylist').getBoundingClientRect(); return r.bottom <= innerHeight && r.top >= 0; });
+    check('Save button is fully on screen (popup not taller than the TV screen)', vis);
+    await closeAll();
+  }
+
   check('no JavaScript errors', pageErrors.length === 0, pageErrors.join(' | '));
   await browser.close();
   const failed = results.filter(r => !r.ok);

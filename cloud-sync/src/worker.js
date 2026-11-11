@@ -412,7 +412,7 @@ export default {
       if (pathname === '/' || pathname === '/link') {
         const codeParam = url.searchParams.get('code') || '';
         return new Response(renderWebPairingUi(codeParam), {
-          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
         });
       }
 
@@ -711,6 +711,9 @@ export default {
 
       // A. TV Requests Live 6-Digit Pairing Code (e.g. SV-XXXX)
       if (method === 'POST' && pathname === '/api/auth/request-code') {
+        const limitedReq = await enforceLimit(env.DB, `ip:reqcode:${clientIp}`, 20, 60,
+          'Too many pairing requests. Please wait a minute.', corsHeaders);
+        if (limitedReq) return limitedReq;
         const now = Date.now();
         // Generate random 4-character suffix using non-confusing chars
         const charset = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -742,6 +745,9 @@ export default {
         const auth = await authenticate(request, env);
         if (!auth) return errorResponse('Authentication required to link device', 401, corsHeaders);
 
+        const limitedClaim = await enforceLimit(env.DB, `acct:claimcode:${auth.accountId}`, 10, 60,
+          'Too many attempts. Please wait a minute.', corsHeaders);
+        if (limitedClaim) return limitedClaim;
         const { code } = await request.json().catch(() => ({}));
         if (!code) return errorResponse('Pairing code is required', 400, corsHeaders);
 
@@ -775,6 +781,9 @@ export default {
       if (method === 'GET' && pathname === '/api/auth/poll-code') {
         const codeParam = url.searchParams.get('code') || '';
         if (!codeParam) return errorResponse('Code parameter required', 400, corsHeaders);
+        const limitedPoll = await enforceLimit(env.DB, `ip:pollcode:${clientIp}`, 60, 60,
+          'Too many requests. Please wait a minute.', corsHeaders);
+        if (limitedPoll) return limitedPoll;
 
         const cleanCode = codeParam.trim().toUpperCase();
         const now = Date.now();
@@ -1577,257 +1586,282 @@ export default {
 // Web TV Link Portal HTML (Rendered on Phone / Browser)
 // --------------------------------------------------------------------
 
+// Accepts only a well-formed TV code (SV-XXXX); anything else is dropped so it can never reach the page.
+function cleanTvCode(raw) {
+  const c = String(raw || '').trim().toUpperCase();
+  return /^SV-[23456789A-HJKLMNP-Z]{4}$/.test(c) ? c : '';
+}
+
 function renderWebPairingUi(initialCode = '') {
+  const safeCode = cleanTvCode(initialCode);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>StreamVault TV — Account & TV Link</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>Link your TV — StreamVault</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-    body { background: #090714; color: #FFFFFF; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-    .card { background: #130E26; border: 1.5px solid #281F4B; border-radius: 16px; width: 100%; max-width: 440px; padding: 28px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
-    .logo { text-align: center; margin-bottom: 24px; }
-    .logo h1 { color: #A78BFA; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
-    .logo p { color: #94A3B8; font-size: 13.5px; margin-top: 4px; }
-    .tabs { display: flex; gap: 8px; margin-bottom: 20px; background: #0A0716; padding: 4px; border-radius: 10px; border: 1px solid #1E1638; }
-    .tab-btn { flex: 1; padding: 8px 12px; font-size: 12.5px; font-weight: 600; border: none; background: transparent; color: #94A3B8; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
-    .tab-btn.active { background: #7C3AED; color: #FFFFFF; }
-    .form-group { margin-bottom: 14px; }
-    .form-group label { display: block; font-size: 12px; font-weight: 600; color: #CBD5E1; margin-bottom: 6px; }
-    .form-group input { width: 100%; padding: 12px 14px; background: #0A0716; border: 1.5px solid #281F4B; border-radius: 8px; font-size: 14px; color: #FFFFFF; outline: none; transition: border-color 0.2s; }
-    .form-group input:focus { border-color: #7C3AED; }
-    .btn { width: 100%; padding: 13px; font-size: 14.5px; font-weight: 700; border: none; border-radius: 8px; cursor: pointer; background: #7C3AED; color: #FFFFFF; transition: opacity 0.2s; margin-top: 8px; }
-    .btn:hover { opacity: 0.92; }
-    .code-box { text-align: center; letter-spacing: 6px; font-size: 24px; font-weight: 800; text-transform: uppercase; }
-    .toast { display: none; padding: 12px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; font-weight: 500; }
-    .toast.error { display: block; background: rgba(239,68,68,0.15); border: 1px solid #EF4444; color: #FCA5A5; }
-    .toast.success { display: block; background: rgba(16,185,129,0.15); border: 1px solid #10B981; color: #6EE7B7; }
-    .logged-box { background: #1B1438; border: 1px solid #3B2D6B; border-radius: 10px; padding: 16px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }
-    .logged-email { font-size: 13.5px; font-weight: 600; color: #E2E8F0; }
-    .btn-link-sm { font-size: 12px; color: #A78BFA; background: none; border: none; cursor: pointer; text-decoration: underline; }
+    body { background: #090714; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .card { background: #130E26; border: 1.5px solid #281F4B; border-radius: 16px; width: 100%; max-width: 420px; padding: 26px; box-shadow: 0 20px 50px rgba(0,0,0,.6); }
+    h1 { color: #A78BFA; font-size: 24px; font-weight: 800; text-align: center; }
+    h2 { font-size: 19px; margin-bottom: 6px; text-align: center; }
+    p.sub { color: #94A3B8; font-size: 14px; line-height: 1.45; text-align: center; margin-bottom: 18px; }
+    .chip { display: block; margin: 12px auto 18px; width: fit-content; background: #0A0716; border: 1.5px solid #4C1D95; border-radius: 999px; padding: 6px 16px; font-size: 14px; color: #CBD5E1; }
+    .chip b { color: #fff; letter-spacing: 2px; font-size: 16px; }
+    .tabs { display: flex; gap: 6px; background: #0A0716; padding: 4px; border-radius: 10px; margin-bottom: 18px; }
+    .tabs button { flex: 1; padding: 10px; font-size: 14px; font-weight: 600; border: 0; background: transparent; color: #94A3B8; border-radius: 7px; cursor: pointer; }
+    .tabs button.on { background: #7C3AED; color: #fff; }
+    label { display: block; font-size: 12.5px; font-weight: 600; color: #CBD5E1; margin: 12px 0 6px; }
+    input { width: 100%; padding: 13px 14px; background: #0A0716; border: 1.5px solid #281F4B; border-radius: 8px; font-size: 16px; color: #fff; outline: none; }
+    input:focus { border-color: #7C3AED; }
+    input.big { text-align: center; font-size: 24px; letter-spacing: 6px; }
+    .btn { width: 100%; margin-top: 18px; padding: 14px; font-size: 15px; font-weight: 700; border: 0; border-radius: 10px; background: #7C3AED; color: #fff; cursor: pointer; }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .btn.ghost { background: transparent; border: 1.5px solid #281F4B; color: #CBD5E1; margin-top: 10px; }
+    .link { background: none; border: 0; color: #A78BFA; font-size: 13.5px; cursor: pointer; text-decoration: underline; }
+    .row { text-align: center; margin-top: 14px; }
+    .err { background: #3B0A14; border: 1px solid #7F1D2D; color: #FECACA; font-size: 13.5px; padding: 10px 12px; border-radius: 8px; margin-top: 14px; }
+    .note { background: #1B1236; border: 1px solid #3B2A73; color: #DDD6FE; font-size: 13.5px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; margin-bottom: 4px; }
+    .ok { text-align: center; }
+    .tick { width: 72px; height: 72px; border-radius: 50%; background: #16A34A; display: flex; align-items: center; justify-content: center; font-size: 40px; margin: 6px auto 16px; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo">
-      <h1>StreamVault TV</h1>
-      <p>Cloud TV Link & Account Portal</p>
+<div class="card">
+  <h1>StreamVault</h1>
+
+  <!-- Step 1: type the code from the TV (skipped when the QR already carried it) -->
+  <section id="viewCode" hidden>
+    <h2>Link your TV</h2>
+    <p class="sub">Enter the code shown on your TV screen. It looks like <b>SV-AB12</b>.</p>
+    <label for="tvCode">Code on your TV</label>
+    <input id="tvCode" class="big" maxlength="7" autocomplete="off" autocapitalize="characters" placeholder="SV-XXXX">
+    <button class="btn" id="btnCode">Continue</button>
+    <div class="err" id="errCode" hidden></div>
+  </section>
+
+  <!-- Step 2: sign in or create an account -->
+  <section id="viewAuth" hidden>
+    <h2 id="authTitle">Sign in to link your TV</h2>
+    <span class="chip">TV code <b class="tvCodeText"></b></span>
+    <div class="tabs">
+      <button id="tabIn" class="on" type="button">Sign in</button>
+      <button id="tabUp" type="button">Create account</button>
     </div>
+    <form id="formIn" novalidate>
+      <label for="inEmail">Email</label>
+      <input id="inEmail" type="email" autocomplete="email" inputmode="email">
+      <label for="inPass">Password</label>
+      <input id="inPass" type="password" autocomplete="current-password">
+      <button class="btn" id="btnIn" type="submit">Sign in &amp; link TV</button>
+    </form>
+    <form id="formUp" novalidate hidden>
+      <label for="upName">Your name</label>
+      <input id="upName" autocomplete="name">
+      <label for="upEmail">Email</label>
+      <input id="upEmail" type="email" autocomplete="email" inputmode="email">
+      <label for="upPass">Password (at least 6 characters)</label>
+      <input id="upPass" type="password" autocomplete="new-password">
+      <button class="btn" id="btnUp" type="submit">Create account</button>
+    </form>
+    <div class="err" id="errAuth" hidden></div>
+    <div class="row"><button class="link" id="btnOtherCode" type="button">Wrong TV code?</button></div>
+  </section>
 
-    <div id="toast" class="toast"></div>
+  <!-- Step 3: email verification (only for new accounts) -->
+  <section id="viewVerify" hidden>
+    <h2>Check your email</h2>
+    <p class="sub">We sent a 6-digit code to <b id="verifyEmail"></b>.</p>
+    <div class="note">This is <b>not</b> the code on your TV. Type the 6 digits from the email here.</div>
+    <label for="verCode">6-digit email code</label>
+    <input id="verCode" class="big" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000">
+    <button class="btn" id="btnVerify">Verify &amp; link TV</button>
+    <div class="err" id="errVerify" hidden></div>
+    <div class="row"><button class="link" id="btnResend" type="button">Send the code again</button> · <button class="link" id="btnBackAuth" type="button">Change email</button></div>
+  </section>
 
-    <div id="loggedHeader" style="display: none;" class="logged-box">
-      <div>
-        <div style="font-size: 11px; color: #94A3B8;">Signed in as</div>
-        <div id="loggedEmailText" class="logged-email"></div>
-      </div>
-      <button class="btn-link-sm" onclick="signOut()">Sign Out</button>
-    </div>
+  <!-- Already signed in on this phone: one tap -->
+  <section id="viewConfirm" hidden>
+    <h2>Link this TV?</h2>
+    <span class="chip">TV code <b class="tvCodeText"></b></span>
+    <p class="sub">Your TV will be signed in as <b id="confirmEmail"></b>.</p>
+    <button class="btn" id="btnConfirm">Yes, link my TV</button>
+    <button class="btn ghost" id="btnSwitch">Use a different account</button>
+    <div class="err" id="errConfirm" hidden></div>
+  </section>
 
-    <div id="authTabs" class="tabs">
-      <button id="tabBtnPair" class="tab-btn active" onclick="switchTab('pair')">Link TV</button>
-      <button id="tabBtnSignIn" class="tab-btn" onclick="switchTab('signin')">Sign In</button>
-      <button id="tabBtnSignUp" class="tab-btn" onclick="switchTab('signup')">Sign Up</button>
-    </div>
+  <!-- Finished -->
+  <section id="viewDone" class="ok" hidden>
+    <div class="tick">✓</div>
+    <h2>Your TV is linked</h2>
+    <p class="sub">Look at your TV — it signs in by itself in a few seconds.<br>You can close this page.</p>
+  </section>
+</div>
 
-    <!-- 1. Pair TV Code Tab -->
-    <div id="panePair">
-      <div class="form-group">
-        <label>Enter 6-Character TV Code</label>
-        <input id="inpTvCode" type="text" class="code-box" maxlength="7" placeholder="SV-XXXX" value="${initialCode}">
-      </div>
-      <button class="btn" onclick="handleClaimCode()">🔗 Link TV Screen</button>
-    </div>
+<script>
+(function () {
+  var INITIAL = ${JSON.stringify(safeCode)};
+  var tvCode = INITIAL;
+  var pendingEmail = '';
+  var pendingPassword = '';
+  var $ = function (id) { return document.getElementById(id); };
+  var VIEWS = ['viewCode', 'viewAuth', 'viewVerify', 'viewConfirm', 'viewDone'];
 
-    <!-- 2. Sign In Tab -->
-    <div id="paneSignIn" style="display: none;">
-      <div class="form-group">
-        <label>Email Address</label>
-        <input id="inpLoginEmail" type="email" placeholder="name@example.com">
-      </div>
-      <div class="form-group">
-        <label>Password</label>
-        <input id="inpLoginPass" type="password" placeholder="••••••••">
-      </div>
-      <button class="btn" onclick="handleLogin()">Sign In</button>
-    </div>
+  function store(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 
-    <!-- 3. Sign Up Tab -->
-    <div id="paneSignUp" style="display: none;">
-      <div class="form-group">
-        <label>Display Name</label>
-        <input id="inpRegName" type="text" placeholder="Waleed Khan">
-      </div>
-      <div class="form-group">
-        <label>Email Address</label>
-        <input id="inpRegEmail" type="email" placeholder="name@example.com">
-      </div>
-      <div class="form-group">
-        <label>Password (min 6 chars)</label>
-        <input id="inpRegPass" type="password" placeholder="••••••••">
-      </div>
-      <button class="btn" onclick="handleSignUp()">Create Account</button>
-    </div>
+  function show(id) {
+    VIEWS.forEach(function (v) { $(v).hidden = (v !== id); });
+    Array.prototype.forEach.call(document.querySelectorAll('.tvCodeText'), function (el) { el.textContent = tvCode; });
+    ['errCode', 'errAuth', 'errVerify', 'errConfirm'].forEach(function (e) { $(e).hidden = true; });
+  }
+  function fail(id, msg) { var el = $(id); el.textContent = msg; el.hidden = false; }
+  function busy(btn, on, label) { btn.disabled = on; if (label) btn.textContent = on ? 'Please wait…' : label; }
 
-    <!-- 4. Verify Code Pane -->
-    <div id="paneVerify" style="display: none;">
-      <p style="font-size: 13px; color: #CBD5E1; margin-bottom: 12px; text-align: center;">We emailed a 6-digit verification code to <b id="verifyEmailTarget"></b></p>
-      <div class="form-group">
-        <label>Enter 6-Digit Email Code</label>
-        <input id="inpVerifyCode" type="text" class="code-box" maxlength="6" placeholder="123456">
-      </div>
-      <button class="btn" onclick="handleVerify()">Confirm Code</button>
-    </div>
-  </div>
+  function api(path, method, body, token) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .catch(function () { return { status: 0, data: { error: 'No internet connection. Please try again.' } }; });
+  }
+  function errText(res) { return (res.data && (res.data.error || res.data.message)) || 'Something went wrong. Please try again.'; }
 
-  <script>
-    function showToast(msg, isError = true) {
-      const t = document.getElementById('toast');
-      t.className = isError ? 'toast error' : 'toast success';
-      t.innerText = msg;
-    }
+  // Tell the server this phone's account owns the TV code. This is the ONLY place the TV gets linked.
+  function linkTv(token, errId) {
+    return api('/api/auth/claim-code', 'POST', { code: tvCode }, token).then(function (res) {
+      if (res.status === 200 && res.data.success) { show('viewDone'); return true; }
+      if (res.status === 401) { store('sv_web_token', null); show('viewAuth'); fail('errAuth', 'Please sign in again.'); return false; }
+      if (res.status === 400) { tvCode = ''; show('viewCode'); fail('errCode', 'That TV code has expired or was already used. Look at your TV for the new code.'); return false; }
+      fail(errId, errText(res)); return false;
+    });
+  }
 
-    function switchTab(tab) {
-      document.getElementById('panePair').style.display = tab === 'pair' ? 'block' : 'none';
-      document.getElementById('paneSignIn').style.display = tab === 'signin' ? 'block' : 'none';
-      document.getElementById('paneSignUp').style.display = tab === 'signup' ? 'block' : 'none';
-      document.getElementById('paneVerify').style.display = 'none';
+  function afterSignedIn(token, email) {
+    store('sv_web_token', token);
+    store('sv_web_email', email);
+    return linkTv(token, 'errAuth');
+  }
 
-      document.getElementById('tabBtnPair').className = tab === 'pair' ? 'tab-btn active' : 'tab-btn';
-      document.getElementById('tabBtnSignIn').className = tab === 'signin' ? 'tab-btn active' : 'tab-btn';
-      document.getElementById('tabBtnSignUp').className = tab === 'signup' ? 'tab-btn active' : 'tab-btn';
-    }
+  function start() {
+    var token = load('sv_web_token');
+    if (!tvCode) { show('viewCode'); return; }
+    if (!token) { show('viewAuth'); return; }
+    api('/api/auth/me', 'GET', null, token).then(function (res) {
+      if (res.status === 200 && res.data.authenticated) {
+        $('confirmEmail').textContent = (res.data.account && res.data.account.email) || load('sv_web_email') || 'your account';
+        show('viewConfirm');
+      } else { store('sv_web_token', null); show('viewAuth'); }
+    });
+  }
 
-    function checkAuthState() {
-      const token = localStorage.getItem('sv_auth_token');
-      const email = localStorage.getItem('sv_auth_email');
-      if (token && email) {
-        document.getElementById('loggedHeader').style.display = 'flex';
-        document.getElementById('loggedEmailText').innerText = email;
-        document.getElementById('tabBtnSignIn').style.display = 'none';
-        document.getElementById('tabBtnSignUp').style.display = 'none';
-        switchTab('pair');
-      } else {
-        document.getElementById('loggedHeader').style.display = 'none';
-        document.getElementById('tabBtnSignIn').style.display = 'block';
-        document.getElementById('tabBtnSignUp').style.display = 'block';
-      }
-    }
+  // ---- Step 1
+  function submitCode() {
+    var c = $('tvCode').value.trim().toUpperCase();
+    if (/^[23456789A-HJKLMNP-Z]{4}$/.test(c)) c = 'SV-' + c;
+    if (!/^SV-[23456789A-HJKLMNP-Z]{4}$/.test(c)) { fail('errCode', 'Type the code exactly as shown on your TV, like SV-AB12.'); return; }
+    tvCode = c; start();
+  }
+  $('btnCode').onclick = submitCode;
+  $('tvCode').onkeydown = function (e) { if (e.key === 'Enter') submitCode(); };
+  $('btnOtherCode').onclick = function () { tvCode = ''; $('tvCode').value = ''; show('viewCode'); };
 
-    async function handleLogin() {
-      const email = document.getElementById('inpLoginEmail').value.trim();
-      const password = document.getElementById('inpLoginPass').value;
-      if (!email || !password) return showToast('Please enter email and password');
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        });
-        const data = await res.json();
-        if (!res.ok) return showToast(data.error || 'Login failed');
-        localStorage.setItem('sv_auth_token', data.token);
-        localStorage.setItem('sv_auth_email', data.email);
-        localStorage.setItem('sv_account_id', data.accountId);
-        checkAuthState();
-        showToast('Signed in successfully!', false);
-      } catch (e) {
-        showToast('Network error during login');
-      }
-    }
+  // ---- Step 2
+  function setMode(up) {
+    $('tabIn').className = up ? '' : 'on'; $('tabUp').className = up ? 'on' : '';
+    $('formIn').hidden = up; $('formUp').hidden = !up;
+    $('authTitle').textContent = up ? 'Create your account' : 'Sign in to link your TV';
+    $('errAuth').hidden = true;
+  }
+  $('tabIn').onclick = function () { setMode(false); };
+  $('tabUp').onclick = function () { setMode(true); };
 
-    let pendingEmail = '';
-    async function handleSignUp() {
-      const displayName = document.getElementById('inpRegName').value.trim();
-      const email = document.getElementById('inpRegEmail').value.trim();
-      const password = document.getElementById('inpRegPass').value;
-      if (!email || !password) return showToast('Please enter all required fields');
-      try {
-        const res = await fetch('/api/auth/signup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ displayName, email, password })
-        });
-        const data = await res.json();
-        if (!res.ok) return showToast(data.error || 'Sign up failed');
-        pendingEmail = email;
-        document.getElementById('verifyEmailTarget').innerText = email;
-        document.getElementById('paneSignUp').style.display = 'none';
-        document.getElementById('paneVerify').style.display = 'block';
-        if (data.devCode) {
-          showToast('Verification code sent! (Dev test code: ' + data.devCode + ')', false);
-        } else {
-          showToast('Verification code sent to your email!', false);
-        }
-      } catch (e) {
-        showToast('Network error during sign up');
-      }
-    }
-
-    async function handleVerify() {
-      const code = document.getElementById('inpVerifyCode').value.trim();
-      if (!code) return showToast('Please enter 6-digit code');
-      try {
-        const res = await fetch('/api/auth/verify-code', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: pendingEmail, code })
-        });
-        const data = await res.json();
-        if (!res.ok) return showToast(data.error || 'Verification failed');
-        localStorage.setItem('sv_auth_token', data.token);
-        localStorage.setItem('sv_auth_email', data.email);
-        localStorage.setItem('sv_account_id', data.accountId);
-        checkAuthState();
-        showToast('Email verified and signed in!', false);
-      } catch (e) {
-        showToast('Network error during verification');
-      }
-    }
-
-    async function handleClaimCode() {
-      const token = localStorage.getItem('sv_auth_token');
-      if (!token) {
-        showToast('Please Sign In or Create an Account first to link your TV');
-        switchTab('signin');
+  $('formIn').onsubmit = function (e) {
+    e.preventDefault();
+    var email = $('inEmail').value.trim(), pass = $('inPass').value;
+    if (!email || !pass) { fail('errAuth', 'Enter your email and password.'); return; }
+    busy($('btnIn'), true);
+    api('/api/auth/login', 'POST', { email: email, password: pass }).then(function (res) {
+      busy($('btnIn'), false, 'Sign in & link TV');
+      if (res.status !== 200 || !res.data.token) { fail('errAuth', errText(res)); return; }
+      if (res.data.isVerified === false) {            // never finished email verification: do that first
+        pendingEmail = email; pendingPassword = pass;
+        api('/api/auth/resend-code', 'POST', { email: email }).then(function () { gotoVerify(email); });
         return;
       }
-      const code = document.getElementById('inpTvCode').value.trim();
-      if (!code) return showToast('Please enter the 6-character code shown on TV');
-      try {
-        const res = await fetch('/api/auth/claim-code', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify({ code })
-        });
-        const data = await res.json();
-        if (!res.ok) return showToast(data.error || 'Failed to link TV');
-        showToast('🎉 ' + data.message, false);
-      } catch (e) {
-        showToast('Network error linking TV code');
-      }
-    }
+      afterSignedIn(res.data.token, res.data.email || email);
+    });
+  };
 
-    function signOut() {
-      const token = localStorage.getItem('sv_auth_token');
-      if (token) {
-        fetch('/api/auth/signout', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + token }
-        }).catch(() => {});
-      }
-      localStorage.clear();
-      checkAuthState();
-      showToast('Signed out successfully', false);
-    }
+  $('formUp').onsubmit = function (e) {
+    e.preventDefault();
+    var name = $('upName').value.trim(), email = $('upEmail').value.trim(), pass = $('upPass').value;
+    if (!email || pass.length < 6) { fail('errAuth', 'Enter a valid email and a password of at least 6 characters.'); return; }
+    busy($('btnUp'), true);
+    api('/api/auth/signup', 'POST', { email: email, password: pass, displayName: name || 'Account Owner' }).then(function (res) {
+      busy($('btnUp'), false, 'Create account');
+      if (res.status !== 201 && res.status !== 200) { fail('errAuth', errText(res)); return; }
+      pendingEmail = email; pendingPassword = pass;
+      if (res.data.requireVerification) gotoVerify(email);
+      else api('/api/auth/login', 'POST', { email: email, password: pass }).then(function (l) { if (l.data.token) afterSignedIn(l.data.token, email); else fail('errAuth', errText(l)); });
+    });
+  };
 
-    checkAuthState();
-  </script>
+  // ---- Step 3
+  var resendTimer = null;
+  function gotoVerify(email) {
+    $('verifyEmail').textContent = email; $('verCode').value = '';
+    show('viewVerify');
+    cooldown();
+  }
+  function cooldown() {
+    var left = 30, b = $('btnResend'); b.disabled = true;
+    clearInterval(resendTimer);
+    resendTimer = setInterval(function () {
+      left--; if (left <= 0) { clearInterval(resendTimer); b.disabled = false; b.textContent = 'Send the code again'; }
+      else b.textContent = 'Send the code again (' + left + 's)';
+    }, 1000);
+    b.textContent = 'Send the code again (30s)';
+  }
+  $('btnResend').onclick = function () {
+    api('/api/auth/resend-code', 'POST', { email: pendingEmail }).then(function (res) {
+      if (res.status === 200) { fail('errVerify', 'A new code was sent.'); $('errVerify').style.background = '#0F2A1A'; $('errVerify').style.borderColor = '#166534'; $('errVerify').style.color = '#BBF7D0'; cooldown(); }
+      else { $('errVerify').removeAttribute('style'); fail('errVerify', errText(res)); }
+    });
+  };
+  $('btnBackAuth').onclick = function () { clearInterval(resendTimer); setMode(true); show('viewAuth'); };
+  function submitVerify() {
+    var c = $('verCode').value.replace(/\\D/g, '');
+    $('errVerify').removeAttribute('style');
+    if (c.length !== 6) { fail('errVerify', 'Type the 6 digits from the email.'); return; }
+    busy($('btnVerify'), true);
+    api('/api/auth/verify-code', 'POST', { email: pendingEmail, code: c }).then(function (res) {
+      busy($('btnVerify'), false, 'Verify & link TV');
+      if (res.status !== 200 || !res.data.token) { fail('errVerify', errText(res)); return; }
+      pendingPassword = '';
+      afterSignedIn(res.data.token, pendingEmail).then(function (okLinked) { if (!okLinked && !$('viewVerify').hidden) fail('errVerify', 'Verified, but linking failed. Please try again.'); });
+    });
+  }
+  $('btnVerify').onclick = submitVerify;
+  $('verCode').onkeydown = function (e) { if (e.key === 'Enter') submitVerify(); };
+
+  // ---- Already signed in
+  $('btnConfirm').onclick = function () {
+    busy($('btnConfirm'), true);
+    linkTv(load('sv_web_token'), 'errConfirm').then(function () { busy($('btnConfirm'), false, 'Yes, link my TV'); });
+  };
+  $('btnSwitch').onclick = function () {
+    var t = load('sv_web_token');
+    if (t) api('/api/auth/signout', 'POST', null, t);
+    store('sv_web_token', null); setMode(false); show('viewAuth');
+  };
+
+  start();
+})();
+</script>
 </body>
 </html>`;
 }

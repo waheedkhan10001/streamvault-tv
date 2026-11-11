@@ -247,6 +247,11 @@ async function run() {
     check('right code signs in and stores the session', st.token);
     check('welcome screen and popup are gone', st.welcome === 'none' && st.modal === 'none', JSON.stringify(st));
     check('remote still has something to focus afterwards', st.focusVisible, `focus is on "${st.focus}"`);
+    // Keys must not be registered twice after signing in (arrows would skip a row, OK would fire twice)
+    await page.evaluate(() => { window.__keyCalls = 0; const orig = window.handleTvKeyEvent; window.handleTvKeyEvent = function (...a) { window.__keyCalls++; return orig.apply(this, a); }; });
+    await press(page, 'ArrowDown');
+    const calls = await page.evaluate(() => window.__keyCalls);
+    check('after signing in, one key press is handled exactly once', calls === 1, `handled ${calls} times`);
     check('no JavaScript errors through the whole sign-up', pageErrors.length === 0, pageErrors.join(' | '));
     await page.close();
   }
