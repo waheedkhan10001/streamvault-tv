@@ -7786,12 +7786,11 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
 }
 
 function startDetailPreviewBuffer(item) {
-  previewBufferTimeout = setTimeout(() => {
-    const creds = (appStatus && appStatus.credentials) || {};
-    if (!creds.serverUrl || !creds.username || !creds.password) return;
+  previewBufferTimeout = setTimeout(async () => {
     const ver = (item.versions || [])[0] || { streamId: item.primaryStreamId, containerExtension: 'mp4' };
     const typePart = item.mediaType === 'SERIES' ? 'series' : 'movie';
-    const directUrl = `${creds.serverUrl.replace(/\/+$/, '')}/${typePart}/${creds.username}/${creds.password}/${ver.streamId}.${ver.containerExtension || 'mp4'}`;
+    const directUrl = await resolveStreamUrl(typePart, ver.streamId, ver.containerExtension || 'mp4');
+    if (!directUrl) return;
     const proxyUrl = `/api/stream-proxy?url=${encodeURIComponent(directUrl)}`;
 
     const pVideo = document.getElementById('detailPreviewVideo');
@@ -8004,6 +8003,25 @@ async function playHeroMovie(dedupKey) {
   await startMoviePlayback(dedupKey, 0, 0);
 }
 
+// The TV engine builds the playable address (the IPTV password never reaches this screen).
+// Returns the address, or '' after showing a clear message when it cannot be built.
+async function resolveStreamUrl(kind, id, ext, announce) {
+  let reply = null;
+  try {
+    const res = await fetch('/api/stream-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: kind, id: String(id == null ? '' : id), ext: ext || '' })
+    });
+    reply = await res.json();
+  } catch (_) {}
+  if (reply && reply.ok && reply.url) return reply.url;
+  if (announce) {
+    showToast((reply && reply.message) || 'Could not start playback. Please check your internet and try again.');
+  }
+  return '';
+}
+
 // 7. HIGH-PRECISION CUSTOM NETFLIX VIDEO PLAYER & EXOPLAYER BRIDGE
 async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episodeId = null) {
   let item = selectedDetailItem;
@@ -8017,12 +8035,9 @@ async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episo
       }
     } catch (_) {}
   }
-  if (!item) return alert('Unable to load movie details.');
+  if (!item) { showToast('Could not load this title. Please try again.'); return; }
 
   const ver = (item.versions || [])[verIdx] || { streamId: item.primaryStreamId, containerExtension: 'mp4' };
-  const creds = (appStatus && appStatus.credentials) || {};
-  if (!creds.serverUrl || !creds.username || !creds.password) return alert('IPTV credentials required.');
-
   // Check if background preview video was already playing
   const pVideo = document.getElementById('detailPreviewVideo');
   if (pVideo) pVideo.pause();
@@ -8050,7 +8065,8 @@ async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episo
     }
   }
 
-  const directUrl = `${creds.serverUrl.replace(/\/+$/, '')}/${typePart}/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${encodeURIComponent(streamId)}.${ext}`;
+  const directUrl = await resolveStreamUrl(typePart, streamId, ext, true);
+  if (!directUrl) return;
   const movieDurationMs = (item.runtimeMins && item.runtimeMins > 0) ? (item.runtimeMins * 60 * 1000) : (item.durationMs > 0 ? item.durationMs : 0);
 
   const seekMs = startOffsetMs > 0 ? startOffsetMs : (item.resumePositionMs > 30000 ? item.resumePositionMs : 0);
@@ -8065,10 +8081,9 @@ async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episo
   launchPlayer(directUrl, streamTitle, seekMs / 1000, movieDurationMs / 1000);
 }
 
-function startLivePlayback(streamId, chName) {
-  const creds = (appStatus && appStatus.credentials) || {};
-  if (!creds.serverUrl || !creds.username || !creds.password) return alert('IPTV credentials required.');
-  const directUrl = `${creds.serverUrl.replace(/\/+$/, '')}/live/${encodeURIComponent(creds.username)}/${encodeURIComponent(creds.password)}/${encodeURIComponent(streamId)}.m3u8`;
+async function startLivePlayback(streamId, chName) {
+  const directUrl = await resolveStreamUrl('live', streamId, 'm3u8', true);
+  if (!directUrl) return;
 
   if (window.AndroidApp && typeof window.AndroidApp.playStream === 'function') {
     window.AndroidApp.playStream(directUrl, chName, 0, 'live:' + streamId, 0, 'm3u8');

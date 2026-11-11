@@ -1582,8 +1582,11 @@ const server = http.createServer(async (req, res) => {
       showAdult: state.parentalControl ? state.parentalControl.showAdult : false,
       hasCustomPin: ((state.parentalControl && state.parentalControl.pin) || '0000') !== '0000'
     };
+    // Same shape as the real TV: the password is never sent to the screen (only hasPassword)
+    const { password: _pw, ...safeCredentials } = state.credentials || {};
+    safeCredentials.hasPassword = !!(state.credentials && state.credentials.password);
     return res.end(JSON.stringify({
-      credentials: state.credentials,
+      credentials: safeCredentials,
       parentalControl: safeParental,
       syncStatus: state.syncStatus,
       remoteSearchQuery: state.remoteSearchQuery,
@@ -2773,6 +2776,19 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           scheduleSaveState();
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ success: true, message: 'Playlist removed' }));
+        }
+        if (pathname === '/api/stream-url') {
+          const d = JSON.parse(body || '{}');
+          const c = state.credentials || {};
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          if (!c.serverUrl || !c.username || !c.password) {
+            return res.end(JSON.stringify({ ok: false, error: 'no_login', message: 'Your IPTV login is not on this TV yet. Open Settings, then IPTV Playlists.' }));
+          }
+          const kind = d.kind === 'series' ? 'series' : d.kind === 'live' ? 'live' : 'movie';
+          if (!d.id) return res.end(JSON.stringify({ ok: false, error: 'no_id', message: 'This title has no playable stream.' }));
+          const ext = kind === 'live' ? 'm3u8' : String(d.ext || 'mp4').replace(/^\./, '');
+          const base = String(c.serverUrl).replace(/\/+$/, '');
+          return res.end(JSON.stringify({ ok: true, url: `${base}/${kind}/${encodeURIComponent(c.username)}/${encodeURIComponent(c.password)}/${encodeURIComponent(d.id)}.${ext}` }));
         }
         if (pathname === '/api/save-credentials') {
           const isJson = (req.headers['content-type'] || '').includes('application/json');
