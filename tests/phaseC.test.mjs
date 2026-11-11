@@ -424,7 +424,8 @@ async function runPhaseCTests() {
     const redChip = document.querySelector('.profile-theme-chip[data-theme="netflix"]');
     redChip.focus();
     window.handleTvKeyEvent('Enter');
-    themeChanged = localStorage.getItem('streamvault_active_theme') === 'netflix';
+    // a theme click is now a preview: the screen changes at once, and it is only stored when Save Profile is pressed
+    themeChanged = document.body.classList.contains('theme-netflix') && localStorage.getItem('streamvault_active_theme') !== 'netflix';
 
     // Focus readonly input and press Enter -> should remove readonly
     const inp = document.getElementById('profNameInput');
