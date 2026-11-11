@@ -485,15 +485,21 @@ class AppApiRouter(
                 put("title", ep.title)
                 put("plot", ep.plot)
                 put("containerExtension", ep.containerExtension)
+                put("durationSecs", ep.durationSecs)
                 put("runtimeMins", ep.durationSecs / 60)
             })
         }
 
+        // The screen reads item.episodes and "related"; older callers read the top-level names, so both are sent
+        val itemJson = mediaItemToJson(item)
+        itemJson.put("episodes", epArr)
+        val relatedArr = mediaListToJsonArray(mlt)
         return JSONObject().apply {
             put("ok", true)
-            put("item", mediaItemToJson(item))
+            put("item", itemJson)
             put("episodes", epArr)
-            put("moreLikeThis", mediaListToJsonArray(mlt))
+            put("related", relatedArr)
+            put("moreLikeThis", relatedArr)
         }.toString()
     }
 

@@ -46,7 +46,7 @@ async function newApp(browser, { twoProfiles = false } = {}) {
         if (p === '/api/home') return JSON.stringify({ hero: catalog[0], rows: [{ title: 'Featured', items: catalog.slice(0, 14) }, { title: 'Series', items: catalog.slice(18) }, { title: 'Trending', items: catalog.slice(4, 16) }] });
         if (p === '/api/query') return JSON.stringify({ items: catalog, totalMatched: catalog.length, total: catalog.length, hasMore: false });
         if (p === '/api/watchlist') return JSON.stringify({ ok: true, items: catalog.slice(0, 5) });
-        if (p === '/api/detail') { const k = new URLSearchParams(path.split('?')[1] || '').get('dedupKey'); return JSON.stringify({ item: catalog.find(c => c.dedupKey === k) || catalog[0], related: catalog.slice(2, 8) }); }
+        if (p === '/api/detail') { const k = new URLSearchParams(path.split('?')[1] || '').get('dedupKey'); return JSON.stringify({ item: catalog.find(c => c.dedupKey === k) || catalog[0], related: window.__emptyRelated ? [] : catalog.slice(2, 8) }); }
         if (p === '/api/search-history') return JSON.stringify({ ok: true, history: ['matrix', 'dune'], items: ['matrix', 'dune'] });
         if (p === '/api/continue-watching') return JSON.stringify({ ok: true, items: [] });
         if (p === '/api/probe-versions') return JSON.stringify({ ok: true, results: [] });
@@ -228,6 +228,34 @@ async function run() {
     const fb = await focusInfo(page);
     check(`detail (${label}): focus returns to a visible control`, fb.ok, fb.name);
   }
+
+
+  // ---- Detail screen: the More Like This pills must be walkable with the remote, with and without results ----
+  for (const [label, empty] of [['with results', false], ['no results', true]]) {
+    console.log(`\n3b. More Like This pills (${label})`);
+    await page.evaluate(e => { window.__emptyRelated = e; }, empty);
+    await page.evaluate(async () => { await window.navigateToTab('HOME'); });
+    await sleep(400);
+    await page.evaluate(() => window.openDetailModal('mov_3'));
+    await sleep(900);
+    const focusMode = mode => page.evaluate(m => { const el = document.querySelector('.mlt-chip[data-mode="' + m + '"]'); if (el) el.focus(); return !!el; }, mode);
+    const modeNow = () => page.evaluate(() => document.activeElement?.getAttribute('data-mode') || document.activeElement?.id || document.activeElement?.className || '');
+    await focusMode('everything'); await sleep(100);
+    const seq = [];
+    for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowRight'); await sleep(120); seq.push(await modeNow()); }
+    check(`pills (${label}): Right from "Everything" walks Story, Setting, Cast`, seq.join(',') === 'story,setting,cast_director', seq.join(','));
+    for (let i = 0; i < 3; i++) { await page.keyboard.press('ArrowLeft'); await sleep(120); }
+    check(`pills (${label}): Left walks back to "Everything"`, (await modeNow()) === 'everything', await modeNow());
+    await page.keyboard.press('ArrowRight'); await sleep(100); await page.keyboard.press('Enter'); await sleep(500);
+    const active = await page.evaluate(() => document.querySelector('.mlt-chip.active')?.getAttribute('data-mode'));
+    check(`pills (${label}): Enter on "Story & Tone" selects it`, active === 'story', String(active));
+    if (!empty) {
+      const cards = await page.evaluate(() => document.querySelectorAll('#mltPosterStrip .poster-card').length);
+      check('More Like This shows titles when the engine finds some', cards > 1, 'cards: ' + cards);
+    }
+    await page.keyboard.press('Escape'); await sleep(400);
+  }
+  await page.evaluate(() => { window.__emptyRelated = false; });
 
   check('no JavaScript errors across all screens', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
   await browser.close();
