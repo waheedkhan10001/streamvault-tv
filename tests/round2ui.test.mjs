@@ -28,6 +28,7 @@ async function run() {
       const u = String(url);
       window.__cloud.push({ url: u, method: init && init.method, headers: (init && init.headers) || {}, body: init && init.body });
       let reply = { ok: true };
+      if (window.__failPush && u.endsWith('/api/sync/push')) return new Response('{}', { status: 503 });
       if (u.endsWith('/api/account/request-pin-reset')) reply = { success: true, sentTo: 'o***@streamvault.tv' };
       if (u.endsWith('/api/account/pin')) reply = { success: true };
       return new Response(JSON.stringify(reply), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -231,13 +232,75 @@ async function run() {
   assert.deepEqual(restore.req, { action: 'restore', pinHash: 'b'.repeat(64), pinSalt: 'salt-9999-wxyz' }, 'salt travels with the hash');
   pass('Sign-in restore carries the salt (previously the salt was lost, so a restored PIN could never match).');
 
-  console.log('[Test 6] No page errors during any of the above...');
+  // ---------- U8: official TMDB logo embedded ----------
+  console.log('[Test 6] Official TMDB logo is embedded in the About card...');
+  await goSettings();
+  const logo = await page.evaluate(() => {
+    const slot = document.getElementById('tmdbLogoSlot');
+    const svg = slot && slot.querySelector('svg');
+    return svg ? { w: svg.getBoundingClientRect().width, stops: [...svg.querySelectorAll('stop')].map(x => x.getAttribute('stop-color')) } : null;
+  });
+  assert.ok(logo, 'inline SVG logo present');
+  assert.deepEqual(logo.stops, ['#90cea1', '#3cbec9', '#00b3e5'], 'official brand gradient untouched');
+  pass('TMDB logo present with its official colours.');
+
+  // ---------- U7: sign-out pushes unsynced changes BEFORE wiping ----------
+  console.log('[Test 7] Sign-out first pushes unsynced changes (while still signed in), then wipes...');
+  await page.evaluate(() => {
+    window.__cloud.length = 0;
+    ProfileSyncManager.recordChange('favorites', 'fav_1', { title: 'Unsynced favourite' });
+    if (ProfileSyncManager.timer) { clearTimeout(ProfileSyncManager.timer); ProfileSyncManager.timer = null; }
+  });
+  assert.equal(await page.evaluate(() => ProfileSyncManager.getPendingCount()), 1, 'one pending change');
+  await page.evaluate(() => confirmSignOutAccount());
+  const order = await page.evaluate(() => window.__cloud.map(c => ({ url: c.url, auth: (c.headers && (c.headers.Authorization || c.headers.authorization)) || '' })));
+  const pushIdx = order.findIndex(c => c.url.endsWith('/api/sync/push'));
+  const outIdx = order.findIndex(c => c.url.endsWith('/api/auth/signout'));
+  assert.ok(pushIdx >= 0, 'unsynced changes were pushed');
+  assert.ok(/^Bearer \S{10,}/.test(order[pushIdx].auth), 'push was authenticated (token still present)');
+  assert.ok(outIdx > pushIdx, 'sign-out happened after the push');
+  const after = await page.evaluate(() => ({ tok: localStorage.getItem('sv_auth_token'), q: localStorage.getItem('sv_pending_profile_sync') }));
+  assert.equal(after.tok, null, 'token wiped');
+  assert.equal(after.q, null, 'sync queue cleared so it cannot leak to the next account');
+  pass('Pending changes are pushed with the live token first; then token, data and queue are wiped.');
+
+  // ---------- U7: failed push blocks sign-out until the owner confirms ----------
+  console.log('[Test 8] If the push fails (offline), the owner is warned and must confirm...');
+  await page.evaluate((T) => {
+    localStorage.setItem('sv_auth_token', T);
+    window.__failPush = true;
+    window.__cloud.length = 0;
+    ProfileSyncManager.recordChange('favorites', 'fav_2', { title: 'Offline favourite' });
+    if (ProfileSyncManager.timer) { clearTimeout(ProfileSyncManager.timer); ProfileSyncManager.timer = null; }
+  }, TOKEN);
+  await page.evaluate(() => confirmSignOutAccount());
+  const st1 = await page.evaluate(() => ({
+    tok: localStorage.getItem('sv_auth_token'),
+    pending: ProfileSyncManager.getPendingCount(),
+    warn: document.getElementById('signOutUnsyncedWarning').textContent,
+    shown: document.getElementById('signOutUnsyncedWarning').style.display,
+    label: document.getElementById('btnConfirmSignOut').textContent,
+    signedOut: window.__cloud.some(c => c.url.endsWith('/api/auth/signout'))
+  }));
+  assert.ok(st1.tok, 'still signed in after the first press');
+  assert.equal(st1.pending, 1, 'change kept');
+  assert.equal(st1.signedOut, false, 'no sign-out call yet');
+  assert.equal(st1.shown, 'block');
+  assert.match(st1.warn, /could not be saved/);
+  assert.equal(st1.label, 'Sign Out Anyway');
+  await page.evaluate(() => confirmSignOutAccount());
+  const st2 = await page.evaluate(() => ({ tok: localStorage.getItem('sv_auth_token'), q: localStorage.getItem('sv_pending_profile_sync') }));
+  assert.equal(st2.tok, null, 'second press signs out');
+  assert.equal(st2.q, null, 'queue discarded only after explicit confirmation');
+  pass('Failed push keeps the data, warns, and only signs out after "Sign Out Anyway".');
+
+  console.log('[Test 9] No page errors during any of the above...');
   assert.equal(pageErrors.length, 0, 'page errors: ' + pageErrors.join(' | '));
   pass('Zero page errors.');
 
   await browser.close();
   console.log('====================================================');
-  console.log(`  ALL ROUND 2 UI ASSERTIONS PASSED (${passed}/6)`);
+  console.log(`  ALL ROUND 2 UI ASSERTIONS PASSED (${passed}/9)`);
   console.log('====================================================');
 }
 

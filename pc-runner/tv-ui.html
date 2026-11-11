@@ -925,6 +925,7 @@
     <div style="font-size:13.5px;color:#D1D5DB;line-height:1.5;margin-bottom:20px;">
       This will unlink this TV from your Cloud account and reset active session data. You can re-link anytime using your 6-digit code.
     </div>
+    <div id="signOutUnsyncedWarning" style="display:none;font-size:13px;color:#FCD34D;background:rgba(245,158,11,0.12);border:1px solid #F59E0B;border-radius:10px;padding:10px 12px;line-height:1.45;margin-bottom:16px;"></div>
     <div style="display:flex;gap:12px;justify-content:center;">
       <button tabindex="0" id="btnCancelSignOut" class="btn tv-focusable" style="background:#262A38;border-color:#374151;color:#FFFFFF;padding:10px 22px;" onclick="closeSignOutModal()">Cancel</button>
       <button tabindex="0" id="btnConfirmSignOut" class="btn tv-focusable" style="background:#DC2626;border-color:#EF4444;color:#FFFFFF;padding:10px 22px;font-weight:800;" onclick="confirmSignOutAccount()">Sign Out &amp; Unlink</button>
@@ -3383,8 +3384,8 @@ async function loadSettings(vp) {
            The card itself is focusable so the TV remote (D-pad) can reach and scroll to it. -->
       <div id="settingsAboutCard" tabindex="0" class="settings-card tv-focusable" onfocus="playNavSound()"
            style="background:#120E24;border:1.5px solid #251C42;border-radius:12px;padding:10px 14px;box-sizing:border-box;display:flex;align-items:center;gap:14px;">
-        <div id="tmdbLogoSlot" style="flex-shrink:0;display:flex;align-items:center;justify-content:center;min-width:56px;height:26px;">
-          <span style="font-size:12px;font-weight:900;letter-spacing:1px;color:#01B4E4;">TMDB</span>
+        <div id="tmdbLogoSlot" style="flex-shrink:0;display:flex;align-items:center;justify-content:center;min-width:84px;">
+          <svg role="img" aria-label="TMDB" style="width:84px;height:auto;display:block;" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 273.42 35.52"><defs><style>.cls-1{fill:url(#linear-gradient);}</style><linearGradient id="linear-gradient" y1="17.76" x2="273.42" y2="17.76" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#90cea1"/><stop offset="0.56" stop-color="#3cbec9"/><stop offset="1" stop-color="#00b3e5"/></linearGradient></defs><g id="Layer_2" data-name="Layer 2"><g id="Layer_1-2" data-name="Layer 1"><path class="cls-1" d="M191.85,35.37h63.9A17.67,17.67,0,0,0,273.42,17.7h0A17.67,17.67,0,0,0,255.75,0h-63.9A17.67,17.67,0,0,0,174.18,17.7h0A17.67,17.67,0,0,0,191.85,35.37ZM10.1,35.42h7.8V6.92H28V0H0v6.9H10.1Zm28.1,0H46V8.25h.1L55.05,35.4h6L70.3,8.25h.1V35.4h7.8V0H66.45l-8.2,23.1h-.1L50,0H38.2ZM89.14.12h11.7a33.56,33.56,0,0,1,8.08,1,18.52,18.52,0,0,1,6.67,3.08,15.09,15.09,0,0,1,4.53,5.52,18.5,18.5,0,0,1,1.67,8.25,16.91,16.91,0,0,1-1.62,7.58,16.3,16.3,0,0,1-4.38,5.5,19.24,19.24,0,0,1-6.35,3.37,24.53,24.53,0,0,1-7.55,1.15H89.14Zm7.8,28.2h4a21.66,21.66,0,0,0,5-.55A10.58,10.58,0,0,0,110,26a8.73,8.73,0,0,0,2.68-3.35,11.9,11.9,0,0,0,1-5.08,9.87,9.87,0,0,0-1-4.52,9.17,9.17,0,0,0-2.63-3.18A11.61,11.61,0,0,0,106.22,8a17.06,17.06,0,0,0-4.68-.63h-4.6ZM133.09.12h13.2a32.87,32.87,0,0,1,4.63.33,12.66,12.66,0,0,1,4.17,1.3,7.94,7.94,0,0,1,3,2.72,8.34,8.34,0,0,1,1.15,4.65,7.48,7.48,0,0,1-1.67,5,9.13,9.13,0,0,1-4.43,2.82V17a10.28,10.28,0,0,1,3.18,1,8.51,8.51,0,0,1,2.45,1.85,7.79,7.79,0,0,1,1.57,2.62,9.16,9.16,0,0,1,.55,3.2,8.52,8.52,0,0,1-1.2,4.68,9.32,9.32,0,0,1-3.1,3A13.38,13.38,0,0,1,152.32,35a22.5,22.5,0,0,1-4.73.5h-14.5Zm7.8,14.15h5.65a7.65,7.65,0,0,0,1.78-.2,4.78,4.78,0,0,0,1.57-.65,3.43,3.43,0,0,0,1.13-1.2,3.63,3.63,0,0,0,.42-1.8A3.3,3.3,0,0,0,151,8.6a3.42,3.42,0,0,0-1.23-1.13A6.07,6.07,0,0,0,148,6.9a9.9,9.9,0,0,0-1.85-.18h-5.3Zm0,14.65h7a8.27,8.27,0,0,0,1.83-.2,4.67,4.67,0,0,0,1.67-.7,3.93,3.93,0,0,0,1.23-1.3,3.8,3.8,0,0,0,.47-1.95,3.16,3.16,0,0,0-.62-2,4,4,0,0,0-1.58-1.18,8.23,8.23,0,0,0-2-.55,15.12,15.12,0,0,0-2.05-.15h-5.9Z"/></g></g></svg>
         </div>
         <div style="min-width:0;">
           <div style="font-size:13px;font-weight:800;margin-bottom:2px;">About &amp; Credits</div>
@@ -4056,13 +4057,37 @@ function closeSignOutModal() {
   playNavSound();
   const m = document.getElementById('signOutModal');
   if (m) m.style.display = 'none';
+  signOutUnsyncedAcknowledged = false;
+  const w = document.getElementById('signOutUnsyncedWarning'); if (w) w.style.display = 'none';
+  const cb = document.getElementById('btnConfirmSignOut'); if (cb) { cb.textContent = 'Sign Out & Unlink'; cb.disabled = false; }
   const btn = document.getElementById('btnSignOutAccount') || document.getElementById('btnOpenCloudSignIn');
   if (btn) btn.focus();
 }
 
+let signOutUnsyncedAcknowledged = false;
+
 async function confirmSignOutAccount() {
   playNavSound();
   const token = getStoredAuthToken();
+  // Push any unsynced profile changes BEFORE the token and local data are wiped.
+  if (token && !signOutUnsyncedAcknowledged && ProfileSyncManager.getPendingCount() > 0) {
+    const btn = document.getElementById('btnConfirmSignOut');
+    const warn = document.getElementById('signOutUnsyncedWarning');
+    if (btn) btn.disabled = true;
+    if (warn) { warn.style.display = 'block'; warn.textContent = 'Saving your latest changes to the cloud...'; }
+    let allSynced = false;
+    try { allSynced = await ProfileSyncManager.flush(); } catch (_) {}
+    if (btn) btn.disabled = false;
+    if (!allSynced) {
+      const n = ProfileSyncManager.getPendingCount();
+      if (warn) warn.textContent = n + ' recent change' + (n === 1 ? '' : 's') + " could not be saved to the cloud (check the internet). If you sign out now they will be lost. Press 'Sign Out Anyway' to continue, or Cancel and try again later.";
+      if (btn) { btn.textContent = 'Sign Out Anyway'; btn.focus(); }
+      signOutUnsyncedAcknowledged = true;
+      return;
+    }
+    if (warn) warn.style.display = 'none';
+  }
+  signOutUnsyncedAcknowledged = false;
   if (token) {
     try {
       await fetch(CLOUD_SYNC_BASE + '/api/auth/signout', {
@@ -4071,6 +4096,7 @@ async function confirmSignOutAccount() {
       }).catch(() => {});
     } catch (_) {}
   }
+  try { localStorage.removeItem(ProfileSyncManager.queueKey); localStorage.removeItem(ProfileSyncManager.lastSyncKey); } catch (_) {}
   localStorage.removeItem('sv_auth_token');
   localStorage.removeItem('streamvault_session_token');
   localStorage.removeItem('streamvault_account');
@@ -4160,10 +4186,10 @@ const ProfileSyncManager = {
       this.timer = null;
     }
     const token = getStoredAuthToken();
-    if (!token) return;
+    if (!token) return this.getQueue().length === 0;
 
     const queue = this.getQueue();
-    if (queue.length === 0) return;
+    if (queue.length === 0) return true;
 
     const groups = {};
     for (const item of queue) {
@@ -4202,6 +4228,7 @@ const ProfileSyncManager = {
       this.setLastSyncTimestamp(Date.now());
       renderSyncStatus();
     }
+    return this.getQueue().length === 0;
   },
 
   async pull(profileId) {
