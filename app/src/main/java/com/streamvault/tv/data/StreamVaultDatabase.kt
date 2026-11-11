@@ -56,7 +56,7 @@ class StreamVaultDatabase(context: Context) :
         /** SQL condition on live_channels.category_name for the three live groups. */
         fun liveGroupClause(group: String): String {
             val adult = "(lower(lc.category_name) LIKE '%xxx%' OR lower(lc.category_name) LIKE '%18+%' OR lower(lc.category_name) LIKE '%adult%' OR lower(lc.category_name) LIKE '%porn%')"
-            val extra = "(" + listOf("wwe", "24/7 dance", "vibe stage drama", "stage drama").joinToString(" OR ") { "lower(lc.category_name) LIKE '%$it%'" } + ")"
+            val extra = "(" + listOf("wwe", "24/7 dance", "vibe stage drama", "stage drama", "islamic").joinToString(" OR ") { "lower(lc.category_name) LIKE '%$it%'" } + ")"
             return when (group) {
                 "adult" -> adult
                 "extras" -> "($extra AND NOT $adult)"
