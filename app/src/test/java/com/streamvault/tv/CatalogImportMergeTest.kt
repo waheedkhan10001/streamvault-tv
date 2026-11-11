@@ -133,4 +133,17 @@ class CatalogImportMergeTest {
         assertEquals(1, counts["901"])
         assertNull(counts["902"])
     }
+
+    @Test
+    fun cloudPendingQueueRemembersTitlesUntilTheyAreSent() {
+        assertEquals(0, db.countCloudPending())
+        db.addCloudPending(listOf("a", "b", "c"))
+        db.addCloudPending(listOf("b", "d"))            // already queued titles are not doubled
+        assertEquals(4, db.countCloudPending())
+        assertEquals(2, db.takeCloudPending(2).size)
+        db.removeCloudPending(listOf("a", "b", "zzz"))
+        assertEquals(setOf("c", "d"), db.takeCloudPending(10).toSet())
+        db.removeCloudPending(listOf("c", "d"))
+        assertEquals(0, db.countCloudPending())
+    }
 }

@@ -575,6 +575,7 @@ class CatalogSyncEngine(
     fun resumeEnrichmentIfNeeded() {
         val (enriched, total) = db.getEnrichmentCounts()
         if (total > 0 && enriched < total) startBackgroundTmdbEnrichment()
+        else if (db.countCloudPending() > 0) scope.launch(Dispatchers.IO) { runCatching { flushPendingCloudUploads() } }
     }
 
     fun startBackgroundTmdbEnrichment(onProgress: () -> Unit = {}) {
@@ -582,6 +583,7 @@ class CatalogSyncEngine(
         enrichJob = scope.launch(Dispatchers.IO) {
             val creds = prefs.loadCredentials()
             val apiKey = creds.tmdbApiKey.ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY }
+            runCatching { flushPendingCloudUploads() }     // details the cloud could not take earlier
 
             // Titles whose lookup failed in this run are skipped for now (retried next start). Without this, the same
             // failing titles sat at the head of the queue and were tried again and again, so the rest never got looked up.
@@ -598,6 +600,7 @@ class CatalogSyncEngine(
                         enrichedCount = enriched,
                         totalToEnrich = total
                     )
+                    runCatching { flushPendingCloudUploads() }     // last chance to send anything the cloud refused earlier
                     break
                 }
 
@@ -656,11 +659,19 @@ class CatalogSyncEngine(
         }
     }
 
-    fun uploadCatalogSyncBatch(items: List<MediaItem>) {
-        val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return
-        val cloudBase = prefs.getCloudSyncBaseUrl()
+    /** While the cloud refuses writes (daily limit reached, server error) we stop knocking for a while instead of retrying every batch. */
+    @Volatile private var cloudPausedUntil = 0L
 
-        items.chunked(25).forEach { chunk ->
+    /** Sends enriched titles to the cloud. Returns true when every batch was accepted. Titles that were not accepted are remembered and sent later. */
+    fun uploadCatalogSyncBatch(items: List<MediaItem>): Boolean {
+        val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return false
+        val cloudBase = prefs.getCloudSyncBaseUrl()
+        var allOk = true
+
+        for (chunk in items.chunked(25)) {
+            if (System.currentTimeMillis() < cloudPausedUntil) {
+                db.addCloudPending(chunk.map { it.dedupKey }); allOk = false; continue
+            }
             var attempt = 0
             var success = false
             val payload = JSONObject().apply {
@@ -707,7 +718,11 @@ class CatalogSyncEngine(
                         if (resp.isSuccessful) {
                             success = true
                         } else if (resp.code == 401) {
-                            return
+                            return false
+                        } else {
+                            // refused (for example the cloud's daily write limit): no point retrying right now
+                            cloudPausedUntil = System.currentTimeMillis() + 10 * 60 * 1000L
+                            attempt = 3
                         }
                     }
                 } catch (e: Exception) {
@@ -716,6 +731,22 @@ class CatalogSyncEngine(
                     }
                 }
             }
+            if (success) db.removeCloudPending(chunk.map { it.dedupKey })
+            else { db.addCloudPending(chunk.map { it.dedupKey }); allOk = false }
+        }
+        return allOk
+    }
+
+    /** Sends titles that could not be sent earlier. Stops at the first refusal; the rest stay queued for next time. */
+    fun flushPendingCloudUploads() {
+        while (System.currentTimeMillis() >= cloudPausedUntil) {
+            val keys = db.takeCloudPending(100)
+            if (keys.isEmpty()) return
+            val items = keys.mapNotNull { db.getItemByDedupKey(it) }
+            val missing = keys.filter { k -> items.none { it.dedupKey == k } }
+            db.removeCloudPending(missing)          // title no longer in the catalogue: nothing to send
+            if (items.isEmpty()) continue
+            if (!uploadCatalogSyncBatch(items)) return
         }
     }
 

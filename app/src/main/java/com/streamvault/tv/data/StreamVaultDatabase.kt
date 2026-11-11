@@ -1401,6 +1401,47 @@ class StreamVaultDatabase(context: Context) :
         }
     }
 
+    // Titles whose details could not be sent to the cloud yet (cloud over its daily limit, offline...). They are sent later.
+    private fun ensureCloudPendingTable() {
+        writableDatabase.execSQL("CREATE TABLE IF NOT EXISTS cloud_upload_pending (dedup_key TEXT PRIMARY KEY)")
+    }
+
+    fun addCloudPending(keys: Collection<String>) {
+        if (keys.isEmpty()) return
+        ensureCloudPendingTable()
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (k in keys) db.execSQL("INSERT OR IGNORE INTO cloud_upload_pending (dedup_key) VALUES (?)", arrayOf(k))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun removeCloudPending(keys: Collection<String>) {
+        if (keys.isEmpty()) return
+        ensureCloudPendingTable()
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (k in keys) db.execSQL("DELETE FROM cloud_upload_pending WHERE dedup_key = ?", arrayOf(k))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    fun takeCloudPending(limit: Int): List<String> {
+        ensureCloudPendingTable()
+        val out = ArrayList<String>()
+        writableDatabase.rawQuery("SELECT dedup_key FROM cloud_upload_pending LIMIT ?", arrayOf(limit.toString())).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    fun countCloudPending(): Int {
+        ensureCloudPendingTable()
+        writableDatabase.rawQuery("SELECT COUNT(*) FROM cloud_upload_pending", null).use { c -> return if (c.moveToFirst()) c.getInt(0) else 0 }
+    }
+
     /** Season counts for many series in ONE query (poster cards show "3 Seasons" instead of a bare "SERIES"). */
     fun seasonCountsFor(seriesIds: Collection<String>): Map<String, Int> {
         val ids = seriesIds.filter { it.isNotBlank() }.distinct()
