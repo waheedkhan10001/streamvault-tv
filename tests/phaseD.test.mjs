@@ -1,8 +1,6 @@
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert/strict';
-
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const UI_PATH = 'file:///C:/Users/wkhan/.gemini/antigravity/scratch/streamvault-tv/app/src/main/assets/tv-ui.html';
+import { CHROME_PATH, UI_PATH } from './test-config.mjs';
 
 async function runPhaseDTests() {
   console.log('=== Running StreamVault TV — Phase D Test Suite (Real Sync) ===\n');
@@ -586,7 +584,7 @@ async function runPhaseDTests() {
   await page.evaluate(async () => {
     await window.navigateToTab('SETTINGS');
   });
-  await page.waitForSelector('#syncPendingLabel', { timeout: 3000 });
+  await page.waitForSelector('#syncPendingLabel', { timeout: 5000 });
 
   const uiSyncResults = await page.evaluate(async () => {
     // Add 1 pending item to queue

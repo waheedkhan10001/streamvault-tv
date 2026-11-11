@@ -7,7 +7,9 @@ function createMockD1() {
     accounts: [],
     email_codes: [],
     sessions: [],
-    profiles: []
+    profiles: [],
+    rate_limits: [],
+    playlists: []
   };
 
   return {
@@ -22,9 +24,24 @@ function createMockD1() {
                 const email = args[0];
                 return tables.accounts.find(u => u.email === email) || null;
               }
+              if (normalized.includes('FROM accounts WHERE account_id =')) {
+                const id = args[0];
+                return tables.accounts.find(u => u.account_id === id) || null;
+              }
               if (normalized.includes('FROM email_codes WHERE email =')) {
                 const [email, code] = args;
                 return tables.email_codes.find(c => c.email === email && c.code === code && !c.is_used) || null;
+              }
+              if (normalized.includes('FROM rate_limits WHERE key =')) {
+                const key = args[0];
+                return tables.rate_limits.find(r => r.key === key) || null;
+              }
+              if (normalized.includes('FROM sessions s') && normalized.includes('token_hash =')) {
+                const tokenHash = args[0];
+                const s = tables.sessions.find(x => x.token_hash === tokenHash);
+                if (!s) return null;
+                const a = tables.accounts.find(x => x.account_id === s.account_id);
+                return a ? { session_id: s.session_id, account_id: a.account_id, expires_at: s.expires_at, email: a.email, is_verified: a.is_verified } : null;
               }
               return null;
             },
@@ -32,7 +49,33 @@ function createMockD1() {
               return { results: [] };
             },
             async run() {
-              if (normalized.startsWith('INSERT INTO accounts')) {
+              if (normalized.startsWith('INSERT INTO rate_limits')) {
+                const [key, resetAt] = [args[0], args[1]];
+                const existing = tables.rate_limits.find(r => r.key === key);
+                if (existing) {
+                  existing.count = 1;
+                  existing.reset_at = resetAt;
+                } else {
+                  tables.rate_limits.push({ key, count: 1, reset_at: resetAt });
+                }
+              } else if (normalized.startsWith('UPDATE rate_limits SET count = count + 1 WHERE key =')) {
+                const key = args[0];
+                const existing = tables.rate_limits.find(r => r.key === key);
+                if (existing) existing.count++;
+              } else if (normalized.startsWith('UPDATE accounts SET pin_hash =')) {
+                const [pinHash, updatedAt, accountId] = args;
+                const a = tables.accounts.find(x => x.account_id === accountId);
+                if (a) { a.pin_hash = pinHash; a.updated_at = updatedAt; }
+              } else if (normalized.startsWith('INSERT INTO playlists')) {
+                tables.playlists.push({
+                  playlist_id: args[0],
+                  account_id: args[1],
+                  name: args[2],
+                  server_url: args[3],
+                  username: args[4],
+                  password_enc: args[5]
+                });
+              } else if (normalized.startsWith('INSERT INTO accounts')) {
                 tables.accounts.push({
                   account_id: args[0],
                   email: args[1],
@@ -615,8 +658,94 @@ async function runPhaseETests() {
     console.log('  ✓ PASS: Compose files deleted and dependencies cleanly purged from app/build.gradle.kts.\n');
   }
 
+  // --- Test 13: Worker AES_SECRET Enforcement & PIN Management ---
+  console.log('[Test 13] Verifying Worker AES_SECRET 500 rejection and PIN reset via account auth...');
+  {
+    const db = createMockD1();
+    const crypto = globalThis.crypto;
+    const tokenBytes = new Uint8Array(32);
+    crypto.getRandomValues(tokenBytes);
+    const rawToken = Array.from(tokenBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const tokenBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawToken));
+    const tokenHash = Array.from(new Uint8Array(tokenBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // PBKDF2 hash for password "AccountPass123!"
+    const saltBytes = new Uint8Array(16);
+    crypto.getRandomValues(saltBytes);
+    const saltHex = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode('AccountPass123!'), { name: 'PBKDF2' }, false, ['deriveBits']);
+    const derived = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: 100000, hash: 'SHA-256' }, keyMaterial, 256);
+    const hashHex = Array.from(new Uint8Array(derived)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const passHash = `pbkdf2:100000:${saltHex}:${hashHex}`;
+
+    db.tables.accounts.push({
+      account_id: 'acc_sec_test',
+      email: 'sec_test@streamvault.tv',
+      password_hash: passHash,
+      is_verified: 1,
+      pin_hash: null,
+      created_at: Date.now(),
+      updated_at: Date.now()
+    });
+
+    db.tables.sessions.push({
+      session_id: 'sess_1',
+      account_id: 'acc_sec_test',
+      token_hash: tokenHash,
+      expires_at: Date.now() + 86400000,
+      created_at: Date.now()
+    });
+
+    // 13a. Attempt to add playlist WITHOUT AES_SECRET in env -> Must return 500 and store nothing!
+    const envNoSecret = { DB: db };
+    const addReqNoSecret = new Request('https://sync.streamvault.tv/api/playlists', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + rawToken
+      },
+      body: JSON.stringify({
+        name: 'Test Playlist',
+        serverUrl: 'http://iptv.example.com',
+        username: 'testuser',
+        password: 'testpass'
+      })
+    });
+    const resNoSecret = await worker.fetch(addReqNoSecret, envNoSecret);
+    assert.equal(resNoSecret.status, 500, 'Adding playlist without AES_SECRET must return HTTP 500');
+    assert.equal(db.tables.playlists.length, 0, 'No playlist must be stored when AES_SECRET is missing');
+
+    // 13b. Reset PIN with wrong account password -> Must return 403
+    const resetReqBad = new Request('https://sync.streamvault.tv/api/account/reset-pin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + rawToken
+      },
+      body: JSON.stringify({ password: 'WrongPassword!', newPin: '4321' })
+    });
+    const resBad = await worker.fetch(resetReqBad, envNoSecret);
+    assert.equal(resBad.status, 403, 'Reset PIN with wrong password must return 403');
+
+    // 13c. Reset PIN with valid account password -> Must return 200 and update pin_hash
+    const resetReqOk = new Request('https://sync.streamvault.tv/api/account/reset-pin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + rawToken
+      },
+      body: JSON.stringify({ password: 'AccountPass123!', newPin: '4321' })
+    });
+    const resOk = await worker.fetch(resetReqOk, envNoSecret);
+    assert.equal(resOk.status, 200, 'Reset PIN with verified account password must succeed');
+    const acc = db.tables.accounts.find(a => a.account_id === 'acc_sec_test');
+    assert.ok(acc.pin_hash, 'Account pin_hash must be updated');
+
+    console.log('  ✓ PASS: Worker AES_SECRET 500 rejection and verified account password PIN reset enforced.\n');
+  }
+
   console.log('====================================================');
-  console.log('  ALL PHASE E ASSERTIONS PASSED (12/12)');
+  console.log('  ALL PHASE E ASSERTIONS PASSED (13/13)');
   console.log('====================================================');
 }
 

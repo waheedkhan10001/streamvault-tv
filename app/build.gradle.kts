@@ -66,6 +66,12 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -93,4 +99,10 @@ dependencies {
 
     // QR Code Generation (ZXing Core) for Phone Wi-Fi Setup & Search Companion
     implementation("com.google.zxing:core:3.5.3")
+
+    // Robolectric & Unit Testing
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.11.1")
+    testImplementation("androidx.test:core:1.5.0")
+    testImplementation("androidx.test.ext:junit:1.1.5")
 }

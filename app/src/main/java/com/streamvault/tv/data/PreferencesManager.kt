@@ -130,7 +130,13 @@ class PreferencesManager(context: Context) {
             .remove("account_email")
             .remove("display_name")
             .remove("account_id")
+            .remove("active_profile_id")
+            .remove("parental_pin_hash")
+            .remove("parental_pin_salt")
+            .remove("pin_failed_attempts")
+            .remove("pin_lockout_until")
             .apply()
+        adultVaultUnlockedSession.set(false)
     }
 
     var lastFullSyncTimestamp: Long
@@ -184,7 +190,7 @@ class PreferencesManager(context: Context) {
     }
 
     // --- Parental Controls (Hashed PIN, attempt-limited, per-device) ---
-    private fun getPinSalt(): String {
+    fun getPinSalt(): String {
         var salt = prefs.getString("parental_pin_salt", null)
         if (salt == null) {
             salt = java.util.UUID.randomUUID().toString()
@@ -201,10 +207,15 @@ class PreferencesManager(context: Context) {
     }
 
     fun hasCustomParentalPin(): Boolean {
-        val defaultHash = hashPin("0000")
-        val currentHash = prefs.getString("parental_pin_hash", defaultHash) ?: defaultHash
-        return currentHash != defaultHash
+        val hash = prefs.getString("parental_pin_hash", null)
+        return !hash.isNullOrBlank()
     }
+
+    fun isPinConfigured(): Boolean = hasCustomParentalPin()
+
+    fun getPinHash(): String? = prefs.getString("parental_pin_hash", null)
+
+    fun getPinLockoutUntil(): Long = prefs.getLong("pin_lockout_until", 0L)
 
     fun verifyParentalPin(inputPin: String): Boolean {
         val failedAttempts = prefs.getInt("pin_failed_attempts", 0)
@@ -212,8 +223,10 @@ class PreferencesManager(context: Context) {
         val now = System.currentTimeMillis()
         if (now < lockoutUntil) return false
 
-        val defaultHash = hashPin("0000")
-        val storedHash = prefs.getString("parental_pin_hash", defaultHash) ?: defaultHash
+        val storedHash = prefs.getString("parental_pin_hash", null)
+        if (storedHash.isNullOrBlank()) {
+            return false
+        }
         val inputHash = hashPin(inputPin.trim())
 
         if (inputHash == storedHash) {
@@ -230,11 +243,28 @@ class PreferencesManager(context: Context) {
         }
     }
 
-    fun setParentalPin(currentPin: String, newPin: String): Boolean {
-        if (!verifyParentalPin(currentPin)) return false
+    fun setParentalPin(currentPin: String?, newPin: String): Boolean {
         if (newPin.trim().length != 4) return false
+        if (hasCustomParentalPin()) {
+            if (currentPin == null || !verifyParentalPin(currentPin)) return false
+        }
         val newHash = hashPin(newPin.trim())
-        return prefs.edit().putString("parental_pin_hash", newHash).commit()
+        return prefs.edit()
+            .putString("parental_pin_hash", newHash)
+            .putInt("pin_failed_attempts", 0)
+            .putLong("pin_lockout_until", 0L)
+            .commit()
+    }
+
+    fun restorePinHash(hash: String?, salt: String? = null) {
+        if (hash.isNullOrBlank()) return
+        val editor = prefs.edit().putString("parental_pin_hash", hash)
+        if (!salt.isNullOrBlank()) {
+            editor.putString("parental_pin_salt", salt)
+        }
+        editor.putInt("pin_failed_attempts", 0)
+            .putLong("pin_lockout_until", 0L)
+            .apply()
     }
 
     fun resetParentalPinWithAuth(newPin: String): Boolean {

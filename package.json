@@ -1,0 +1,17 @@
+{
+  "name": "streamvault-tv",
+  "version": "2.8.0",
+  "description": "StreamVault TV IPTV Client for Android TV (TCL 55P635, Android 11)",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/phaseA.test.mjs && node tests/phaseB.test.mjs && node tests/phaseC.test.mjs && node tests/phaseD.test.mjs && node tests/phaseE.test.mjs",
+    "test:phaseA": "node tests/phaseA.test.mjs",
+    "test:phaseB": "node tests/phaseB.test.mjs",
+    "test:phaseC": "node tests/phaseC.test.mjs",
+    "test:phaseD": "node tests/phaseD.test.mjs",
+    "test:phaseE": "node tests/phaseE.test.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^22.0.0"
+  }
+}

@@ -1,8 +1,6 @@
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert/strict';
-
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const UI_PATH = 'file:///C:/Users/wkhan/.gemini/antigravity/scratch/streamvault-tv/app/src/main/assets/tv-ui.html';
+import { CHROME_PATH, UI_PATH } from './test-config.mjs';
 
 const KIDS_CERTIFICATIONS = new Set(['G', 'PG', 'TV-Y', 'TV-Y7', 'TV-G', 'TV-PG', 'U']);
 
@@ -25,7 +23,7 @@ async function runPhaseBTests() {
   await page.evaluateOnNewDocument(() => {
     let mockSessionToken = 'test-session-token-phase-b';
     let mockAccount = { accountId: 'acc_1', email: 'owner@streamvault.tv', displayName: 'Account Owner' };
-    let mockMasterPin = '0000';
+    let mockMasterPin = null;
     let isAdultVaultUnlocked = false;
 
     // Profiles Store (Max 5)
@@ -154,14 +152,33 @@ async function runPhaseBTests() {
             return JSON.stringify({
               success: true,
               isLocked: !isAdultVaultUnlocked,
-              showAdult: isAdultVaultUnlocked
+              showAdult: isAdultVaultUnlocked,
+              hasCustomPin: Boolean(mockMasterPin),
+              hasPin: Boolean(mockMasterPin)
             });
           }
           if (action === 'lock') {
             isAdultVaultUnlocked = false;
             return JSON.stringify({ success: true, isLocked: true, showAdult: false });
           }
+          if (action === 'set_pin') {
+            if (mockMasterPin && body.pin !== mockMasterPin) {
+              return JSON.stringify({ success: false, error: 'Current PIN incorrect' });
+            }
+            mockMasterPin = body.newPin;
+            return JSON.stringify({ success: true, message: 'PIN updated', hasCustomPin: true, pinHash: 'hash_' + body.newPin });
+          }
+          if (action === 'reset_pin') {
+            if (body.password === 'WrongPassword') {
+              return JSON.stringify({ success: false, error: 'Incorrect account password' });
+            }
+            mockMasterPin = body.newPin;
+            return JSON.stringify({ success: true, message: 'PIN reset' });
+          }
           if (action === 'unlock') {
+            if (!mockMasterPin) {
+              return JSON.stringify({ success: false, requireSetPin: true, error: 'Master PIN must be set first' });
+            }
             if (body.pin === mockMasterPin) {
               isAdultVaultUnlocked = true;
               return JSON.stringify({ success: true, isLocked: false, showAdult: true });
@@ -169,10 +186,18 @@ async function runPhaseBTests() {
             return JSON.stringify({ success: false, error: 'Incorrect Master PIN' });
           }
           if (action === 'verify') {
+            if (!mockMasterPin) {
+              return JSON.stringify({ success: false, requireSetPin: true, error: 'Master PIN must be set first' });
+            }
             if (body.pin === mockMasterPin) {
               return JSON.stringify({ success: true, ok: true });
             }
             return JSON.stringify({ success: false, error: 'Incorrect Master PIN' });
+          }
+          if (action === 'signout') {
+            mockMasterPin = null;
+            activeProfileId = '';
+            return JSON.stringify({ success: true });
           }
         }
 
@@ -209,6 +234,9 @@ async function runPhaseBTests() {
 
           // Phase B Rule: Turning Kids Mode OFF requires Master PIN
           if (prof.isKids && body.isKids === false) {
+            if (!mockMasterPin) {
+              return JSON.stringify({ ok: false, requireSetPin: true, error: 'Master PIN must be set before disabling Kids Mode' });
+            }
             if (body.pin !== mockMasterPin) {
               return JSON.stringify({ ok: false, error: 'Master PIN required to disable Kids Mode' });
             }
@@ -539,40 +567,84 @@ async function runPhaseBTests() {
   const pinOffResults = await page.evaluate(async () => {
     const profId = window.currentActiveProfile.id;
 
-    // 1. Attempt to turn kids mode off without PIN
+    // 0. Verify fresh state has no PIN and requires setting one
+    const statusBefore = await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'status' })
+    }).then(r => r.json());
+
+    // Attempting to turn kids off before setting PIN must require setting PIN
+    const preSetOff = await fetch('/api/profiles/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: profId, isKids: false })
+    }).then(r => r.json());
+
+    // 1. Create Master PIN (1234)
+    const setRes = await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_pin', newPin: '1234' })
+    }).then(r => r.json());
+
+    // 2. Attempt to turn kids mode off without PIN
     const noPin = await fetch('/api/profiles/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: profId, isKids: false })
     }).then(r => r.json());
 
-    // 2. Attempt with wrong PIN
+    // 3. Attempt with wrong PIN
     const wrongPin = await fetch('/api/profiles/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: profId, isKids: false, pin: '9999' })
     }).then(r => r.json());
 
-    // 3. Attempt with valid PIN
+    // 4. Reset PIN with Account Password to 5678
+    const resetFail = await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reset_pin', password: 'WrongPassword', newPin: '5678' })
+    }).then(r => r.json());
+
+    const resetOk = await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reset_pin', password: 'ValidPassword', newPin: '5678' })
+    }).then(r => r.json());
+
+    // 5. Attempt with valid new PIN (5678)
     const validPin = await fetch('/api/profiles/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: profId, isKids: false, pin: '0000' })
+      body: JSON.stringify({ id: profId, isKids: false, pin: '5678' })
     }).then(r => r.json());
 
     return {
+      noPinDefault: !statusBefore.hasCustomPin,
+      preSetRequiresPin: preSetOff.requireSetPin === true,
+      setPinSuccess: setRes.success === true,
       noPinRejected: !noPin.ok && !noPin.success,
       wrongPinRejected: !wrongPin.ok && !wrongPin.success,
+      resetAuthFailed: !resetFail.success,
+      resetAuthSuccess: resetOk.success === true,
       validPinSuccess: validPin.ok || validPin.success,
       updatedIsKids: validPin.profile?.isKids
     };
   });
 
+  assert.equal(pinOffResults.noPinDefault, true, 'Default 0000 PIN must be removed; initially no custom PIN');
+  assert.equal(pinOffResults.preSetRequiresPin, true, 'Disabling kids mode before setting PIN must require setting one');
+  assert.equal(pinOffResults.setPinSuccess, true, 'Initial Master PIN setup must succeed');
   assert.equal(pinOffResults.noPinRejected, true, 'Disabling kids mode without PIN must be rejected');
   assert.equal(pinOffResults.wrongPinRejected, true, 'Disabling kids mode with wrong PIN must be rejected');
+  assert.equal(pinOffResults.resetAuthFailed, true, 'Resetting PIN with incorrect account password must fail');
+  assert.equal(pinOffResults.resetAuthSuccess, true, 'Resetting PIN with verified account password must succeed');
   assert.equal(pinOffResults.validPinSuccess, true, 'Disabling kids mode with valid Master PIN must succeed');
   assert.equal(pinOffResults.updatedIsKids, false, 'Profile kids mode is now false');
-  console.log('  ✓ PASS: Master PIN protection on Kids Mode OFF enforced.\n');
+  console.log('  ✓ PASS: Master PIN protection, setup requirement, and password-reset verified.\n');
 
   // --- Test 6: 18+ Vault Session-Only Unlock & Auto Re-Lock ---
   console.log('[Test 6] Testing 18+ Vault session-only unlock and auto re-lock on standby/switch...');
@@ -588,7 +660,7 @@ async function runPhaseBTests() {
     const unlockRes = await fetch('/api/parental-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unlock', pin: '0000' })
+      body: JSON.stringify({ action: 'unlock', pin: '5678' })
     }).then(r => r.json());
 
     // Adult items accessible only from 18+ Vault tab
@@ -610,7 +682,7 @@ async function runPhaseBTests() {
     await fetch('/api/parental-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unlock', pin: '0000' })
+      body: JSON.stringify({ action: 'unlock', pin: '5678' })
     });
     // Switch profile
     const secProf = (await fetch('/api/profiles').then(r => r.json())).profiles[1].id;

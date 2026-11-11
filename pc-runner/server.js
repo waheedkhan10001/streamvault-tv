@@ -2194,16 +2194,17 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
       try {
         const { pin, action, newPin } = JSON.parse(body || '{}');
         if (!state.parentalControl) {
-          state.parentalControl = { isLocked: true, pin: '0000', showAdult: false };
+          state.parentalControl = { isLocked: true, pin: null, showAdult: false };
         }
-        const currentPin = state.parentalControl.pin || '0000';
+        const currentPin = state.parentalControl.pin || null;
         if (action === 'status') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({
             success: true,
             isLocked: state.parentalControl.isLocked,
             showAdult: state.parentalControl.showAdult,
-            hasCustomPin: currentPin !== '0000'
+            hasCustomPin: Boolean(currentPin),
+            hasPin: Boolean(currentPin)
           }));
         }
         if (action === 'lock') {
@@ -2218,6 +2219,10 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           }));
         }
         if (action === 'unlock') {
+          if (!currentPin) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ success: false, requireSetPin: true, error: 'Master PIN must be set first' }));
+          }
           if (pin === currentPin) {
             state.parentalControl.showAdult = true;
             state.parentalControl.isLocked = false;
@@ -2234,7 +2239,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           }
         }
         if (action === 'set_pin') {
-          if (pin !== currentPin) {
+          if (currentPin && pin !== currentPin) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify({ success: false, error: 'Current PIN is incorrect' }));
           }
@@ -2245,7 +2250,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           state.parentalControl.pin = String(newPin);
           scheduleSaveState();
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ success: true, message: 'Parental PIN updated successfully' }));
+          return res.end(JSON.stringify({ success: true, message: 'Parental PIN updated successfully', hasCustomPin: true }));
         }
         // Unlock / Lock toggle
         if (pin === currentPin) {
@@ -2392,11 +2397,9 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
     if (req.method === 'GET') {
       if (!state.profiles || !state.profiles.length) {
         state.profiles = [
-          { id: 'prof_1', name: state.credentials?.displayName || 'Waleed Khan', avatarColor: '#7C3AED', isKids: false, isActive: true },
-          { id: 'prof_2', name: 'Family', avatarColor: '#059669', isKids: false, isActive: false },
-          { id: 'prof_3', name: 'Kids', avatarColor: '#D97706', isKids: true, isActive: false }
+          { id: 'prof_primary', name: state.credentials?.displayName || 'User', avatarColor: '#7C3AED', isKids: false, isActive: true }
         ];
-        state.activeProfileId = 'prof_1';
+        state.activeProfileId = 'prof_primary';
         scheduleSaveState();
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2489,7 +2492,8 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
     req.on('end', () => {
       try {
         const { profileId } = JSON.parse(body || '{}');
-        if (profileId === 'prof_1') {
+        const primaryId = state.profiles[0]?.id || 'prof_primary';
+        if (profileId === primaryId || profileId === 'prof_primary') {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ success: false, error: 'Cannot delete primary profile' }));
         }
@@ -2499,8 +2503,8 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
         }
         state.profiles = state.profiles.filter(p => p.id !== profileId);
         if (state.activeProfileId === profileId) {
-          state.activeProfileId = 'prof_1';
-          state.profiles.forEach(p => { p.isActive = (p.id === 'prof_1'); });
+          state.activeProfileId = primaryId;
+          state.profiles.forEach(p => { p.isActive = (p.id === primaryId); });
         }
         scheduleSaveState();
         res.writeHead(200, { 'Content-Type': 'application/json' });

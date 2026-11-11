@@ -682,6 +682,7 @@ class AppApiRouter(
         val pin = obj.optString("pin")
         val newPin = obj.optString("newPin")
         val password = obj.optString("password", "")
+        val code = obj.optString("code", "")
 
         return when (action) {
             "status" -> {
@@ -690,6 +691,9 @@ class AppApiRouter(
                     put("isLocked", !prefs.isAdultVaultUnlocked())
                     put("showAdult", prefs.isAdultVaultUnlocked())
                     put("hasCustomPin", prefs.hasCustomParentalPin())
+                    put("hasPin", prefs.hasCustomParentalPin())
+                    put("isLockedOut", System.currentTimeMillis() < prefs.getPinLockoutUntil())
+                    put("pinHash", prefs.getPinHash() ?: "")
                 }.toString()
             }
             "lock" -> {
@@ -701,6 +705,12 @@ class AppApiRouter(
                 }.toString()
             }
             "unlock" -> {
+                if (!prefs.hasCustomParentalPin()) {
+                    return """{"success":false,"requireSetPin":true,"error":"Master PIN must be set before accessing 18+ Vault"}"""
+                }
+                if (System.currentTimeMillis() < prefs.getPinLockoutUntil()) {
+                    return """{"success":false,"isLockedOut":true,"error":"Too many failed attempts. Try again later."}"""
+                }
                 val ok = prefs.verifyParentalPin(pin)
                 if (ok) {
                     prefs.setAdultVaultUnlocked(true)
@@ -710,30 +720,124 @@ class AppApiRouter(
                         put("showAdult", true)
                     }.toString()
                 } else {
-                    """{"success":false,"error":"Incorrect Master PIN"}"""
+                    val lockedOut = System.currentTimeMillis() < prefs.getPinLockoutUntil()
+                    val err = if (lockedOut) "Too many failed attempts. Locked for 60 seconds." else "Incorrect Master PIN"
+                    JSONObject().apply {
+                        put("success", false)
+                        put("error", err)
+                        put("isLockedOut", lockedOut)
+                    }.toString()
                 }
             }
             "verify" -> {
+                if (!prefs.hasCustomParentalPin()) {
+                    return """{"success":false,"requireSetPin":true,"error":"Master PIN must be set first"}"""
+                }
+                if (System.currentTimeMillis() < prefs.getPinLockoutUntil()) {
+                    return """{"success":false,"isLockedOut":true,"error":"Too many failed attempts. Try again later."}"""
+                }
                 val ok = prefs.verifyParentalPin(pin)
                 if (ok) {
                     """{"success":true,"ok":true}"""
                 } else {
-                    """{"success":false,"error":"Incorrect Master PIN"}"""
+                    val lockedOut = System.currentTimeMillis() < prefs.getPinLockoutUntil()
+                    val err = if (lockedOut) "Too many failed attempts. Locked for 60 seconds." else "Incorrect Master PIN"
+                    JSONObject().apply {
+                        put("success", false)
+                        put("error", err)
+                        put("isLockedOut", lockedOut)
+                    }.toString()
                 }
             }
             "set_pin" -> {
-                val ok = if (password.isNotBlank() && password == prefs.loadCredentials().password) {
-                    prefs.resetParentalPinWithAuth(newPin)
-                } else {
-                    prefs.setParentalPin(pin, newPin)
-                }
+                val currentPin = pin.takeIf { it.isNotBlank() }
+                val ok = prefs.setParentalPin(currentPin, newPin)
                 if (ok) {
-                    """{"success":true,"message":"PIN updated"}"""
+                    JSONObject().apply {
+                        put("success", true)
+                        put("message", "PIN updated")
+                        put("pinHash", prefs.getPinHash() ?: "")
+                        put("hasCustomPin", true)
+                    }.toString()
                 } else {
-                    """{"success":false,"error":"Current PIN incorrect or new PIN invalid"}"""
+                    val err = if (prefs.hasCustomParentalPin()) "Current PIN incorrect or new PIN invalid" else "New PIN must be exactly 4 digits"
+                    """{"success":false,"error":"$err"}"""
                 }
             }
+            "reset_pin" -> {
+                if (newPin.trim().length != 4) {
+                    return """{"success":false,"error":"New PIN must be exactly 4 digits"}"""
+                }
+                val (verified, msg) = verifyResetPinWithWorker(accountPassword = password, code = code, newPin = newPin)
+                if (verified) {
+                    JSONObject().apply {
+                        put("success", true)
+                        put("message", msg)
+                        put("pinHash", prefs.getPinHash() ?: "")
+                    }.toString()
+                } else {
+                    JSONObject().apply {
+                        put("success", false)
+                        put("error", msg)
+                    }.toString()
+                }
+            }
+            "restore" -> {
+                val pinHash = obj.optString("pinHash")
+                val pinSalt = obj.optString("pinSalt")
+                if (pinHash.isNotBlank()) {
+                    prefs.restorePinHash(pinHash, pinSalt)
+                }
+                """{"success":true}"""
+            }
+            "signout" -> {
+                prefs.clearAuthSession()
+                """{"success":true}"""
+            }
             else -> """{"success":false,"error":"Unknown action"}"""
+        }
+    }
+
+    private fun verifyResetPinWithWorker(accountPassword: String, code: String, newPin: String): Pair<Boolean, String> {
+        val token = prefs.getAuthToken()
+        if (token.isNullOrBlank()) {
+            return Pair(false, "Cloud session required to reset PIN. Please sign in.")
+        }
+        return try {
+            val baseUrl = prefs.getCloudSyncBaseUrl()
+            val url = java.net.URL("$baseUrl/api/account/reset-pin")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.doOutput = true
+
+            val payload = JSONObject().apply {
+                if (accountPassword.isNotBlank()) put("password", accountPassword)
+                if (code.isNotBlank()) put("code", code)
+                put("newPin", newPin)
+            }
+
+            conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            val codeResp = conn.responseCode
+            val respStr = if (codeResp in 200..299) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            }
+            conn.disconnect()
+
+            if (codeResp in 200..299) {
+                prefs.resetParentalPinWithAuth(newPin)
+                Pair(true, "PIN reset successfully")
+            } else {
+                val err = try { JSONObject(respStr).optString("error", "Verification failed") } catch (_: Exception) { "Verification failed" }
+                Pair(false, err)
+            }
+        } catch (e: Exception) {
+            Pair(false, "Network error: ${e.message}")
         }
     }
 
@@ -794,6 +898,9 @@ class AppApiRouter(
 
         // Phase B Rule: Turning Kids Mode OFF requires Master PIN!
         if (existing.isKids && !targetIsKids) {
+            if (!prefs.hasCustomParentalPin()) {
+                return """{"ok":false,"requireSetPin":true,"error":"Master PIN must be set before disabling Kids Mode"}"""
+            }
             if (!prefs.verifyParentalPin(pin)) {
                 return """{"ok":false,"error":"Master PIN required to disable Kids Mode"}"""
             }

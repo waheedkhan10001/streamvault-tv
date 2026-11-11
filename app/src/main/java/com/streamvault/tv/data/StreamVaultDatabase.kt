@@ -561,7 +561,7 @@ class StreamVaultDatabase(context: Context) :
         // Kids mode rule:
         // When on: show only titles with age cert <= young child level. Titles with NO certification are hidden!
         if (isKids) {
-            whereClauses.add("m.certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND m.certification != ''")
+            whereClauses.add(ContentCertifications.kidsClause("m.certification"))
         }
 
         if (filter.mediaTypeFilter != null) {
@@ -728,7 +728,7 @@ class StreamVaultDatabase(context: Context) :
         val db = readableDatabase
         val suggestions = LinkedHashSet<String>()
 
-        val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+        val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
 
         // 1. Matching Titles starting with or containing the prefix
         db.rawQuery(
@@ -779,7 +779,7 @@ class StreamVaultDatabase(context: Context) :
         if (item.genres.isEmpty() && item.director.isBlank()) return emptyList()
         val db = readableDatabase
         val primaryGenre = item.genres.firstOrNull() ?: ""
-        val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+        val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
 
         val cursor = db.rawQuery(
             """
@@ -842,7 +842,7 @@ class StreamVaultDatabase(context: Context) :
         val db = readableDatabase
         // Phase B Rule: Adult content NEVER appears in Continue Watching!
         val (sql, args) = if (profileId.isNotBlank()) {
-            val kidsClause = if (isKids) "AND m.certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND m.certification != ''" else ""
+            val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("m.certification") else ""
             Pair(
                 """
                 SELECT m.*,
@@ -864,7 +864,7 @@ class StreamVaultDatabase(context: Context) :
                 arrayOf(profileId, limit.toString())
             )
         } else {
-            val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+            val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
             Pair(
                 "SELECT * FROM media_items WHERE resume_position_ms > 15000 AND is_watched = 0 AND is_adult = 0 $kidsClause ORDER BY added_timestamp DESC LIMIT ?",
                 arrayOf(limit.toString())
@@ -878,7 +878,7 @@ class StreamVaultDatabase(context: Context) :
         val db = readableDatabase
         // Phase B Rule: Adult content NEVER appears in Watchlist
         val (sql, args) = if (profileId.isNotBlank()) {
-            val kidsClause = if (isKids) "AND m.certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND m.certification != ''" else ""
+            val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("m.certification") else ""
             Pair(
                 """
                 SELECT m.*,
@@ -898,7 +898,7 @@ class StreamVaultDatabase(context: Context) :
                 arrayOf(profileId)
             )
         } else {
-            val kidsClause = if (isKids) "AND certification IN ('G','PG','TV-Y','TV-Y7','TV-G','TV-PG','U') AND certification != ''" else ""
+            val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("certification") else ""
             Pair(
                 "SELECT * FROM media_items WHERE in_watchlist = 1 AND is_adult = 0 $kidsClause ORDER BY clean_title ASC",
                 emptyArray<String>()
@@ -916,19 +916,26 @@ class StreamVaultDatabase(context: Context) :
         var newState = false
 
         if (profileId.isNotBlank()) {
+            var exists = false
             db.rawQuery("SELECT in_watchlist FROM profile_media_state WHERE profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey)).use { c ->
-                newState = if (c.moveToFirst()) c.getInt(0) == 0 else true
+                if (c.moveToFirst()) {
+                    exists = true
+                    newState = c.getInt(0) == 0
+                } else {
+                    newState = true
+                }
             }
-            db.execSQL(
-                """
-                INSERT INTO profile_media_state (profile_id, dedup_key, in_watchlist, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
-                  in_watchlist = excluded.in_watchlist,
-                  updated_at = excluded.updated_at
-                """.trimIndent(),
-                arrayOf(profileId, dedupKey, if (newState) 1 else 0, now)
-            )
+            val cv = ContentValues().apply {
+                put("in_watchlist", if (newState) 1 else 0)
+                put("updated_at", now)
+            }
+            if (exists) {
+                db.update("profile_media_state", cv, "profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey))
+            } else {
+                cv.put("profile_id", profileId)
+                cv.put("dedup_key", dedupKey)
+                db.insert("profile_media_state", null, cv)
+            }
         } else {
             db.rawQuery("SELECT in_watchlist FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
                 if (c.moveToFirst()) newState = c.getInt(0) == 0
@@ -947,20 +954,27 @@ class StreamVaultDatabase(context: Context) :
         var newState = false
 
         if (profileId.isNotBlank()) {
+            var exists = false
             db.rawQuery("SELECT is_watched FROM profile_media_state WHERE profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey)).use { c ->
-                newState = if (c.moveToFirst()) c.getInt(0) == 0 else true
+                if (c.moveToFirst()) {
+                    exists = true
+                    newState = c.getInt(0) == 0
+                } else {
+                    newState = true
+                }
             }
-            db.execSQL(
-                """
-                INSERT INTO profile_media_state (profile_id, dedup_key, is_watched, resume_position_ms, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
-                  is_watched = excluded.is_watched,
-                  resume_position_ms = CASE WHEN excluded.is_watched = 1 THEN 0 ELSE profile_media_state.resume_position_ms END,
-                  updated_at = excluded.updated_at
-                """.trimIndent(),
-                arrayOf(profileId, dedupKey, if (newState) 1 else 0, 0L, now)
-            )
+            val cv = ContentValues().apply {
+                put("is_watched", if (newState) 1 else 0)
+                if (newState) put("resume_position_ms", 0L)
+                put("updated_at", now)
+            }
+            if (exists) {
+                db.update("profile_media_state", cv, "profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey))
+            } else {
+                cv.put("profile_id", profileId)
+                cv.put("dedup_key", dedupKey)
+                db.insert("profile_media_state", null, cv)
+            }
         } else {
             db.rawQuery("SELECT is_watched FROM media_items WHERE dedup_key = ?", arrayOf(dedupKey)).use { c ->
                 if (c.moveToFirst()) newState = c.getInt(0) == 0
@@ -1003,16 +1017,16 @@ class StreamVaultDatabase(context: Context) :
         val db = writableDatabase
         val now = System.currentTimeMillis()
         if (profileId.isNotBlank()) {
-            db.execSQL(
-                """
-                INSERT INTO profile_media_state (profile_id, dedup_key, user_rating, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
-                  user_rating = excluded.user_rating,
-                  updated_at = excluded.updated_at
-                """.trimIndent(),
-                arrayOf(profileId, dedupKey, starRating, now)
-            )
+            val cv = ContentValues().apply {
+                put("user_rating", starRating)
+                put("updated_at", now)
+            }
+            val rows = db.update("profile_media_state", cv, "profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey))
+            if (rows == 0) {
+                cv.put("profile_id", profileId)
+                cv.put("dedup_key", dedupKey)
+                db.insert("profile_media_state", null, cv)
+            }
         }
         val cv = ContentValues().apply { put("rating", starRating) }
         db.update("media_items", cv, "dedup_key = ?", arrayOf(dedupKey))
@@ -1028,25 +1042,19 @@ class StreamVaultDatabase(context: Context) :
         val now = System.currentTimeMillis()
 
         if (profileId.isNotBlank()) {
-            db.execSQL(
-                """
-                INSERT INTO profile_media_state (profile_id, dedup_key, resume_position_ms, duration_ms, is_watched, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(profile_id, dedup_key) DO UPDATE SET
-                  resume_position_ms = excluded.resume_position_ms,
-                  duration_ms = excluded.duration_ms,
-                  is_watched = CASE WHEN excluded.is_watched = 1 THEN 1 ELSE profile_media_state.is_watched END,
-                  updated_at = excluded.updated_at
-                """.trimIndent(),
-                arrayOf(
-                    profileId,
-                    dedupKey,
-                    if (finished) 0L else positionMs,
-                    durationMs,
-                    if (finished) 1 else 0,
-                    now
-                )
-            )
+            val cv = ContentValues().apply {
+                put("resume_position_ms", if (finished) 0L else positionMs)
+                put("duration_ms", durationMs)
+                if (finished) put("is_watched", 1)
+                put("updated_at", now)
+            }
+            val rows = db.update("profile_media_state", cv, "profile_id = ? AND dedup_key = ?", arrayOf(profileId, dedupKey))
+            if (rows == 0) {
+                cv.put("profile_id", profileId)
+                cv.put("dedup_key", dedupKey)
+                cv.put("is_watched", if (finished) 1 else 0)
+                db.insert("profile_media_state", null, cv)
+            }
         }
 
         val cv = ContentValues().apply {
@@ -1152,25 +1160,19 @@ class StreamVaultDatabase(context: Context) :
         val now = System.currentTimeMillis()
 
         if (profileId.isNotBlank()) {
-            db.execSQL(
-                """
-                INSERT INTO profile_episode_state (profile_id, episode_id, resume_position_ms, duration_secs, is_watched, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(profile_id, episode_id) DO UPDATE SET
-                  resume_position_ms = excluded.resume_position_ms,
-                  duration_secs = excluded.duration_secs,
-                  is_watched = CASE WHEN excluded.is_watched = 1 THEN 1 ELSE profile_episode_state.is_watched END,
-                  updated_at = excluded.updated_at
-                """.trimIndent(),
-                arrayOf(
-                    profileId,
-                    episodeId,
-                    if (finished) 0L else positionMs,
-                    (durationMs / 1000).toInt(),
-                    if (finished) 1 else 0,
-                    now
-                )
-            )
+            val cv = ContentValues().apply {
+                put("resume_position_ms", if (finished) 0L else positionMs)
+                put("duration_secs", (durationMs / 1000).toInt())
+                if (finished) put("is_watched", 1)
+                put("updated_at", now)
+            }
+            val rows = db.update("profile_episode_state", cv, "profile_id = ? AND episode_id = ?", arrayOf(profileId, episodeId))
+            if (rows == 0) {
+                cv.put("profile_id", profileId)
+                cv.put("episode_id", episodeId)
+                cv.put("is_watched", if (finished) 1 else 0)
+                db.insert("profile_episode_state", null, cv)
+            }
         }
 
         val cv = ContentValues().apply {

@@ -4,28 +4,29 @@
 
 ### Repo Layout
 - **`app/`**: Android TV application (Android 11+, Leanback TV wrapper, Room/SQLite, ExoPlayer).
-  - `app/src/main/assets/tv-ui.html`: Standalone TV Web UI running inside native WebView (spatial nav, profiles, video player UI, multi-version stream selector).
+  - `app/src/main/assets/tv-ui.html`: Standalone TV Web UI running inside native WebView (spatial nav, profiles, video player UI, multi-version stream selector, and client-side `ProfileSyncManager` handling debounced 10s queueing and delta sync pulls).
   - `app/src/main/java/com/streamvault/tv/data/`: Native data layer:
     - `StreamVaultDatabase.kt`: Room/SQLite database (`profiles`, `profile_media_state`, `media_items`, `series_episodes`, `live_channels`, `pinned_smart_rows`).
-    - `AppApiRouter.kt`: Native HTTP server intercepting `/api/*` calls from `tv-ui.html` (auth gates, profile CRUD, `/api/probe-versions`, sync, credentials).
+    - `AppApiRouter.kt`: Native HTTP server intercepting `/api/*` calls from `tv-ui.html` (auth gates, profile CRUD, Master PIN hash restoration & reset routing, `/api/probe-versions`, sync, credentials).
     - `CatalogSyncEngine.kt`: Batched 25-item catalogue sync with exponential backoff and 14-day soft delete.
-    - `PreferencesManager.kt`: Encrypted and persistent device preferences (auth token, last profile, dedupKey index).
+    - `PreferencesManager.kt`: Encrypted and persistent device preferences (auth token, last profile, salt/hash for Master PIN, attempt lockout).
   - `app/src/main/java/com/streamvault/tv/MainActivity.kt`: Hardware Back key interceptor and WebView container.
 - **`cloud-sync/`**: Cloudflare Worker backend and D1 database schema.
-  - `src/worker.js`: Auth API (PBKDF2 SHA-256), Brevo v3 transactional email, per-IP and per-email rate limits, `/api/auth/resend-code`, TMDB proxy with D1 cache, catalog and profile delta sync.
-  - `schema.sql`: D1 relational schema (`accounts`, `profiles`, `profile_media_state`, `playlists`, `catalog_items`, `stream_versions`, `tmdb_cache`, `email_codes`).
+  - `src/worker.js`: Auth API (PBKDF2 SHA-256), Brevo v3 transactional email, D1-backed rate limits (`rate_limits` table: key, count, reset_at), AES_SECRET 500 enforcement, PIN sync & password/code reset, `/api/auth/resend-code`, TMDB proxy with D1 cache, catalog and profile delta sync.
+  - `schema.sql`: D1 relational schema (`accounts`, `profiles`, `profile_media_state`, `playlists`, `catalog_items`, `stream_versions`, `tmdb_cache`, `email_codes`, `rate_limits`).
 - **`pc-runner/`**: Desktop test harness for headless and browser-based debugging (`server.js`, `tv-ui.html`).
-- **`tests/`**: Automated Puppeteer / Node.js test suites (`phaseA.test.mjs` through `phaseE.test.mjs`).
+- **`tests/`**: Automated test suites:
+  - Cross-platform Puppeteer suites (`phaseA.test.mjs` through `phaseE.test.mjs`, configured via `test-config.mjs`).
+  - Robolectric Android unit tests (`app/src/test/java/com/streamvault/tv/RobolectricSecurityAndContentTest.kt`).
 - **`.toolchain/`**: Local portable Android SDK (build-tools 34.0.0, platforms android-34) and OpenJDK.
 
 ### How to Run the Tests
 ```bash
-# Run complete test suite (42/42 assertions across all phases):
-node tests/phaseA.test.mjs
-node tests/phaseB.test.mjs
-node tests/phaseC.test.mjs
-node tests/phaseD.test.mjs
-node tests/phaseE.test.mjs
+# Run complete test suite (43/43 assertions across all phases):
+npm test
+
+# Run Robolectric unit tests (9/9 assertions: kids cert filter, adult progress rejection, PIN lockout):
+.\gradlew.bat testReleaseUnitTest
 
 # Rebuild signed release APK:
 .\gradlew.bat assembleRelease
@@ -130,34 +131,48 @@ node tests/phaseE.test.mjs
   - TMDB proxy through Cloudflare Worker (`/api/tmdb/*`) with D1 cache (`X-Cache: HIT`); age certification extraction; zero API keys in APK.
   - Resumable catalogue upload to `/api/catalog/sync-batch` in chunks of 25 with exponential backoff; 14-day soft delete (`/api/catalog/mark-removed`).
   - Catalogue down streaming to Room (`/api/catalog/pull-cloud`).
-  - `ProfileSyncManager`: debounced 10s queue, immediate flush on pause/switch/exit, delta pull via `/api/sync/pull` with last-write-wins by `updatedAt` (adult excluded).
+  - `ProfileSyncManager`: implemented directly in `tv-ui.html` (client-side JS, lines 4015-4150, not Kotlin), managing debounced 10s queue, immediate flush on pause/switch/exit, and delta pull via `/api/sync/pull` with last-write-wins by `updatedAt` (adult excluded).
   - Auto-import first enabled cloud playlist on new TV.
   - Real sync Settings UI ("Just now", "All synced").
   - Universal `dedupKey` anchoring retains 100% of user profile data across playlist swaps.
 
-### Phase E — Auth Hardening, Resend Route, Probe Versions & Compose Cleanup
+### Phase E & Code Review Hardening — Auth Hardening, Resend Route, Probe Versions, Compose Cleanup & Security Audits
 - **Files Touched**:
   - `cloud-sync/src/worker.js`
+  - `cloud-sync/schema.sql`
   - `cloud-sync/README.md`
   - `app/build.gradle.kts`
+  - `app/src/main/java/com/streamvault/tv/data/Models.kt`
+  - `app/src/main/java/com/streamvault/tv/data/StreamVaultDatabase.kt`
+  - `app/src/main/java/com/streamvault/tv/data/PreferencesManager.kt`
   - `app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt`
   - `app/src/main/assets/tv-ui.html` & `pc-runner/tv-ui.html`
   - `app/src/main/java/com/streamvault/tv/ui/StreamVaultPlayerScreen.kt` (deleted)
   - `app/src/main/java/com/streamvault/tv/ui/StreamVaultTvApp.kt` (deleted)
-  - `tests/phaseE.test.mjs`
+  - `app/src/test/java/com/streamvault/tv/RobolectricSecurityAndContentTest.kt`
+  - `tests/test-config.mjs`
+  - `tests/phaseA.test.mjs` through `tests/phaseE.test.mjs`
+  - `package.json`
 - **What Changed**:
   - Removed `devCode` leak from signup response in production; only returned when `DEV_MODE=true` is explicitly configured.
   - Migrated email dispatch to Brevo v3 Transactional Email API (`https://api.brevo.com/v3/smtp/email`, send-only, no contact lists).
-  - Per-email rate limits on signup (3/min), login (5/min), verify (5/min), and resend (3/min).
-  - Implemented `/api/auth/resend-code` route in `worker.js` and wired to TV UI (`resendVerificationCode`).
+  - Rate limiting moved from in-memory map to D1 table `rate_limits` (`key`, `count`, `reset_at`) maintaining per-IP and per-email limits across worker restarts and edge nodes.
+  - Removed `AES_SECRET` default fallback from worker: returns HTTP 500 and aborts saving if `AES_SECRET` is unset.
+  - Removed default `0000` PIN: initial PIN setup is mandatory prior to first Vault unlock or turning Kids Mode off.
+  - PIN reset workflow: requires account password or 6-digit email code verified by Worker `/api/account/reset-pin`, strictly disallowing IPTV credentials.
+  - PIN hash synced to Worker account (`accounts.pin_hash`) and restored upon sign-in; sign-out purges PIN hash, salt, attempt lockout, and active profile ID.
+  - Centralized Kids Certification list into single Kotlin constant `ContentCertifications.KIDS_CERTIFICATIONS` in `Models.kt`, used by all queries.
+  - Purged dead `prof_1` default and dead `saveAccountCredentials()`.
+  - Added root `package.json` with npm test scripts, and made `CHROME_PATH` / `UI_PATH` cross-platform configurable via `tests/test-config.mjs`.
   - Implemented `/api/probe-versions` in native `AppApiRouter.kt` using fast HTTP Range bytes 0-10, size formatting, and CAM rip detection.
   - Completely purged unused Jetpack Compose dependencies and legacy screen files, reducing APK size from 4.11 MB to ~2.96 MB.
+  - Added Robolectric test suite (`RobolectricSecurityAndContentTest.kt`) verifying kids certification filtering, adult progress rejection / zero database tracking, and PIN lockout lifecycle.
 
 ---
 
 ## 4. What Failed or Was Skipped
 
-- **Failures**: 0 failures. All 42 automated assertions across 5 test suites passed cleanly.
+- **Failures**: 0 failures. All 43 automated Puppeteer assertions across 5 test suites and all 9 Robolectric unit tests passed cleanly (52/52 total).
 - **Skipped / Held on Owner Request**:
   - ADB install to TCL 55P635 held.
   - Cloudflare Worker production deployment held.
@@ -172,8 +187,9 @@ node tests/phaseE.test.mjs
 | **Phase B** | Profiles CRUD, scoped data, Kids Mode, Master PIN, Vault | `node tests/phaseB.test.mjs` | **7/7 PASSED** |
 | **Phase C** | Spatial navigation, element reachability, Leanback Back key | `node tests/phaseC.test.mjs` | **8/8 PASSED** |
 | **Phase D** | TMDB proxy, catalog up/down, profile sync, dedup re-link | `node tests/phaseD.test.mjs` | **8/8 PASSED** |
-| **Phase E** | `devCode` omission, Brevo email, per-email limits, resend route, probe-versions, Compose removal | `node tests/phaseE.test.mjs` | **12/12 PASSED** |
-| **Full Run** | Complete regression suite (Phases A through E) | `node tests/phaseA.test.mjs; node tests/phaseB.test.mjs; node tests/phaseC.test.mjs; node tests/phaseD.test.mjs; node tests/phaseE.test.mjs` | **42/42 PASSED** |
+| **Phase E** | `devCode` omission, Brevo email, D1 rate limits, AES_SECRET 500, PIN reset, probe-versions, Compose removal | `node tests/phaseE.test.mjs` | **13/13 PASSED** |
+| **Full Puppeteer Run** | Complete UI regression suite (Phases A through E) | `npm test` | **43/43 PASSED** |
+| **Robolectric JVM Tests**| Kids cert filter, adult progress rejection, PIN lockout lifecycle | `.\gradlew.bat testReleaseUnitTest` | **9/9 PASSED** |
 
 ---
 

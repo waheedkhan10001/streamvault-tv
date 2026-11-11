@@ -50,7 +50,16 @@ data class XtreamCredentials(
     companion object {
         // TMDB requests are proxied via Worker or configured via TMDB_API_KEY; no hardcoded keys in APK
         const val DEFAULT_TMDB_KEY = ""
-        val KIDS_CERTIFICATIONS = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
+        val KIDS_CERTIFICATIONS = ContentCertifications.KIDS_CERTIFICATIONS
+    }
+}
+
+object ContentCertifications {
+    val KIDS_CERTIFICATIONS: Set<String> = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
+    val KIDS_CERTIFICATIONS_SQL_IN: String = KIDS_CERTIFICATIONS.joinToString(",") { "'$it'" }
+
+    fun kidsClause(column: String = "certification"): String {
+        return "$column IN ($KIDS_CERTIFICATIONS_SQL_IN) AND $column != ''"
     }
 }
 
@@ -75,7 +84,9 @@ data class UserProfile(
 
     companion object {
         fun fromJson(obj: JSONObject): UserProfile = UserProfile(
-            id = obj.optString("id", obj.optString("profile_id", "prof_1")),
+            id = obj.optString("id", obj.optString("profile_id", "")).ifBlank {
+                "prof_" + java.util.UUID.randomUUID().toString().substring(0, 8)
+            },
             name = obj.optString("name", obj.optString("display_name", "User")),
             avatarColor = obj.optString("avatarColor", obj.optString("avatar_color", "#8B5CF6")),
             isKids = obj.optBoolean("isKids", obj.optInt("is_kids", 0) == 1),

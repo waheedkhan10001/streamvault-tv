@@ -5,19 +5,36 @@
  * ====================================================================
  */
 
-// Rate limiting in-memory bucket (Worker isolate lifetime)
-const RATE_LIMIT_MAP = new Map();
-function checkRateLimit(ip, bucket, maxRequests = 15, windowSeconds = 60) {
-  const key = `${bucket}:${ip}`;
+// Rate limiting via D1 table (key, count, reset_at)
+async function checkRateLimit(db, key, maxRequests = 15, windowSeconds = 60) {
+  if (!db) return true;
   const now = Date.now();
-  const record = RATE_LIMIT_MAP.get(key) || { count: 0, resetAt: now + windowSeconds * 1000 };
-  if (now > record.resetAt) {
-    record.count = 0;
-    record.resetAt = now + windowSeconds * 1000;
+  try {
+    const record = await db.prepare(
+      `SELECT count, reset_at FROM rate_limits WHERE key = ?`
+    ).bind(key).first();
+
+    if (!record || now > record.reset_at) {
+      const resetAt = now + windowSeconds * 1000;
+      await db.prepare(
+        `INSERT INTO rate_limits (key, count, reset_at) VALUES (?, 1, ?)
+         ON CONFLICT(key) DO UPDATE SET count = 1, reset_at = ?`
+      ).bind(key, resetAt, resetAt).run();
+      return true;
+    }
+
+    if (record.count >= maxRequests) {
+      return false;
+    }
+
+    await db.prepare(
+      `UPDATE rate_limits SET count = count + 1 WHERE key = ?`
+    ).bind(key).run();
+    return true;
+  } catch (err) {
+    console.error('[RateLimit Error]', err);
+    return true;
   }
-  record.count++;
-  RATE_LIMIT_MAP.set(key, record);
-  return record.count <= maxRequests;
 }
 
 // Security: Standard CORS Headers
@@ -136,9 +153,12 @@ async function verifyPassword(password, storedHash) {
 
 // AES-GCM-256 for encrypting IPTV passwords at rest
 async function getEncryptionKey(env) {
-  const secret = env.AES_SECRET || env.ENCRYPTION_KEY || 'sv_default_secure_vault_key_2026';
+  const secret = env.AES_SECRET || env.ENCRYPTION_KEY;
+  if (!secret || typeof secret !== 'string' || secret.trim().length === 0) {
+    throw new Error('Server encryption secret missing (AES_SECRET required)');
+  }
   const enc = new TextEncoder();
-  const rawKey = await crypto.subtle.digest('SHA-256', enc.encode(secret));
+  const rawKey = await crypto.subtle.digest('SHA-256', enc.encode(secret.trim()));
   return crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
@@ -322,7 +342,7 @@ export default {
 
       // A. Sign Up (PBKDF2 + Email Verification Code)
       if (method === 'POST' && pathname === '/api/auth/signup') {
-        if (!checkRateLimit(clientIp, 'signup', 5, 60)) {
+        if (!await checkRateLimit(env.DB, `ip:signup:${clientIp}`, 5, 60)) {
           return errorResponse('Too many sign-up attempts. Please wait 1 minute.', 429, corsHeaders);
         }
         const { email, password, displayName = 'Account Owner' } = await request.json().catch(() => ({}));
@@ -336,7 +356,7 @@ export default {
         if (password.length < 6) {
           return errorResponse('Password must be at least 6 characters', 400, corsHeaders);
         }
-        if (!checkRateLimit(cleanEmail, 'email_signup', 3, 60)) {
+        if (!await checkRateLimit(env.DB, `email:signup:${cleanEmail}`, 3, 60)) {
           return errorResponse('Too many sign-up attempts for this email. Please wait 1 minute.', 429, corsHeaders);
         }
 
@@ -402,14 +422,14 @@ export default {
 
       // B. Verify Email Code
       if (method === 'POST' && pathname === '/api/auth/verify-code') {
-        if (!checkRateLimit(clientIp, 'verify', 10, 60)) {
+        if (!await checkRateLimit(env.DB, `ip:verify:${clientIp}`, 10, 60)) {
           return errorResponse('Too many verification attempts. Please wait 1 minute.', 429, corsHeaders);
         }
         const { email, code } = await request.json().catch(() => ({}));
         if (!email || !code) return errorResponse('Email and code are required', 400, corsHeaders);
         const cleanEmail = email.trim().toLowerCase();
         const cleanCode = String(code).trim();
-        if (!checkRateLimit(cleanEmail, 'email_verify', 5, 60)) {
+        if (!await checkRateLimit(env.DB, `email:verify:${cleanEmail}`, 5, 60)) {
           return errorResponse('Too many verification attempts for this email. Please wait 1 minute.', 429, corsHeaders);
         }
         const now = Date.now();
@@ -440,7 +460,7 @@ export default {
         await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(codeRecord.code_id).run();
         await env.DB.prepare(`UPDATE accounts SET is_verified = 1, updated_at = ? WHERE email = ?`).bind(now, cleanEmail).run();
 
-        const account = await env.DB.prepare(`SELECT account_id FROM accounts WHERE email = ?`).bind(cleanEmail).first();
+        const account = await env.DB.prepare(`SELECT account_id, pin_hash FROM accounts WHERE email = ?`).bind(cleanEmail).first();
 
         // Issue 32-byte crypto session token
         const rawToken = generateSessionToken();
@@ -463,13 +483,14 @@ export default {
           accountId: account.account_id,
           token: rawToken,
           email: cleanEmail,
+          pinHash: (account && account.pin_hash) || '',
           profiles: profiles.results || []
         }, 200, corsHeaders);
       }
 
       // B.1 Resend Email Verification Code
       if (method === 'POST' && pathname === '/api/auth/resend-code') {
-        if (!checkRateLimit(clientIp, 'resend', 5, 60)) {
+        if (!await checkRateLimit(env.DB, `ip:resend:${clientIp}`, 5, 60)) {
           return errorResponse('Too many requests. Please wait 1 minute.', 429, corsHeaders);
         }
         const { email } = await request.json().catch(() => ({}));
@@ -479,7 +500,7 @@ export default {
           return errorResponse('Please enter a valid email address', 400, corsHeaders);
         }
 
-        if (!checkRateLimit(cleanEmail, 'email_resend', 3, 60)) {
+        if (!await checkRateLimit(env.DB, `email:resend:${cleanEmail}`, 3, 60)) {
           return errorResponse('Too many resend attempts for this email. Please wait 1 minute.', 429, corsHeaders);
         }
 
@@ -523,18 +544,18 @@ export default {
 
       // C. Sign In (PBKDF2 Check + Session Issue)
       if (method === 'POST' && pathname === '/api/auth/login') {
-        if (!checkRateLimit(clientIp, 'login', 8, 60)) {
+        if (!await checkRateLimit(env.DB, `ip:login:${clientIp}`, 8, 60)) {
           return errorResponse('Too many login attempts. Please wait 1 minute.', 429, corsHeaders);
         }
         const { email, password } = await request.json().catch(() => ({}));
         if (!email || !password) return errorResponse('Email and password are required', 400, corsHeaders);
 
         const cleanEmail = email.trim().toLowerCase();
-        if (!checkRateLimit(cleanEmail, 'email_login', 5, 60)) {
+        if (!await checkRateLimit(env.DB, `email:login:${cleanEmail}`, 5, 60)) {
           return errorResponse('Too many login attempts for this email. Please wait 1 minute.', 429, corsHeaders);
         }
         const account = await env.DB.prepare(
-          `SELECT account_id, email, password_hash, is_verified FROM accounts WHERE email = ?`
+          `SELECT account_id, email, password_hash, pin_hash, is_verified FROM accounts WHERE email = ?`
         ).bind(cleanEmail).first();
 
         if (!account) return errorResponse('Invalid email or password', 401, corsHeaders);
@@ -569,6 +590,7 @@ export default {
           accountId: account.account_id,
           email: account.email,
           isVerified: account.is_verified === 1,
+          pinHash: account.pin_hash || '',
           profiles: profiles.results || [],
           playlists: playlists.results || []
         }, 200, corsHeaders);
@@ -725,7 +747,7 @@ export default {
            VALUES (?, ?, ?, ?, ?)`
         ).bind(sessionId, record.account_id, tokenHash, sessionExpires, now).run();
 
-        const account = await env.DB.prepare(`SELECT email FROM accounts WHERE account_id = ?`).bind(record.account_id).first();
+        const account = await env.DB.prepare(`SELECT email, pin_hash FROM accounts WHERE account_id = ?`).bind(record.account_id).first();
         const profiles = await env.DB.prepare(`SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE account_id = ?`).bind(record.account_id).all();
 
         // Decrypt playlists for the paired TV
@@ -749,9 +771,58 @@ export default {
           token: rawToken,
           accountId: record.account_id,
           email: account ? account.email : '',
+          pinHash: (account && account.pin_hash) || '',
           profiles: profiles.results || [],
           playlists: decryptedPlaylists
         }, 200, corsHeaders);
+      }
+
+      // Reset PIN (via Account Password or 6-digit Email Code)
+      if (method === 'POST' && pathname === '/api/account/reset-pin') {
+        const authHeader = request.headers.get('Authorization') || '';
+        let account = null;
+        if (authHeader.startsWith('Bearer ')) {
+          const sessionAuth = await authenticate(request, env);
+          if (sessionAuth) {
+            account = await env.DB.prepare(
+              `SELECT account_id, email, password_hash FROM accounts WHERE account_id = ?`
+            ).bind(sessionAuth.accountId).first();
+          }
+        }
+        const { email, password, code, newPin, newPinHash } = await request.json().catch(() => ({}));
+        if (!account && email) {
+          account = await env.DB.prepare(
+            `SELECT account_id, email, password_hash FROM accounts WHERE email = ?`
+          ).bind(email.trim().toLowerCase()).first();
+        }
+        if (!account) {
+          return errorResponse('Account not found or session invalid', 404, corsHeaders);
+        }
+
+        if (password) {
+          const ok = await verifyPassword(password, account.password_hash);
+          if (!ok) return errorResponse('Incorrect account password', 403, corsHeaders);
+        } else if (code) {
+          const cleanCode = String(code).trim();
+          const codeRecord = await env.DB.prepare(
+            `SELECT code_id, expires_at FROM email_codes WHERE email = ? AND code = ? AND is_used = 0 ORDER BY created_at DESC LIMIT 1`
+          ).bind(account.email, cleanCode).first();
+          if (!codeRecord || Date.now() > codeRecord.expires_at) {
+            return errorResponse('Invalid or expired 6-digit verification code', 401, corsHeaders);
+          }
+          await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(codeRecord.code_id).run();
+        } else {
+          return errorResponse('Account password or 6-digit email code required', 400, corsHeaders);
+        }
+
+        const now = Date.now();
+        const pinToSave = newPinHash || (newPin ? await sha256(newPin) : null);
+        if (pinToSave) {
+          await env.DB.prepare(
+            `UPDATE accounts SET pin_hash = ?, updated_at = ? WHERE account_id = ?`
+          ).bind(pinToSave, now, account.account_id).run();
+        }
+        return jsonResponse({ success: true, message: 'Master PIN reset successfully verified' }, 200, corsHeaders);
       }
 
       // ================================================================
@@ -762,6 +833,19 @@ export default {
       const auth = await authenticate(request, env);
       if (!auth) {
         return errorResponse('Unauthorized: Valid Bearer session token required', 401, corsHeaders);
+      }
+
+      // Sync / Update Master PIN Hash
+      if (method === 'POST' && pathname === '/api/account/pin') {
+        const { pinHash } = await request.json().catch(() => ({}));
+        if (!pinHash || typeof pinHash !== 'string') {
+          return errorResponse('pinHash is required', 400, corsHeaders);
+        }
+        const now = Date.now();
+        await env.DB.prepare(
+          `UPDATE accounts SET pin_hash = ?, updated_at = ? WHERE account_id = ?`
+        ).bind(pinHash.trim(), now, auth.accountId).run();
+        return jsonResponse({ success: true, message: 'PIN hash synced' }, 200, corsHeaders);
       }
 
       // ----------------------------------------------------------------
@@ -802,9 +886,17 @@ export default {
         if (!serverUrl || !username || !password) {
           return errorResponse('Server URL, username, and password are required', 400, corsHeaders);
         }
+        if (!env.AES_SECRET && !env.ENCRYPTION_KEY) {
+          return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+        }
+        let passEnc;
+        try {
+          passEnc = await encryptData(password, env);
+        } catch (err) {
+          return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+        }
         const now = Date.now();
         const playlistId = 'pl_' + crypto.randomUUID().substring(0, 10);
-        const passEnc = await encryptData(password, env);
 
         await env.DB.prepare(
           `INSERT INTO playlists (playlist_id, account_id, name, server_url, username, password_enc, is_enabled, status, last_sync_at, created_at, updated_at)
@@ -838,7 +930,14 @@ export default {
 
         let passEnc = existing.password_enc;
         if (password && password.trim().length > 0) {
-          passEnc = await encryptData(password.trim(), env);
+          if (!env.AES_SECRET && !env.ENCRYPTION_KEY) {
+            return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+          }
+          try {
+            passEnc = await encryptData(password.trim(), env);
+          } catch (err) {
+            return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+          }
         }
 
         await env.DB.prepare(

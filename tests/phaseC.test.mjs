@@ -1,8 +1,6 @@
 import puppeteer from 'puppeteer-core';
 import assert from 'node:assert/strict';
-
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const UI_PATH = 'file:///C:/Users/wkhan/.gemini/antigravity/scratch/streamvault-tv/app/src/main/assets/tv-ui.html';
+import { CHROME_PATH, UI_PATH } from './test-config.mjs';
 
 async function runPhaseCTests() {
   console.log('=== Running StreamVault TV — Phase C Test Suite ===\n');

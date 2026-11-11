@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   account_id TEXT PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  pin_hash TEXT,
   is_verified INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -141,3 +142,11 @@ CREATE TABLE IF NOT EXISTS pairing_codes (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pairing_codes_status ON pairing_codes(code, status);
+
+-- 10. Rate Limits (Key, count, reset_at)
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  reset_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_reset ON rate_limits(reset_at);

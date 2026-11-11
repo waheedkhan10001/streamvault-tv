@@ -996,6 +996,40 @@
       <button class="pin-btn tv-focusable" onclick="pressPinDigit('0')">0</button>
       <button class="pin-btn tv-focusable" onclick="closeParentalPinModal()">✕</button>
     </div>
+    <div style="text-align:center;margin-top:10px;">
+      <button tabindex="0" class="btn tv-focusable" style="background:transparent;border:1px solid #4B5563;color:#9CA3AF;font-size:10px;padding:3px 10px;" onclick="openResetPinModal()">Forgot PIN? Reset via Account Password</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset PIN Dialog (via Cloud Account Password or Email Code) -->
+<div id="resetPinModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100010;align-items:center;justify-content:center;">
+  <div style="background:#120E24;border:1.5px solid var(--theme-border, #A78BFA);border-radius:16px;max-width:440px;width:90%;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
+    <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Reset Master PIN</div>
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:14px;">Verify your StreamVault Cloud Account password or enter an emailed 6-digit code.</div>
+    
+    <div style="margin-bottom:10px;text-align:left;">
+      <label style="display:block;font-size:10px;font-weight:700;color:#D1D5DB;margin-bottom:4px;">Account Password</label>
+      <input id="resetPinPasswordInput" type="password" class="search-field tv-focusable"
+             readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
+             onkeydown="onInputKeyDown(this, event)"
+             placeholder="Account password" style="width:100%;font-size:13px;padding:6px 10px;box-sizing:border-box;" />
+    </div>
+
+    <div style="margin-bottom:10px;text-align:left;">
+      <label style="display:block;font-size:10px;font-weight:700;color:#D1D5DB;margin-bottom:4px;">New 4-Digit Master PIN</label>
+      <input id="resetPinNewInput" type="password" maxlength="4" class="search-field tv-focusable"
+             readonly onclick="this.removeAttribute('readonly');this.focus();" onblur="this.setAttribute('readonly','true');"
+             oninput="onPinInput(this)" onkeydown="onInputKeyDown(this, event)"
+             placeholder="••••" style="width:100%;font-size:14px;letter-spacing:4px;text-align:center;padding:6px 10px;box-sizing:border-box;" />
+    </div>
+
+    <div id="resetPinErrorMessage" style="font-size:11px;color:#EF4444;min-height:16px;margin-bottom:12px;text-align:left;"></div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+      <button tabindex="0" class="btn tv-focusable" style="padding:8px 16px;" onclick="closeResetPinModal()">Cancel</button>
+      <button tabindex="0" id="btnSubmitResetPin" class="btn btn-primary tv-focusable" style="padding:8px 18px;" onclick="submitResetPin()">Verify &amp; Set PIN</button>
+    </div>
   </div>
 </div>
 
@@ -1713,6 +1747,16 @@ async function handleSuccessfulAuth(data) {
     displayName: data.displayName || (data.email ? data.email.split('@')[0] : 'User')
   };
   localStorage.setItem('streamvault_account', JSON.stringify(accountObj));
+
+  if (data.pinHash) {
+    try {
+      await fetch('/api/parental-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'restore', pinHash: data.pinHash })
+      }).catch(() => {});
+    } catch (_) {}
+  }
 
   await syncSessionToNative(data.token);
   closeCloudAuthModal();
@@ -2938,7 +2982,7 @@ function setProfileTheme(themeKey) {
 }
 
 async function loadProfile(vp) {
-  let profilesData = { profiles: [], activeProfileId: 'prof_1' };
+  let profilesData = { profiles: [], activeProfileId: '' };
   try {
     const pRes = await fetch('/api/profiles').catch(() => null);
     if (pRes) profilesData = await pRes.json();
@@ -3587,88 +3631,6 @@ function onInputKeyDown(el, event) {
   }
 }
 
-async function saveAccountCredentials() {
-  playNavSound();
-  const displayName = (document.getElementById('setDisplayName')?.value || '').trim();
-  const serverUrl = document.getElementById('setServerUrl').value.trim();
-  const playlistName = document.getElementById('setPlaylistName').value.trim();
-  const username = document.getElementById('setUsername').value.trim();
-  const password = document.getElementById('setPassword').value.trim();
-  const statusLbl = document.getElementById('accountSaveStatus');
-
-  if (!serverUrl || !username) {
-    if (statusLbl) {
-      statusLbl.innerText = 'Server URL and Username are required';
-      statusLbl.style.color = '#EF4444';
-    }
-    return;
-  }
-
-  if (statusLbl) {
-    statusLbl.innerText = 'Connecting and syncing catalog...';
-    statusLbl.style.color = '#A78BFA';
-  }
-
-  // 1. Sync credentials to Cloudflare Workers + D1 if Cloud Account is logged in
-  try {
-    const rawAcc = localStorage.getItem('streamvault_account');
-    if (rawAcc) {
-      const acc = JSON.parse(rawAcc);
-      if (acc && acc.accountId) {
-        await fetch(CLOUD_SYNC_BASE + '/api/account/update-credentials', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            accountId: acc.accountId,
-            iptvServer: serverUrl,
-            iptvUser: username,
-            iptvPass: password,
-            playlistName
-          })
-        }).catch(() => {});
-        acc.iptvServerUrl = serverUrl;
-        acc.iptvUsername = username;
-        acc.iptvPassword = password;
-        acc.playlistName = playlistName;
-        localStorage.setItem('streamvault_account', JSON.stringify(acc));
-      }
-    }
-  } catch (_) {}
-
-  // 2. Update local state
-  if (!appStatus) appStatus = {};
-  if (!appStatus.credentials) appStatus.credentials = {};
-  appStatus.credentials.serverUrl = serverUrl;
-  appStatus.credentials.playlistName = playlistName;
-  appStatus.credentials.username = username;
-  appStatus.credentials.password = password;
-  if (displayName) appStatus.credentials.displayName = displayName;
-
-  // 3. Post to companion runner if available
-  try {
-    const res = await fetch('/api/save-credentials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ serverUrl, playlistName, username, password, displayName })
-    });
-    const d = await res.json();
-    if (d.ok) {
-      const sRes = await fetch('/api/state').catch(() => null);
-      if (sRes) appStatus = await sRes.json();
-    }
-  } catch (_) {}
-
-  updateUserProfileUI();
-  if (statusLbl) {
-    statusLbl.innerText = '✓ Saved & synced with Cloud!';
-    statusLbl.style.color = '#10B981';
-  }
-  showToast('✓ IPTV Provider Connected! Loading Catalog...');
-  setTimeout(async () => {
-    await navigateToTab('HOME');
-  }, 1200);
-}
-
 async function changeParentalPin() {
   playNavSound();
   const cur = document.getElementById('setCurPin').value.trim();
@@ -4082,9 +4044,17 @@ async function confirmSignOutAccount() {
     await fetch('/api/session', { method: 'DELETE' }).catch(() => {});
   } catch (_) {}
   try {
+    await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'signout' })
+    }).catch(() => {});
+  } catch (_) {}
+  try {
     await fetch('/api/factory-reset', { method: 'POST' }).catch(() => {});
   } catch (_) {}
 
+  if (typeof profilesData !== 'undefined') profilesData.activeProfileId = '';
   appStatus = null;
   homeData = null;
   currentActiveProfile = null;
@@ -5930,19 +5900,43 @@ document.addEventListener('visibilitychange', () => {
 });
 
 let parentalPinContext = { action: 'unlock', onComplete: null };
+let isCreatingPinMode = false;
 
-function openParentalPinModal(context = { action: 'unlock' }) {
+async function openParentalPinModal(context = { action: 'unlock' }) {
   parentalPinContext = context;
   playNavSound();
   enteredPin = '';
   updatePinDots();
+
+  // Check if Master PIN has been set
+  let hasPin = false;
+  try {
+    const res = await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'status' })
+    });
+    const d = await res.json();
+    hasPin = Boolean(d.hasCustomPin || d.hasPin);
+  } catch (_) {}
+
+  isCreatingPinMode = !hasPin;
+
   const title = document.getElementById('parentalPinTitle');
   if (title) {
-    title.innerText = context.action === 'disable_kids' ? 'Master PIN Required' : 'Parental Control';
+    if (isCreatingPinMode) {
+      title.innerText = 'Create Master PIN';
+    } else {
+      title.innerText = context.action === 'disable_kids' ? 'Master PIN Required' : 'Parental Control';
+    }
   }
   const sub = document.getElementById('parentalPinSubtitle');
   if (sub) {
-    sub.innerText = context.action === 'disable_kids' ? 'Enter Master PIN to disable Kids Mode' : 'Enter 4-digit Master PIN to unlock 18+ Vault';
+    if (isCreatingPinMode) {
+      sub.innerText = 'Set a 4-digit Master PIN to protect adult content & settings';
+    } else {
+      sub.innerText = context.action === 'disable_kids' ? 'Enter Master PIN to disable Kids Mode' : 'Enter 4-digit Master PIN to unlock 18+ Vault';
+    }
   }
   document.getElementById('pinErrorMessage').innerText = '';
   const m = document.getElementById('parentalPinModal');
@@ -5993,6 +5987,56 @@ function updatePinDots() {
 async function verifyParentalPin() {
   try {
     const isDisableKids = parentalPinContext && parentalPinContext.action === 'disable_kids';
+
+    if (isCreatingPinMode) {
+      const res = await fetch('/api/parental-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_pin', newPin: enteredPin })
+      });
+      const d = await res.json();
+      if (d.success) {
+        const token = getStoredAuthToken();
+        if (token && d.pinHash) {
+          fetch(CLOUD_SYNC_BASE + '/api/account/pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ pinHash: d.pinHash })
+          }).catch(() => {});
+        }
+        showToast('✓ Master PIN created!');
+        isCreatingPinMode = false;
+        const pinUsed = enteredPin;
+        closeParentalPinModal();
+        if (isDisableKids) {
+          if (typeof parentalPinContext.onComplete === 'function') {
+            parentalPinContext.onComplete(pinUsed);
+          }
+        } else {
+          await fetch('/api/parental-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'unlock', pin: pinUsed })
+          });
+          if (appStatus && appStatus.parentalControl) {
+            appStatus.parentalControl.isLocked = false;
+            appStatus.parentalControl.showAdult = true;
+          }
+          renderSidebar();
+          if (currentTab === 'SETTINGS' || currentTab === 'PROFILE') {
+            updateParentalStatusInSettings();
+          } else {
+            navigateToTab(currentTab);
+          }
+        }
+        return;
+      } else {
+        document.getElementById('pinErrorMessage').innerText = d.error || 'Failed to set PIN';
+        setTimeout(clearPin, 600);
+        return;
+      }
+    }
+
     const actionParam = isDisableKids ? 'verify' : 'unlock';
     const res = await fetch('/api/parental-pin', {
       method: 'POST',
@@ -6025,6 +6069,74 @@ async function verifyParentalPin() {
     }
   } catch (err) {
     document.getElementById('pinErrorMessage').innerText = 'Connection error';
+  }
+}
+
+function openResetPinModal() {
+  closeParentalPinModal();
+  playNavSound();
+  const m = document.getElementById('resetPinModal');
+  if (m) {
+    document.getElementById('resetPinPasswordInput').value = '';
+    document.getElementById('resetPinNewInput').value = '';
+    document.getElementById('resetPinErrorMessage').innerText = '';
+    m.style.display = 'flex';
+    setTimeout(() => {
+      const input = document.getElementById('resetPinPasswordInput');
+      if (input) { input.focus(); playNavSound(); }
+    }, 40);
+  }
+}
+
+function closeResetPinModal() {
+  const m = document.getElementById('resetPinModal');
+  if (m) m.style.display = 'none';
+}
+
+async function submitResetPin() {
+  playNavSound();
+  const pwd = (document.getElementById('resetPinPasswordInput')?.value || '').trim();
+  const newPin = (document.getElementById('resetPinNewInput')?.value || '').trim();
+  const errLbl = document.getElementById('resetPinErrorMessage');
+
+  if (!pwd) {
+    if (errLbl) errLbl.innerText = 'Account password is required';
+    return;
+  }
+  if (newPin.length !== 4 || isNaN(newPin)) {
+    if (errLbl) errLbl.innerText = 'New PIN must be exactly 4 numeric digits';
+    return;
+  }
+
+  if (errLbl) {
+    errLbl.innerText = 'Verifying with cloud server...';
+    errLbl.style.color = '#A78BFA';
+  }
+
+  try {
+    const res = await fetch('/api/parental-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reset_pin', password: pwd, newPin: newPin })
+    });
+    const d = await res.json();
+    if (d.success) {
+      showToast('✓ Master PIN reset successfully!');
+      closeResetPinModal();
+      if (currentTab === 'SETTINGS' || currentTab === 'PROFILE') {
+        updateParentalStatusInSettings();
+      }
+    } else {
+      if (errLbl) {
+        errLbl.innerText = d.error || 'Failed to reset PIN';
+        errLbl.style.color = '#EF4444';
+      }
+    }
+  } catch (err) {
+    if (errLbl) {
+      errLbl.innerText = `Error: ${err.message}`;
+      errLbl.style.color = '#EF4444';
+    }
   }
 }
 
@@ -6076,6 +6188,10 @@ window.handleAppBackKey = function() {
   }
   if (document.getElementById('parentalPinModal') && document.getElementById('parentalPinModal').style.display === 'flex') {
     closeParentalPinModal();
+    return true;
+  }
+  if (document.getElementById('resetPinModal') && document.getElementById('resetPinModal').style.display === 'flex') {
+    closeResetPinModal();
     return true;
   }
   if (document.getElementById('voiceSearchModal') && document.getElementById('voiceSearchModal').style.display === 'flex') {
