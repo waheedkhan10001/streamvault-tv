@@ -1,0 +1,41 @@
+name: Enrichments pack test
+
+# Measures the real size and match quality of the shared "Enrichments" pack. Builds nothing into the app.
+# Needs these repository secrets: IPTV_SERVER, IPTV_USER, IPTV_PASS, TMDB_API_KEY
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'How many titles to test (0 = all ~51,000)'
+        default: '2000'
+      posters:
+        description: 'Also download posters to measure real sizes (true/false)'
+        default: 'true'
+
+jobs:
+  pack-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run the pack test
+        working-directory: tools/enrichments-test
+        env:
+          IPTV_SERVER: ${{ secrets.IPTV_SERVER }}
+          IPTV_USER: ${{ secrets.IPTV_USER }}
+          IPTV_PASS: ${{ secrets.IPTV_PASS }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          LIMIT: ${{ github.event.inputs.limit }}
+          POSTERS: ${{ github.event.inputs.posters }}
+        run: node pack-test.cjs
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrichments-pack-test-results
+          path: |
+            tools/enrichments-test/pack-test-summary.txt
+            tools/enrichments-test/pack-test-samples.txt
