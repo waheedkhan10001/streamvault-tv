@@ -71,24 +71,63 @@ function slim(d, type) {
   };
 }
 
+// Extra name cleaning for the search step (the app's own parser already removes year, quality and "DE:").
+const LANGS = 'hindi|tamil|telugu|malayalam|kannada|marathi|punjabi|pashto|bengali|bangla|urdu|english|gujarati|bhojpuri|dubbed|subbed|sub|subtitles|english-subbed|full|length|movie|film|hd|4k|uhd|latest|new|superhit|classic|old|awesome|comedy|thriller|romantic|action|telefilm|converted|scam|tv|netflix|voot|zee5|hotstar|amazon|prime';
+function variants(raw, clean) {
+  const out = []; const add = (x) => { x = String(x || '').replace(/\s+/g, ' ').trim(); if (x.length > 1 && !out.includes(x)) out.push(x); };
+  let c = String(clean || '').replace(/\*/g, ' ').replace(/^\s*[A-Z]{2,3}\s*:\s*/, '');
+  c = c.replace(/\((tv movie|netflix|voot|zee5|hotstar|amazon|prime|hd|scam|[^)]*movie[^)]*)\)/gi, ' ').replace(/-converted/gi, ' ').replace(/\s+S\d{1,2}$/i, ' ');
+  add(c);
+  const parts = c.split(/\s+[_|]+\s+|\s+-\s+/); // "Title _ Full Movie _ Actor" -> keep the first part
+  if (parts.length > 1) add(parts[0]);
+  const stripped = parts[0].replace(new RegExp('\\b(' + LANGS + ')\\b', 'gi'), ' ').replace(/[\[\]()]/g, ' ');
+  add(stripped);
+  const colon = c.split(/\s*:\s*/); if (colon.length > 1) add(colon[0]);
+  add(c.replace(/'s\b/g, 's').replace(/([a-z])([A-Z])/g, '$1 $2'));
+  return out.slice(0, 5);
+}
+const yr = (d) => (d ? parseInt(String(d).slice(0, 4), 10) : 0);
+async function searchBest(isTv, gYear, names) {
+  const ep = isTv ? '/search/tv' : '/search/movie';
+  let best = null;
+  for (const q of names) {
+    for (const lang of ['en-US', 'de-DE']) {
+      for (const withYear of gYear ? [true, false] : [false]) {
+        const p = { query: q, language: lang };
+        if (withYear) p[isTv ? 'first_air_date_year' : 'year'] = gYear;
+        const s = await tmdb(ep, p);
+        for (const h of ((s && s.results) || []).slice(0, 5)) {
+          const hy = yr(isTv ? h.first_air_date : h.release_date);
+          const ns = Math.max(sim(q, isTv ? h.name : h.title), sim(q, isTv ? h.original_name : h.original_title));
+          const yOk = !gYear || !hy || (isTv ? gYear >= hy - 1 : Math.abs(gYear - hy) <= 1);
+          const score = ns + (yOk ? 0.3 : 0) + (gYear && hy && gYear === hy ? 0.1 : 0) + Math.min(0.05, (h.popularity || 0) / 2000);
+          if (!best || score > best.score) best = { id: h.id, score, ns, yOk };
+        }
+        if (best && best.ns >= 0.8 && best.yOk) return best; // good enough, stop early
+      }
+    }
+  }
+  return best && best.ns >= 0.34 ? best : (best && best.yOk && best.ns >= 0.2 ? best : null); // the very weakest guesses count as not found
+}
+
 async function resolve(item) {
   const isTv = item.type === 'series', g = item.g;
   const append = isTv ? 'credits,content_ratings,external_ids' : 'credits,release_dates';
   let id = g.tmdb > 0 ? g.tmdb : 0, method = id ? 'id' : 'search';
   if (!id) {
-    const q = g.clean;
-    const s = await tmdb(isTv ? '/search/tv' : '/search/movie', isTv ? { query: q, first_air_date_year: g.year || '' } : { query: q, year: g.year || '' });
-    const hit = s && s.results && s.results[0];
-    if (!hit) { item.status = 'notfound'; return; }
-    id = hit.id;
+    const best = await searchBest(isTv, g.year || 0, variants(g.raw, g.clean));
+    if (!best) { item.status = 'notfound'; return; }
+    id = best.id;
   }
   const d = await tmdb((isTv ? '/tv/' : '/movie/') + id, { append_to_response: append });
   if (!d) { item.status = 'notfound'; item.method = method; return; }
   item.method = method; item.rec = slim(d, item.type);
-  const ts = Math.max(sim(g.clean, item.rec.t), sim(g.clean, item.rec.ot));
-  const yearOk = !g.year || !item.rec.y || Math.abs(g.year - item.rec.y) <= 1;
+  const names = variants(g.raw, g.clean);
+  const ts = Math.max(0, ...names.map((n) => Math.max(sim(n, item.rec.t), sim(n, item.rec.ot))));
+  // a series name carries the year of the LATEST season, TMDB keeps the first year, so only a later name year is fine
+  const yearOk = !g.year || !item.rec.y || (isTv ? g.year >= item.rec.y - 1 : Math.abs(g.year - item.rec.y) <= 1);
   item.sim = ts; item.yearOk = yearOk;
-  item.status = (ts >= 0.6 && yearOk) ? 'confident' : 'doubtful';
+  item.status = (ts >= 0.6 && yearOk) ? 'confident' : (method === 'id' && ts >= 0.9 && isTv) ? 'confident' : 'doubtful';
 }
 
 (async () => {
