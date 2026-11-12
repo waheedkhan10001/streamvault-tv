@@ -268,7 +268,9 @@ async function runPhaseCTests() {
       reached.add('theme-chip-2');
     }
     // Down to kids mode toggle
+    window.__navTrail = [document.activeElement.id || document.activeElement.className];
     window.handleTvKeyEvent('ArrowDown');
+    window.__navTrail.push(document.activeElement.id || document.activeElement.className);
     if (document.activeElement?.id === 'btnToggleKidsMode') {
       reached.add('btnToggleKidsMode');
     }
@@ -293,7 +295,8 @@ async function runPhaseCTests() {
 
   assert.ok(profileReached.includes('profNameInput'), 'profNameInput must be reached');
   assert.ok(profileReached.includes('theme-chip'), 'Theme chip must be reached');
-  assert.ok(profileReached.includes('btnToggleKidsMode'), 'btnToggleKidsMode must be reached');
+  const trail = await page.evaluate(() => JSON.stringify(window.__navTrail || []) + ' vp=' + innerWidth + 'x' + innerHeight + ' rects=' + JSON.stringify(['btnToggleKidsMode','btnSaveProfile'].map(id => { const e = document.getElementById(id); if (!e) return null; const r = e.getBoundingClientRect(); return [id, Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })) + ' chips=' + JSON.stringify([...document.querySelectorAll('.profile-theme-chip')].map(e => { const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; })));
+  assert.ok(profileReached.includes('btnToggleKidsMode'), 'btnToggleKidsMode must be reached ' + trail);
   assert.ok(profileReached.includes('btnSaveProfile'), 'btnSaveProfile must be reached');
   console.log(`  ✓ PASS: Profile controls reached smoothly via spatial navigation (${profileReached.join(', ')}).\n`);
 
