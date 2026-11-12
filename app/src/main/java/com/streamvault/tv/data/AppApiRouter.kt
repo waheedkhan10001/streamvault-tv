@@ -100,6 +100,7 @@ class AppApiRouter(
                 method == "POST" && path == "/api/clear-crash" -> { prefs.lastCrash = null; """{"ok":true}""" }
                 method == "POST" && path == "/api/catalog/pull-cloud" -> handlePullCloudCatalog()
                 method == "GET" && path == "/api/sync/status" -> handleGetSyncStatus()
+                method == "GET" && path == "/api/diag" -> handleGetDiag()
 
                 // 14. Factory Reset
                 method == "POST" && path == "/api/factory-reset" -> handleFactoryReset()
@@ -1248,6 +1249,23 @@ class AppApiRouter(
             put("ok", true)
             put("count", count)
             put("message", "Catalog pulled from cloud ($count titles)")
+        }.toString()
+    }
+
+    /** Facts for the "Report a problem" screen. Contains no passwords, tokens or stream addresses. */
+    private fun handleGetDiag(): String {
+        val (enriched, total) = db.getEnrichmentCountsCached()
+        return JSONObject().apply {
+            put("ok", true)
+            put("appVersion", com.streamvault.tv.BuildConfig.VERSION_NAME)
+            put("device", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE}")
+            put("titles", total)
+            put("enriched", enriched)
+            put("cloudPending", db.countCloudPending())
+            put("cloudPausedUntil", syncEngine.cloudPausedUntilMs())
+            put("signedIn", !prefs.getAuthToken().isNullOrBlank())
+            put("lastCrash", prefs.lastCrash ?: JSONObject.NULL)
+            put("lines", JSONArray(DiagLog.recent(40)))
         }.toString()
     }
 

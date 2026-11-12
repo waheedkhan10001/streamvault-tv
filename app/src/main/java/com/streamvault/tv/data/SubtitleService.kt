@@ -45,6 +45,50 @@ class SubtitleService(private val context: Context) {
         "fa" to "Persian"
     )
 
+    companion object {
+        /** Lower-case letters and digits only, so "Spider-Man: Homecoming" and "spider man homecoming" compare equal. */
+        fun normalizeTitle(t: String): String = t.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "")
+
+        /**
+         * Picks the TMDB id out of a search answer, but ONLY when it is certainly the same title:
+         * the name must match exactly (ignoring punctuation/case) and, for movies, the year must match exactly.
+         * Anything less sure returns 0 (no subtitles are better than another film's subtitles).
+         */
+        fun pickExactMatch(searchJson: String, title: String, year: Int, isSeries: Boolean): Int {
+            val results = runCatching { JSONObject(searchJson).optJSONArray("results") }.getOrNull() ?: return 0
+            val want = normalizeTitle(title)
+            if (want.isEmpty()) return 0
+            for (i in 0 until results.length()) {
+                val o = results.optJSONObject(i) ?: continue
+                val name = if (isSeries) o.optString("name") else o.optString("title")
+                val original = if (isSeries) o.optString("original_name") else o.optString("original_title")
+                if (normalizeTitle(name) != want && normalizeTitle(original) != want) continue
+                if (!isSeries) {
+                    val y = o.optString("release_date").take(4).toIntOrNull() ?: 0
+                    if (year <= 1900 || y != year) continue
+                }
+                val id = o.optInt("id", 0)
+                if (id > 0) return id
+            }
+            return 0
+        }
+    }
+
+    /** For a title the app never found a TMDB/IMDb id for: asks TMDB (through the cloud) once, at play time, and accepts only an exact match. */
+    suspend fun resolveTmdbIdByTitle(cloudBase: String, token: String, title: String, year: Int, isSeries: Boolean): Int = withContext(Dispatchers.IO) {
+        if (token.isBlank() || title.isBlank()) return@withContext 0
+        runCatching {
+            val type = if (isSeries) "tv" else "movie"
+            val q = java.net.URLEncoder.encode(title, "UTF-8")
+            val yearParam = if (!isSeries && year > 1900) "&year=$year" else ""
+            val req = Request.Builder().url("$cloudBase/api/tmdb/search/$type?query=$q$yearParam")
+                .header("Authorization", "Bearer $token").build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) 0 else pickExactMatch(resp.body?.string().orEmpty(), title, year, isSeries)
+            }
+        }.getOrDefault(0)
+    }
+
     /**
      * Searches online subtitle providers for a given movie or episode by TMDB ID / IMDb ID.
      */

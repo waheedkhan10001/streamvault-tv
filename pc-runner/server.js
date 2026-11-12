@@ -1575,6 +1575,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Lightweight status endpoint (<4KB) so 2-second polling never lags!
+  if (req.method === 'GET' && pathname === '/api/diag') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ ok: true, appVersion: 'pc-simulator', device: 'PC runner', titles: 0, enriched: 0, cloudPending: 0, cloudPausedUntil: 0, signedIn: true, lastCrash: null, lines: ['PC simulator: no device events'] }));
+  }
+
   if (req.method === 'GET' && pathname === '/api/state') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     const safeParental = {

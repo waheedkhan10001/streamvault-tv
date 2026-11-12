@@ -246,6 +246,8 @@ class MainActivity : Activity() {
 
         db = com.streamvault.tv.data.StreamVaultDatabase.getInstance(this)
         prefs = com.streamvault.tv.data.PreferencesManager(this)
+        com.streamvault.tv.data.DiagLog.init(this)
+        com.streamvault.tv.data.DiagLog.add("App started (version ${BuildConfig.VERSION_NAME})")
         syncEngine = com.streamvault.tv.data.CatalogSyncEngine(
             db,
             prefs,
@@ -902,7 +904,15 @@ class MainActivity : Activity() {
                             com.streamvault.tv.data.SubtitleTrackItem(o.getString("id"), o.getString("name"), o.getString("lang"), o.getString("name"), false, o.getString("url"), o.optString("format", "srt"))
                         }
                     } else {
-                        val found = subtitleService.searchOnlineSubtitles(item.tmdbId, item.imdbId, season, episode, listOf("en", "ur", "hi", "ar"))
+                        // Only titles with no TMDB/IMDb id at all: look the title up once, accept an exact match only
+                        var useTmdbId = item.tmdbId
+                        if (useTmdbId <= 0 && item.imdbId.isBlank()) {
+                            useTmdbId = subtitleService.resolveTmdbIdByTitle(
+                                prefs.getCloudSyncBaseUrl(), prefs.getAuthToken().orEmpty(),
+                                item.cleanTitle, item.year, item.mediaType == com.streamvault.tv.data.MediaType.SERIES)
+                        }
+                        val found = subtitleService.searchOnlineSubtitles(useTmdbId, item.imdbId, season, episode, listOf("en", "ur", "hi", "ar"))
+                        com.streamvault.tv.data.DiagLog.add("Subtitles: ${found.size} found online for \"${item.cleanTitle}\"" + (if (item.tmdbId <= 0 && item.imdbId.isBlank()) " (looked up by title)" else ""))
                         tracks = listOf("en", "ur", "hi", "ar").mapNotNull { l -> found.firstOrNull { it.languageCode == l } }.take(3)
                         if (tracks.isNotEmpty()) {
                             val arr = org.json.JSONArray()
@@ -1061,6 +1071,7 @@ class MainActivity : Activity() {
 
                     override fun onPlayerError(error: PlaybackException) {
                         Log.e("StreamVault", "Direct Player Error: ${error.message} (Code: ${error.errorCodeName})", error)
+                        com.streamvault.tv.data.DiagLog.add("Playback error ${error.errorCodeName} on ${if (currentDedupKey.startsWith("live:")) "a live channel" else "a title"}")
                         flashCenterIndicator("Stream unavailable (${error.errorCodeName})")
                     }
                 })
@@ -1293,6 +1304,31 @@ class MainActivity : Activity() {
 
                 // B. Standard In-Player Controls
                 when (keyCode) {
+                    // Remote's own fast-forward / rewind keys: 30 seconds (films and episodes only, not live TV)
+                    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                    KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                        if (currentDedupKey.startsWith("live:")) return true
+                        val forward = keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+                        val maxDur = if (player.duration > 0) player.duration else Long.MAX_VALUE
+                        val target = if (forward) Math.min(maxDur, player.currentPosition + 30000L) else Math.max(0L, player.currentPosition - 30000L)
+                        player.seekTo(target)
+                        if (forward) flashRightIndicator("⟳\n30s") else flashLeftIndicator("⟲\n30s")
+                        updateOsdTime()
+                        showOsd()
+                        return true
+                    }
+                    // Remote's channel keys: next / previous channel, only while a live channel is playing
+                    KeyEvent.KEYCODE_CHANNEL_UP,
+                    KeyEvent.KEYCODE_CHANNEL_DOWN,
+                    KeyEvent.KEYCODE_MEDIA_NEXT,
+                    KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                        if (currentDedupKey.startsWith("live:")) {
+                            val dir = if (keyCode == KeyEvent.KEYCODE_CHANNEL_UP || keyCode == KeyEvent.KEYCODE_MEDIA_NEXT) 1 else -1
+                            webView.evaluateJavascript("window.zapLiveChannel && window.zapLiveChannel($dir)", null)
+                            playAcousticTick()
+                        }
+                        return true
+                    }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {

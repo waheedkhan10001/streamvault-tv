@@ -1033,6 +1033,17 @@
 </div>
 
 <!-- Reset PIN Dialog (via Cloud Account Password or Email Code) -->
+<div id="diagModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:100020;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border:1px solid var(--card-border);border-radius:12px;padding:16px 20px;width:min(860px,92vw);max-height:90vh;display:flex;flex-direction:column;">
+    <div style="font-size:15px;font-weight:900;margin-bottom:6px;">Report a problem</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">Take a photo of this screen and send it. It contains no passwords or stream addresses.</div>
+    <pre id="diagText" style="flex:1;overflow:hidden;font-size:9.5px;line-height:1.35;color:#E5E7EB;background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;margin:0 0 10px 0;">Loading…</pre>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button tabindex="0" id="btnDiagRefresh" class="btn tv-focusable" style="padding:5px 14px;font-size:11px;" onclick="loadDiagText()" onfocus="playNavSound()">Refresh</button>
+      <button tabindex="0" id="btnDiagClose" class="btn btn-primary tv-focusable" style="padding:5px 14px;font-size:11px;" onclick="closeDiagModal()" onfocus="playNavSound()">Close</button>
+    </div>
+  </div>
+</div>
 <div id="resetPinModal" class="pin-modal-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100010;align-items:center;justify-content:center;">
   <div style="background:var(--panel);border:1.5px solid var(--theme-border);border-radius:16px;max-width:440px;width:90%;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,0.95);box-sizing:border-box;">
     <div style="font-size:18px;font-weight:900;color:#FFFFFF;margin-bottom:4px;">Reset Master PIN</div>
@@ -4345,6 +4356,7 @@ async function loadLatest(vp, focusFirst = false) {
 }
 
 function latestLiveCards(items) {
+  liveZapList = items;
   return `<div class="live-grid" id="latestLiveGrid">${items.map((ch) => `
       <div class="live-channel-card">
         <div class="channel-left">
@@ -4630,6 +4642,7 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     previousTab = currentTab;
   }
   const leavingTab = currentTab;
+  const memAtOpen = tabFocusMemory[tabId];   // the screen's own first-title focus must not overwrite this before we use it
   currentTab = tabId;
   renderCatalogStrip();
   lastContentFocusTarget = null;
@@ -4679,6 +4692,13 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
   renderSidebar();
   if (focusFirstCard) {
     // Keep focus off sidebar so first card in catalog receives focus
+    // ...then, once the tab has drawn, move to the title the person was on last time (only if they have not pressed anything meanwhile)
+    const navAtOpen = navKeyCounter;
+    [650, 1200].forEach((ms) => setTimeout(() => {
+      if (currentTab !== tabId || navKeyCounter !== navAtOpen) return;
+      const r = findRememberedFocus(memAtOpen);
+      if (r && document.activeElement !== r) { r.focus(); tvScrollIntoView(r, { block: 'nearest' }); }
+    }, ms));
   } else if (tabId === 'PROFILE') {
     const userPill = document.getElementById('sidebarUserProfilePill') || document.querySelector('.user-profile-pill');
     if (userPill) userPill.focus();
@@ -5489,7 +5509,7 @@ async function executeFilterQuery(append = false) {
       }
     }
     if (items.length === 0) {
-      grid.innerHTML = '<div style="grid-column:1/-1;padding:60px 20px;color:var(--muted);text-align:center;font-size:15px;">No titles match these filters.<br/><span style="font-size:13px;color:var(--theme-accent);cursor:pointer;margin-top:8px;display:inline-block;" onclick="resetFilterState()">Click here to reset all filters</span></div>';
+      grid.innerHTML = '<div style="grid-column:1/-1;padding:60px 20px;color:var(--muted);text-align:center;font-size:15px;">No titles match these filters.<br/><button tabindex="0" id="btnResetFiltersEmpty" class="btn btn-primary tv-focusable" style="margin-top:14px;padding:8px 18px;font-size:13px;" onclick="resetFilterState()" onfocus="playNavSound()">Reset all filters</button></div>';
       return;
     }
     grid.innerHTML = items.map((m) => renderPosterCard(m)).join('');
@@ -5588,6 +5608,7 @@ async function fetchLiveChannels(rebuildTabs = true) {
       return;
     }
 
+    liveZapList = channels;
     grid.innerHTML = channels.map((ch) => {
       return `
         <div class="live-channel-card">
@@ -5660,7 +5681,7 @@ async function loadWatchlist(vp) {
       <div style="padding:34px 44px;">
         <div style="font-size:24px;font-weight:900;margin-bottom:18px;">My List (${items.length})</div>
         ${items.length === 0
-          ? '<div style="color:var(--muted);font-size:15px;margin-top:20px;">Your watchlist is empty. Open a title and choose "+ Add to List".</div>'
+          ? '<div style="color:var(--muted);font-size:15px;margin-top:20px;">Your watchlist is empty. Open a title and choose "+ Add to List".<br/><button tabindex="0" id="btnBrowseFromEmptyList" class="btn btn-primary tv-focusable" style="margin-top:14px;padding:8px 18px;font-size:13px;" onclick="navigateToTab(\'MOVIES\')" onfocus="playNavSound()">Browse movies</button></div>'
           : `<div class="results-grid">${items.map((m) => renderPosterCard(m)).join('')}</div>`}
       </div>
     `;
@@ -6069,6 +6090,13 @@ async function loadSettings(vp, skipFetch = false) {
                 <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Checks by itself every day. Tap to check now.</div>
               </div>
               <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Check for new titles</button>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Something wrong?</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Shows what the app did lately. Photograph the screen to send it.</div>
+              </div>
+              <button tabindex="0" id="btnReportProblem" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="openDiagModal()">Report a problem</button>
             </div>
 
           </div>
@@ -8284,7 +8312,19 @@ async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episo
   launchPlayer(directUrl, streamTitle, seekMs / 1000, movieDurationMs / 1000);
 }
 
+// Channel +/- on the remote while a live channel plays: the list the person picked from decides what "next" is
+let liveZapList = [];
+let liveZapCurrentId = null;
+window.zapLiveChannel = async function(dir) {
+  if (!Array.isArray(liveZapList) || liveZapList.length < 2 || liveZapCurrentId == null) return;
+  const i = liveZapList.findIndex(c => String(c.streamId) === String(liveZapCurrentId));
+  if (i < 0) return;
+  const next = liveZapList[(i + dir + liveZapList.length) % liveZapList.length];
+  if (next) await startLivePlayback(next.streamId, next.name);
+};
+
 async function startLivePlayback(streamId, chName) {
+  liveZapCurrentId = streamId;
   const directUrl = await resolveStreamUrl('live', streamId, 'm3u8', true);
   if (!directUrl) return;
 
@@ -9028,6 +9068,38 @@ function openResetPinModal() {
   }
 }
 
+function openDiagModal() {
+  const m = document.getElementById('diagModal');
+  if (!m) return;
+  m.style.display = 'flex';
+  loadDiagText();
+  const c = document.getElementById('btnDiagClose');
+  if (c) c.focus();
+}
+function closeDiagModal() {
+  const m = document.getElementById('diagModal');
+  if (m) m.style.display = 'none';
+  const b = document.getElementById('btnReportProblem');
+  if (b && b.offsetParent !== null) b.focus();
+}
+async function loadDiagText() {
+  const pre = document.getElementById('diagText');
+  if (!pre) return;
+  try {
+    const r = await fetch('/api/diag');
+    const d = r && r.ok ? await r.json() : null;
+    if (!d) { pre.textContent = 'The report is not available on this device.'; return; }
+    const until = d.cloudPausedUntil && d.cloudPausedUntil > Date.now() ? new Date(d.cloudPausedUntil).toLocaleString() : 'no';
+    pre.textContent = [
+      `StreamVault ${d.appVersion}  |  ${d.device}`,
+      `Titles: ${d.titles}  |  with details: ${d.enriched}  |  waiting for the cloud: ${d.cloudPending}  |  cloud paused until: ${until}  |  signed in: ${d.signedIn ? 'yes' : 'no'}`,
+      d.lastCrash ? `Last crash: ${String(d.lastCrash).slice(0, 300)}` : 'No crash recorded.',
+      '--- latest events ---',
+      ...(d.lines && d.lines.length ? d.lines.slice(-22) : ['(nothing recorded yet)'])
+    ].join('\n');
+  } catch (_) { pre.textContent = 'The report could not be loaded.'; }
+}
+
 function closeResetPinModal() {
   const m = document.getElementById('resetPinModal');
   if (m) m.style.display = 'none';
@@ -9246,6 +9318,33 @@ function tvScrollIntoView(el, opts) {
 }
 
 let lastContentFocusTarget = null;
+// Remember where the person was in each tab, so coming back to a tab lands on the same title (not the first one)
+const tabFocusMemory = {};
+let navKeyCounter = 0;
+function focusKeyOf(el) {
+  if (!el) return null;
+  if (el.id) return '#' + el.id;
+  const oc = el.getAttribute && el.getAttribute('onclick');
+  return oc ? 'o:' + oc : null;
+}
+function rememberTabFocus(el) {
+  if (!el || !currentTab) return;
+  const k = focusKeyOf(el);
+  if (k) tabFocusMemory[currentTab] = k;
+}
+document.addEventListener('focusin', (e) => {
+  const t = e.target;
+  if (t && t.closest && t.closest('#mainViewport') && t.classList && t.classList.contains('tv-focusable')) rememberTabFocus(t);
+});
+function findRememberedFocus(keyOverride) {
+  const k = keyOverride || tabFocusMemory[currentTab];
+  const vp = document.getElementById('mainViewport');
+  if (!k || !vp) return null;
+  for (const c of vp.querySelectorAll('.tv-focusable')) {
+    if (c.offsetParent !== null && focusKeyOf(c) === k) return c;
+  }
+  return null;
+}
 let lastMltFocusedCard = null;
 
 function getActiveSidebarElement() {
@@ -9263,7 +9362,7 @@ function getActiveSidebarElement() {
 
 // Every popup that can open over the app. The one on top (highest layer, then latest in the page,
 // exactly what is painted in front) owns the remote control: arrows stay inside it and Back closes it.
-const POPUP_IDS = ['playlistModal', 'cloudAuthModal', 'resetPinModal', 'parentalPinModal', 'signOutModal', 'factoryResetModal',
+const POPUP_IDS = ['diagModal', 'playlistModal', 'cloudAuthModal', 'resetPinModal', 'parentalPinModal', 'signOutModal', 'factoryResetModal',
   'userProfileModal', 'addProfileModal', 'deleteProfileModal', 'deleteHistoryModal', 'clearAllHistoryModal', 'voiceSearchModal'];
 
 function getTopPopup() {
@@ -9286,6 +9385,7 @@ function closeTopPopup(el) {
       if (vp && vp.style.display !== 'none' && vp.style.display !== '') switchCloudAuthPane('form'); else closeCloudAuthModal();
       return true;
     }
+    case 'diagModal': closeDiagModal(); return true;
     case 'playlistModal': closePlaylistModal(); return true;
     case 'resetPinModal': closeResetPinModal(); return true;
     case 'parentalPinModal': closeParentalPinModal(); return true;
@@ -9365,6 +9465,7 @@ function fastNavigate(current, key) {
   if (current.closest && current.closest('#mainViewport')) {
     lastContentFocusTarget = current;
   }
+  navKeyCounter++;
 
   // 0.0. Sign-in / sign-up popup (checked first: it is on top of everything else)
   if (cloudAuthNavigate(current, key)) return true;
@@ -10164,6 +10265,8 @@ tvScrollIntoView(lastContentFocusTarget, { block: 'nearest' });
         playNavSound();
         return true;
       }
+      const remembered = findRememberedFocus();
+      if (remembered) { remembered.focus(); tvScrollIntoView(remembered, { block: 'nearest' }); playNavSound(); return true; }
       const firstTarget = document.querySelector('#mainViewport .hero-actions .btn-primary, #mainViewport .filter-pill-btn, #mainViewport .poster-card, #mainViewport button.tv-focusable, #mainViewport input');
       if (firstTarget) {
         firstTarget.focus();

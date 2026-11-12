@@ -617,6 +617,7 @@ class CatalogSyncEngine(
                         totalToEnrich = total
                     )
                     runCatching { flushPendingCloudUploads() }     // last chance to send anything the cloud refused earlier
+                    DiagLog.add("Details and ratings finished: $enriched of $total titles, ${failedKeys.size} could not be looked up")
                     break
                 }
 
@@ -690,6 +691,7 @@ class CatalogSyncEngine(
 
     /** While the cloud refuses writes (daily limit reached, server error) we stop knocking for a while instead of retrying every batch. */
     @Volatile private var cloudPausedUntil = 0L
+    fun cloudPausedUntilMs(): Long = cloudPausedUntil
 
     /** Sends enriched titles to the cloud. Returns true when every batch was accepted. Titles that were not accepted are remembered and sent later. */
     fun uploadCatalogSyncBatch(items: List<MediaItem>): Boolean {
@@ -754,6 +756,7 @@ class CatalogSyncEngine(
                             val msg = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
                             val dailyLimit = resp.code == 429 || Regex("limit|quota|too many|exceeded|D1_ERROR", RegexOption.IGNORE_CASE).containsMatchIn(msg)
                             cloudPausedUntil = pauseUntilAfterRefusal(System.currentTimeMillis(), dailyLimit)
+                            DiagLog.add("Cloud refused an upload (HTTP ${resp.code}, ${if (dailyLimit) "daily limit" else "other"}); waiting until ${java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(cloudPausedUntil))}")
                             attempt = 3
                         }
                     }
