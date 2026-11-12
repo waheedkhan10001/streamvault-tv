@@ -145,7 +145,13 @@ async function resolve(item) {
 
 (async () => {
   const base = SERVER + '/player_api.php?username=' + encodeURIComponent(USER) + '&password=' + encodeURIComponent(PASS) + '&action=';
-  const get = async (a) => (await getJson(base + a, PASS)).data;
+  const get = async (a) => { // the provider sometimes answers 502 for a moment: wait and try again
+    let last;
+    for (let t = 0; t < 8; t++) {
+      try { return (await getJson(base + a, PASS)).data; } catch (e) { last = e; log('Provider busy (' + redact(e.message, PASS) + '), retrying in ' + 15 * (t + 1) + ' s'); await sleep(15000 * (t + 1)); }
+    }
+    throw last;
+  };
   log('Reading the provider list ...');
   const [vodCats, vod, serCats, ser] = await Promise.all([get('get_vod_categories'), get('get_vod_streams'), get('get_series_categories'), get('get_series')]).catch((e) => { console.log('Provider error: ' + redact(e.message, PASS)); process.exit(1); });
   const cm = (arr) => new Map(arr.map((c) => [String(c.category_id), String(c.category_name ?? '')]));
