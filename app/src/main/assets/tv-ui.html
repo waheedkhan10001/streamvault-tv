@@ -4757,6 +4757,9 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     await loadProfile(vp);
   } else if (tabId === 'SETTINGS') {
     loadSettings(vp);
+    const paintEnrich = () => updateEnrichStatusRow((appStatus && appStatus.syncStatus) || {});
+    setTimeout(paintEnrich, 120);
+    setTimeout(async () => { try { await refreshAppStatus(); } catch (_) {} paintEnrich(); }, 700);
   }
 }
 
@@ -6053,6 +6056,13 @@ async function loadSettings(vp, skipFetch = false) {
               System Maintenance
             </div>
 
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <div>
+                <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Details &amp; ratings</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Loaded once, then only new titles.</div>
+              </div>
+              <span id="settingsEnrichStatus" style="font-size:10px;font-weight:800;text-align:right;max-width:55%;">…</span>
+            </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Catalog</div>
@@ -10576,12 +10586,11 @@ function navigateSpatial(key) {
 
   // Industry-standard direction search (like Android's focus finder):
   //  1. only boxes that lie wholly in that direction count (edge to edge, not centre to centre),
-  //  2. boxes that line up with the current one (they overlap on the other axis) beat boxes that are off to the side,
-  //  3. among those the nearest wins.
+  //  2. among those the nearest wins, boxes that line up with the current one count as a bit closer.
   // This is what makes "Right" go to the right-hand box instead of walking down the left-hand column.
   const R = (el) => el.getBoundingClientRect();
   let bestCandidate = null;
-  let bestBeam = Infinity, bestSide = Infinity;
+  let bestSide = Infinity;
   let sideCandidate = null;
   for (const el of focusables) {
     if (el === current) continue;
@@ -10598,13 +10607,9 @@ function navigateSpatial(key) {
       : Math.min(cRect.bottom, e.bottom) - Math.max(cRect.top, e.top);
     const eCenter = { x: e.left + e.width / 2, y: e.top + e.height / 2 };
     const orthoCenter = vertical ? Math.abs(eCenter.x - cCenter.x) : Math.abs(eCenter.y - cCenter.y);
-    if (overlap > 4) {
-      const score = gap + orthoCenter * 0.25;
-      if (score < bestBeam) { bestBeam = score; bestCandidate = el; }
-    } else {
-      const score = gap + orthoCenter * 2.2;
-      if (score < bestSide) { bestSide = score; sideCandidate = el; }
-    }
+    // nearest first, boxes in line with the current one count as closer; the same weighting the screens were tuned with
+    const score = gap + orthoCenter * (overlap > 4 ? 1.6 : 2.2);
+    if (score < bestSide) { bestSide = score; sideCandidate = el; }
   }
   if (!bestCandidate) bestCandidate = sideCandidate;
   if (!bestCandidate) {
@@ -10800,6 +10805,29 @@ function renderCatalogStrip() {
   el.style.display = 'flex';
   document.body.classList.add('strip-on');
 }
+
+// "Is the one-time details & ratings lookup finished?"  (titles the lookup could not find right now are listed in the phase text)
+let enrichWasRunning = false;
+function enrichmentIsComplete(sync) {
+  if (!sync || sync.isSyncing) return false;
+  return /Catalog Enriched|Details loaded/i.test(String(sync.phase || ''));
+}
+function enrichStatusText(sync) {
+  const enr = Number((sync && sync.enrichedCount) || 0), tot = Number((sync && sync.totalToEnrich) || 0);
+  if (sync && sync.isSyncing) return { text: 'Waiting for the catalogue to finish loading', color: '#9CA3AF' };
+  if (enrichmentIsComplete(sync)) {
+    const missing = Math.max(0, tot - enr);
+    return { text: '✓ Complete — ' + formatCount(enr) + ' titles ready' + (missing ? ' (' + formatCount(missing) + ' not found online)' : ''), color: '#10B981' };
+  }
+  if (tot > 0 && enr < tot) return { text: 'Loading — ' + formatCount(enr) + ' of ' + formatCount(tot) + ' titles. Browsing works meanwhile', color: '#FBBF24' };
+  return { text: tot > 0 ? '✓ Complete' : 'Nothing to load yet', color: tot > 0 ? '#10B981' : '#9CA3AF' };
+}
+function updateEnrichStatusRow(sync) {
+  const el = document.getElementById('settingsEnrichStatus');
+  if (!el) return;
+  const st = enrichStatusText(sync);
+  el.textContent = st.text; el.style.color = st.color;
+}
 async function pollCatalogStrip() {
   let delay = 12000;
   try {
@@ -10808,6 +10836,11 @@ async function pollCatalogStrip() {
       const sync = (appStatus && appStatus.syncStatus) || {};
       if (catalogStripWasSyncing && !sync.isSyncing && sync.note) showToast(escapeHtml(sync.note));
       catalogStripWasSyncing = !!sync.isSyncing;
+      // When the details lookup finishes while the app is open: say so once ("everything is ready")
+      const doneNow = enrichmentIsComplete(sync);
+      if (enrichWasRunning && doneNow) showToast('✓ All set: details and ratings are ready for ' + formatCount(sync.enrichedCount) + ' titles. The app is at full speed.');
+      enrichWasRunning = !doneNow && Number(sync.totalToEnrich || 0) > 0 && !sync.isSyncing;
+      updateEnrichStatusRow(sync);
       renderCatalogStrip();
       if (sync.isSyncing || catalogStripState()) delay = 2500;
     } else {

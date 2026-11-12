@@ -10,6 +10,7 @@ check('engine sends "related" in the detail answer', /put\("related"/.test(kt));
 check('screen reads item.episodes for series', /item\.episodes/.test(ui));
 check('engine puts episodes inside the item', /itemJson\.put\("episodes"/.test(kt));
 check('engine sends episode length (durationSecs)', /put\("durationSecs"/.test(kt));
+check('engine sends the details-lookup total (totalToEnrich) the strip reads', /put\("totalToEnrich"/.test(kt) && /sync\.totalToEnrich/.test(ui));
 const poster = ui.match(/id="detailPosterBox" style="[^"]*height:(\d+)px/);
 const col = ui.match(/id="detailInfoColumn" style="[^"]*min-height:(\d+)px/);
 check('detail poster is as tall as the info column', poster && col && poster[1] === col[1]);

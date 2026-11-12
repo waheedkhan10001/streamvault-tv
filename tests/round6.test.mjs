@@ -25,7 +25,7 @@ async function newApp(browser) {
       handleApiRequestWithAuth: (method, path) => {
         const p = path.split('?')[0]; const J = o => JSON.stringify(o);
         window.__calls.push(p);
-        if (p === '/api/state') return J({ ok: true, totalCatalogCount: 30, syncStatus: {}, credentials: { serverUrl: 'http://x', username: 'u', hasPassword: true }, parentalControl: { isLocked: true, showAdult: false, showExtras: false, hasCustomPin: true } });
+        if (p === '/api/state') return J({ ok: true, totalCatalogCount: 30, syncStatus: window.__sync || {}, credentials: { serverUrl: 'http://x', username: 'u', hasPassword: true }, parentalControl: { isLocked: true, showAdult: false, showExtras: false, hasCustomPin: true } });
         if (p === '/api/session') return J({ ok: true, authenticated: true, token: TOKEN });
         if (p === '/api/auth/me') return J({ ok: true, account, token: TOKEN });
         if (p === '/api/profiles') return J({ ok: true, profiles, activeProfileId: 'p1' });
@@ -98,6 +98,20 @@ async function run() {
   await page.evaluate(() => document.getElementById('l1').focus());
   await press(page, 'ArrowDown', 2);
   check('Down walks down the same column', (await focusInfo(page)) === 'l3', await focusInfo(page));
+
+  console.log('\nDetails & ratings completion indicator');
+  await page.evaluate(() => { window.__sync = { isSyncing: false, phase: 'TMDB Enriching: 3200 / 69800 Titles', enrichedCount: 3200, totalToEnrich: 69800, lastSyncTimestamp: 1 }; });
+  await page.evaluate(async () => { await refreshAppStatus(); updateEnrichStatusRow(appStatus.syncStatus); });
+  await page.evaluate(() => window.navigateToTab('SETTINGS')); await sleep(1300);
+  let st = await page.evaluate(() => document.getElementById('settingsEnrichStatus')?.innerText || '');
+  check('Settings shows the progress while loading', /Loading — 3,200 of 69,800/.test(st), st);
+  await page.evaluate(() => { window.__sync = { isSyncing: false, phase: '100% Catalog Enriched (69800 Titles Ready)', enrichedCount: 69800, totalToEnrich: 69800, lastSyncTimestamp: 1 }; });
+  await page.evaluate(async () => { enrichWasRunning = true; await pollCatalogStrip(); });
+  await sleep(250);
+  st = await page.evaluate(() => document.getElementById('settingsEnrichStatus')?.innerText || '');
+  const toast = await page.evaluate(() => { const e = document.getElementById('tvToastNotification'); return e ? e.innerText : ''; });
+  check('Settings shows "Complete" when everything is loaded', /Complete — 69,800 titles ready/.test(st), st);
+  check('a one-time "All set" message appears when the lookup finishes', /All set/.test(toast), toast);
 
   console.log('\nThemes change the whole look');
   const look = async t => { await page.evaluate(k => applyProfileTheme(k), t); await sleep(80); return page.evaluate(() => { const cs = getComputedStyle(document.body); const sb = getComputedStyle(document.querySelector('.sidebar')); return { bg: cs.backgroundColor, panel: sb.backgroundColor }; }); };

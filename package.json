@@ -4,7 +4,7 @@
   "description": "StreamVault TV IPTV Client for Android TV (TCL 55P635, Android 11)",
   "type": "module",
   "scripts": {
-    "test": "node tests/phaseA.test.mjs && node tests/phaseB.test.mjs && node tests/phaseC.test.mjs && node tests/phaseD.test.mjs && node tests/phaseE.test.mjs && node --no-warnings tests/round2.test.mjs && node tests/round2ui.test.mjs && node tests/welcomeSignup.test.mjs && node tests/popupFocus.test.mjs && node tests/screenSweep.test.mjs && node tests/filters.test.mjs && node --no-warnings tests/pairing.test.mjs && node --no-warnings tests/playlists.test.mjs && node tests/vaults.test.mjs && node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs && node tests/contract.test.mjs && node tests/playback.test.mjs && node tests/strip.test.mjs && npm run test:sidebar && npm run test:series && npm run test:detailfocus && npm run test:theme && npm run test:scrollfast",
+    "test": "node tests/phaseA.test.mjs && node tests/phaseB.test.mjs && node tests/phaseC.test.mjs && node tests/phaseD.test.mjs && node tests/phaseE.test.mjs && node --no-warnings tests/round2.test.mjs && node tests/round2ui.test.mjs && node tests/welcomeSignup.test.mjs && node tests/popupFocus.test.mjs && node tests/screenSweep.test.mjs && node tests/filters.test.mjs && node --no-warnings tests/pairing.test.mjs && node --no-warnings tests/playlists.test.mjs && node tests/vaults.test.mjs && node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs && node tests/contract.test.mjs && node tests/playback.test.mjs && node tests/strip.test.mjs && npm run test:sidebar && npm run test:series && npm run test:detailfocus && npm run test:theme && npm run test:scrollfast && node tests/round6.test.mjs",
     "test:tmdbcache": "node --no-warnings tests/tmdbcache.test.mjs",
     "test:latest": "node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs",
     "test:vaults": "node tests/vaults.test.mjs && node tests/latest.test.mjs && node --no-warnings tests/tmdbcache.test.mjs",
@@ -27,7 +27,8 @@
     "test:series": "node tests/series.test.mjs",
     "test:detailfocus": "node tests/detailfocus.test.mjs",
     "test:theme": "node tests/theme.test.mjs",
-    "test:scrollfast": "node tests/scrollfast.test.mjs"
+    "test:scrollfast": "node tests/scrollfast.test.mjs",
+    "test:round6": "node tests/round6.test.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^22.0.0"

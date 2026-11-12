@@ -740,6 +740,16 @@ class StreamVaultDatabase(context: Context) :
         db.rawQuery("SELECT changes()", null).use { c -> return if (c.moveToFirst()) c.getInt(0) else 0 }
     }
 
+    @Volatile private var enrichCountCache: Triple<Int, Int, Long>? = null
+    /** Same numbers, but counted at most once every few seconds: the screen asks for them all the time and counting 70k rows is not free. */
+    fun getEnrichmentCountsCached(maxAgeMs: Long = 6000L): Pair<Int, Int> {
+        val c = enrichCountCache
+        if (c != null && System.currentTimeMillis() - c.third < maxAgeMs) return Pair(c.first, c.second)
+        val fresh = getEnrichmentCounts()
+        enrichCountCache = Triple(fresh.first, fresh.second, System.currentTimeMillis())
+        return fresh
+    }
+
     fun getEnrichmentCounts(): Pair<Int, Int> {
         val db = readableDatabase
         var total = 0

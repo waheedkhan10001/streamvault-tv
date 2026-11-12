@@ -136,7 +136,7 @@ class AppApiRouter(
 
     private fun handleGetState(): String {
         val creds = prefs.loadCredentials()
-        val (enriched, total) = db.getEnrichmentCounts()
+        val (enriched, total) = db.getEnrichmentCountsCached()
         val syncState = syncEngine.syncState.value
         val activeProf = getActiveUserProfile()
         val allProfiles = db.getProfiles(prefs.getAccountDisplayName())
@@ -164,6 +164,7 @@ class AppApiRouter(
             put("totalMovies", total)
             put("totalSeries", 0)
             put("enrichedCount", enriched)
+            put("totalToEnrich", total)
             put("percentComplete", if (total > 0) (enriched * 100) / total else 100)
             put("stage", syncState.stage)
             put("processedItems", syncState.processedItems)
