@@ -9375,6 +9375,22 @@ function fastNavigate(current, key) {
   const topPopup = getTopPopup();
   if (topPopup && topPopup.id !== 'playlistModal' && !topPopup.contains(current)) return false;
 
+  // Profile page: the theme chips, the Kids-mode switch and Save sit in a fixed order, so Up/Down follows it on every screen size.
+  if (!topPopup && (key === 'ArrowDown' || key === 'ArrowUp')) {
+    const kids = document.getElementById('btnToggleKidsMode');
+    const save = document.getElementById('btnSaveProfile');
+    if (kids && save && kids.offsetParent && save.offsetParent) {
+      if (current.classList && current.classList.contains('profile-theme-chip') && key === 'ArrowDown') { kids.focus(); playNavSound(); return true; }
+      if (current === kids && key === 'ArrowDown') { save.focus(); playNavSound(); return true; }
+      if (current === kids && key === 'ArrowUp') {
+        const chips = Array.from(document.querySelectorAll('.profile-theme-chip'));
+        const t = chips.find(c => c.classList.contains('selected') || c.classList.contains('active')) || chips[0];
+        if (t) { t.focus(); playNavSound(); return true; }
+      }
+      if (current === save && key === 'ArrowUp') { kids.focus(); playNavSound(); return true; }
+    }
+  }
+
   // 0.1. Welcome Screen Overlay Navigation Flow
   const welcomeOverlay = document.getElementById('welcomeScreenOverlay');
   if (!topPopup && welcomeOverlay && welcomeOverlay.style.display === 'flex') {
