@@ -599,6 +599,10 @@ class CatalogSyncEngine(
         enrichJob = scope.launch(enrichDispatcher) {
             val creds = prefs.loadCredentials()
             val apiKey = creds.tmdbApiKey.ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY }
+            // First run on a new TV / after a reinstall: take the TMDB ids from the account (once, only when it completes)
+            if (!prefs.getFlag("cloud_ids_pulled_v1") && !prefs.getAuthToken().isNullOrBlank()) {
+                if (runCatching { pullTmdbIdsFromCloud() }.getOrNull() != null) prefs.setFlag("cloud_ids_pulled_v1")
+            }
             runCatching { flushPendingCloudUploads() }     // details the cloud could not take earlier
 
             // Titles whose lookup failed in this run are skipped for now (retried next start). Without this, the same
@@ -803,6 +807,49 @@ class CatalogSyncEngine(
                 httpClient.newCall(req).execute().close()
             } catch (_: Exception) {}
         }
+    }
+
+    /**
+     * New TV / reinstall: asks the cloud copy for the TMDB id of each title (ids only, read-only, 200 per request) so the
+     * one-by-one searches are skipped and the details come from the shared cache. Returns how many titles got an id,
+     * or null when it could not finish (it is then tried again next time).
+     */
+    fun pullTmdbIdsFromCloud(): Int? {
+        val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return null
+        val cloudBase = prefs.getCloudSyncBaseUrl()
+        var afterUpdated = 0L
+        var afterItem = ""
+        var first = true
+        var filled = 0
+        var pages = 0
+        while (pages++ < 2000) {
+            val url = "$cloudBase/api/catalog/pull?limit=200" +
+                (if (first) "" else "&after_updated=$afterUpdated&after_item=" + URLEncoder.encode(afterItem, "UTF-8"))
+            val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+            try {
+                val more = httpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return null
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    val arr = json.optJSONArray("items") ?: JSONArray()
+                    val pairs = ArrayList<Pair<String, Int>>(arr.length())
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        if (o.optBoolean("isRemoved", false)) continue
+                        pairs.add(o.optString("dedupKey") to o.optInt("tmdbId", 0))
+                    }
+                    filled += db.fillMissingTmdbIds(pairs)
+                    afterUpdated = json.optLong("nextAfterUpdated", afterUpdated)
+                    afterItem = json.optString("nextAfterItem", afterItem)
+                    json.optBoolean("hasMore", false) && afterItem.isNotEmpty()
+                }
+                first = false
+                if (!more) break
+            } catch (e: Exception) {
+                return null
+            }
+        }
+        DiagLog.add("Cloud ids: $filled titles got their TMDB id from the account")
+        return filled
     }
 
     fun pullCatalogFromCloud(onProgress: (Int, Int) -> Unit = { _, _ -> }): Int {

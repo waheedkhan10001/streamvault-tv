@@ -731,6 +731,32 @@ class StreamVaultDatabase(context: Context) :
         }
     }
 
+    /**
+     * A new TV only learns the TMDB id of each title from the cloud copy (nothing else: the cloud copy may still hold old
+     * provider ratings). Titles that already have an id are left alone. Returns how many titles got an id.
+     */
+    fun fillMissingTmdbIds(pairs: List<Pair<String, Int>>): Int {
+        if (pairs.isEmpty()) return 0
+        val db = writableDatabase
+        var filled = 0
+        db.beginTransaction()
+        try {
+            val st = db.compileStatement("UPDATE media_items SET tmdb_id = ? WHERE dedup_key = ? AND (tmdb_id IS NULL OR tmdb_id = 0)")
+            for ((key, id) in pairs) {
+                if (id <= 0 || key.isBlank()) continue
+                st.clearBindings()
+                st.bindLong(1, id.toLong())
+                st.bindString(2, key)
+                filled += st.executeUpdateDelete()
+            }
+            st.close()
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return filled
+    }
+
     /** Titles with no TMDB votes and no rating were only "described" by the provider: send them to TMDB too. */
     fun requeueProviderOnlyTitles(): Int {
         val db = writableDatabase
