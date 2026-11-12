@@ -119,15 +119,28 @@ async function resolve(item) {
     if (!best) { item.status = 'notfound'; return; }
     id = best.id;
   }
-  const d = await tmdb((isTv ? '/tv/' : '/movie/') + id, { append_to_response: append });
-  if (!d) { item.status = 'notfound'; item.method = method; return; }
-  item.method = method; item.rec = slim(d, item.type);
   const names = variants(g.raw, g.clean);
-  const ts = Math.max(0, ...names.map((n) => Math.max(sim(n, item.rec.t), sim(n, item.rec.ot))));
-  // a series name carries the year of the LATEST season, TMDB keeps the first year, so only a later name year is fine
-  const yearOk = !g.year || !item.rec.y || (isTv ? g.year >= item.rec.y - 1 : Math.abs(g.year - item.rec.y) <= 1);
-  item.sim = ts; item.yearOk = yearOk;
-  item.status = (ts >= 0.6 && yearOk) ? 'confident' : (method === 'id' && ts >= 0.9 && isTv) ? 'confident' : 'doubtful';
+  const judge = (rec) => {
+    const ts = Math.max(0, ...names.map((n) => Math.max(sim(n, rec.t), sim(n, rec.ot))));
+    // a series name carries the year of the LATEST season, TMDB keeps the first year, so only a later name year is fine
+    const yearOk = !g.year || !rec.y || (isTv ? g.year >= rec.y - 1 : Math.abs(g.year - rec.y) <= 1);
+    return { ts, yearOk };
+  };
+  const load = async (tid) => { const d = await tmdb((isTv ? '/tv/' : '/movie/') + tid, { append_to_response: append }); return d ? slim(d, item.type) : null; };
+  const rec = await load(id);
+  if (!rec) { item.status = 'notfound'; item.method = method; return; }
+  let j = judge(rec);
+  item.method = method; item.rec = rec;
+  // the provider's id points at a film whose name does not fit at all: it is probably wrong, so search by name instead
+  if (method === 'id' && j.ts < 0.3) {
+    const best = await searchBest(isTv, g.year || 0, names);
+    if (best && best.id !== id) {
+      const r2 = await load(best.id);
+      if (r2) { const j2 = judge(r2); if (j2.ts >= 0.6 && j2.yearOk) { item.rec = r2; item.method = 'search'; item.fixedId = true; j = j2; } }
+    }
+  }
+  item.sim = j.ts; item.yearOk = j.yearOk;
+  item.status = (j.ts >= 0.6 && j.yearOk) ? 'confident' : (item.method === 'id' && j.ts >= 0.9 && isTv) ? 'confident' : 'doubtful';
 }
 
 (async () => {
@@ -179,6 +192,7 @@ async function resolve(item) {
   add('Provider gave a TMDB id: ' + fmt(by('id')) + '   found by name+year search: ' + fmt(by('search')) + '   not found at all: ' + fmt(by(null, 'notfound')));
   add('Found by search -> confident (name and year agree): ' + fmt(items.filter((x) => x.method === 'search' && x.status === 'confident').length) + '   doubtful (name or year disagree): ' + fmt(items.filter((x) => x.method === 'search' && x.status === 'doubtful').length));
   add('Provider id used -> name and year agree: ' + fmt(items.filter((x) => x.method === 'id' && x.status === 'confident').length) + '   disagree (provider id may be wrong): ' + fmt(items.filter((x) => x.method === 'id' && x.status === 'doubtful').length));
+  add('Provider id looked wrong (name did not fit) and was replaced by a name search: ' + fmt(items.filter((x) => x.fixedId).length));
   add('Titles with no year in the provider name: ' + fmt(items.filter((x) => !x.g.year).length) + '   of those found by search and doubtful: ' + fmt(items.filter((x) => !x.g.year && x.method === 'search' && x.status === 'doubtful').length));
   add('');
   add('== DATABASE SIZE (title, year, plot, cast, director, genres, ratings, age rating, ids) ==');
