@@ -1435,6 +1435,16 @@ const server = http.createServer(async (req, res) => {
     return res.end(fs.readFileSync(htmlPath, 'utf8'));
   }
 
+  // The screen's style sheet and script files (the single big page was split into these)
+  if (req.method === 'GET' && /^\/ui\/[A-Za-z0-9._-]+\.(js|css)$/.test(pathname)) {
+    const f = path.join(__dirname, '../app/src/main/assets', pathname);
+    const alt = path.join(__dirname, pathname.slice(1));
+    const use = fs.existsSync(f) ? f : alt;
+    if (!fs.existsSync(use)) { res.writeHead(404); return res.end('not found'); }
+    res.writeHead(200, { 'Content-Type': pathname.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/javascript; charset=utf-8' });
+    return res.end(fs.readFileSync(use));
+  }
+
   if (req.method === 'GET' && pathname === '/phone') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(buildPhonePortalHtml());

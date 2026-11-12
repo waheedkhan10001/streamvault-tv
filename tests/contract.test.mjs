@@ -2,7 +2,10 @@
 // so we check the names it sends against the names the screen reads).
 import fs from 'node:fs';
 const kt = fs.readFileSync(new URL('../app/src/main/java/com/streamvault/tv/data/AppApiRouter.kt', import.meta.url), 'utf8');
-const ui = fs.readFileSync(new URL('../app/src/main/assets/tv-ui.html', import.meta.url), 'utf8');
+// the screen is one page plus its style/script files (ui/*.js): read them together
+const assetsDir = new URL('../app/src/main/assets/', import.meta.url);
+const ui = fs.readFileSync(new URL('tv-ui.html', assetsDir), 'utf8') +
+  fs.readdirSync(new URL('ui/', assetsDir)).sort().map(f => fs.readFileSync(new URL('ui/' + f, assetsDir), 'utf8')).join('\n');
 let bad = 0;
 const check = (n, ok) => { console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${n}`); if (!ok) bad++; };
 check('screen reads "related" for More Like This', /data\.related/.test(ui));
