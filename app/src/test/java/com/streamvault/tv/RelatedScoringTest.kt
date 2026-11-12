@@ -3,6 +3,7 @@ package com.streamvault.tv
 import com.streamvault.tv.data.MediaItem
 import com.streamvault.tv.data.MediaType
 import com.streamvault.tv.data.RelatedScoring
+import com.streamvault.tv.data.Taste
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -71,5 +72,35 @@ class RelatedScoringTest {
         assertNull(RelatedScoring.score(base, urdu, "setting"))
         val en = m("e", "Drama2", genres = listOf("Drama"), lang = "English", year = 1998)
         assertNotNull(RelatedScoring.score(base, en, "setting"))
+    }
+
+    @Test fun aTitleWithOneGenreCanStillMatchTitlesWithThatGenre() {
+        val doc = m("doc", "Planet", genres = listOf("Documentary"))
+        val other = m("doc2", "Oceans", genres = listOf("Documentary"))
+        assertNotNull(RelatedScoring.score(doc, other, "everything"))
+    }
+
+    @Test fun aTitleWithoutDetailsUsesItsProviderCategory() {
+        val raw = m("r1", "Unknown Film").copy(categoryName = "HOLLYWOOD ACTION")
+        val sameCat = m("r2", "Another").copy(categoryName = "HOLLYWOOD ACTION")
+        val otherCat = m("r3", "Third").copy(categoryName = "ARABIC DRAMA")
+        assertNotNull(RelatedScoring.score(raw, sameCat, "everything"))
+        assertNull(RelatedScoring.score(raw, otherCat, "everything"))
+    }
+
+    @Test fun ownStarRatingsNudgeSuggestions() {
+        val cand = m("t1", "Heist", genres = listOf("Crime", "Thriller"), year = 1990)
+        val plain = RelatedScoring.score(base, cand, "everything")!!
+        val likes = Taste(setOf("Crime", "Thriller"), emptySet(), emptySet())
+        val dislikes = Taste(emptySet(), setOf("Crime", "Thriller"), emptySet())
+        assertTrue(RelatedScoring.score(base, cand, "everything", likes)!! > plain)
+        val down = RelatedScoring.score(base, cand, "everything", dislikes)
+        assertTrue(down == null || down < plain)
+    }
+
+    @Test fun tasteNeverCreatesAMatchFromNothing() {
+        val unrelated = m("u1", "Cartoon", genres = listOf("Animation"), year = 1960)
+        val likes = Taste(setOf("Animation"), emptySet(), emptySet())
+        assertNull(RelatedScoring.score(base, unrelated, "everything", likes))
     }
 }

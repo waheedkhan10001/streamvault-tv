@@ -19,6 +19,14 @@ class PreferencesManager(context: Context) {
     // Strict 1-Connection Lock: true whenever ExoPlayer is actively streaming
     val isPlaybackActive = AtomicBoolean(false)
 
+    // Last time the person did something on screen (opened a tab, a title, a filter...). Background work such as the
+    // details lookup waits while this is recent, so the app stays quick under the remote. Status polling does not count.
+    @Volatile var lastUiActivityAt: Long = 0L
+    fun getFlag(name: String): Boolean = prefs.getBoolean("flag_$name", false)
+    fun setFlag(name: String) { prefs.edit().putBoolean("flag_$name", true).apply() }
+    fun noteUiActivity() { lastUiActivityAt = System.currentTimeMillis() }
+    fun msSinceUiActivity(): Long = System.currentTimeMillis() - lastUiActivityAt
+
     // Session-only 18+ Vault Unlock (Never persisted to disk, localStorage or cloud!)
     private val adultVaultUnlockedSession = AtomicBoolean(false)
     private val extrasUnlockedSession = AtomicBoolean(false)

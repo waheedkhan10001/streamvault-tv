@@ -5,6 +5,7 @@ import android.util.JsonToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -442,7 +443,7 @@ class CatalogSyncEngine(
                         categoryId = categoryId,
                         categoryName = catName,
                         addedTimestamp = addedTs,
-                        isEnriched = plot.isNotBlank() && serverGenres.isNotEmpty(),
+                        isEnriched = false,   // provider text is only a fallback: every title still gets its TMDB rating, age rating and cast
                         versions = listOf(version)
                     )
                 } else {
@@ -451,7 +452,7 @@ class CatalogSyncEngine(
                     val mergedGenres = (existing.genres + combinedGenres).distinct()
                     val mergedVersions = existing.versions + version
                     val bestPoster = if (existing.posterUrl.isNotBlank()) existing.posterUrl else poster
-                    val bestRating = maxOf(existing.rating, rating.coerceIn(0.0, 10.0))
+                    val bestRating = existing.rating   // the IPTV provider's own rating is never used (TMDB fills it later)
                     val bestAdded = maxOf(existing.addedTimestamp, addedTs)
                     target[parsed.dedupKey] = existing.copy(
                         qualityBadges = mergedQualities,
@@ -573,14 +574,29 @@ class CatalogSyncEngine(
      */
     /** App start: if the last enrichment was cut short (app closed, TV switched off), carry on where it stopped. */
     fun resumeEnrichmentIfNeeded() {
+        // One time: titles that earlier versions marked "done" from provider text alone (no TMDB rating/votes) go back in the queue
+        if (!prefs.getFlag("requeue_provider_enriched_v1")) {
+            runCatching { db.requeueProviderOnlyTitles() }
+            prefs.setFlag("requeue_provider_enriched_v1")
+        }
         val (enriched, total) = db.getEnrichmentCounts()
         if (total > 0 && enriched < total) startBackgroundTmdbEnrichment()
         else if (db.countCloudPending() > 0) scope.launch(Dispatchers.IO) { runCatching { flushPendingCloudUploads() } }
     }
 
+    // The details lookup runs on its own low-priority thread and steps aside while the person is using the app,
+    // so it can no longer make every screen slow.
+    private val enrichDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "sv-enrich").apply { priority = Thread.MIN_PRIORITY; isDaemon = true }
+    }.asCoroutineDispatcher()
+
+    private suspend fun waitUntilQuiet() {
+        while (kotlin.coroutines.coroutineContext.isActive && (prefs.msSinceUiActivity() < 2500L || prefs.isPlaybackActive.get())) delay(400)
+    }
+
     fun startBackgroundTmdbEnrichment(onProgress: () -> Unit = {}) {
         if (enrichJob?.isActive == true) return
-        enrichJob = scope.launch(Dispatchers.IO) {
+        enrichJob = scope.launch(enrichDispatcher) {
             val creds = prefs.loadCredentials()
             val apiKey = creds.tmdbApiKey.ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY }
             runCatching { flushPendingCloudUploads() }     // details the cloud could not take earlier
@@ -620,6 +636,7 @@ class CatalogSyncEngine(
                 for (item in queue) {
                     if (!isActive) break
                     if (item.dedupKey in fromCache) continue
+                    waitUntilQuiet()
                     val enrichedOk = enrichSingleItemFromTmdb(item, apiKey)
                     if (!enrichedOk && !prefs.isPlaybackActive.get() && creds.isConfigured) {
                         // Gentle fallback to IPTV server VOD info only when not playing video
@@ -637,12 +654,15 @@ class CatalogSyncEngine(
                     }
                     updatedInBatch++
                     if (updatedInBatch % 25 == 0) {
-                        val (enriched, total) = db.getEnrichmentCounts()
-                        _syncState.value = _syncState.value.copy(
-                            phase = "TMDB Enriching: $enriched / $total Titles",
-                            enrichedCount = enriched,
-                            totalToEnrich = total
-                        )
+                        // counting 70k rows is not free: do it every 100 titles, not every 25
+                        if (updatedInBatch % 100 == 0) {
+                            val (enriched, total) = db.getEnrichmentCounts()
+                            _syncState.value = _syncState.value.copy(
+                                phase = "TMDB Enriching: $enriched / $total Titles",
+                                enrichedCount = enriched,
+                                totalToEnrich = total
+                            )
+                        }
                         if (enrichedBatch.isNotEmpty()) {
                             uploadCatalogSyncBatch(enrichedBatch.toList())
                             enrichedBatch.clear()
@@ -656,6 +676,15 @@ class CatalogSyncEngine(
                 }
                 onProgress()
             }
+        }
+    }
+
+    companion object {
+        /** When to try the cloud again after it refused a write: next reset of the daily limit, or a short pause. */
+        fun pauseUntilAfterRefusal(nowMs: Long, dailyLimit: Boolean): Long {
+            if (!dailyLimit) return nowMs + 10 * 60 * 1000L
+            val day = 24 * 60 * 60 * 1000L
+            return (nowMs / day + 1) * day + 2 * 60 * 1000L   // 2 minutes after 00:00 UTC
         }
     }
 
@@ -720,8 +749,11 @@ class CatalogSyncEngine(
                         } else if (resp.code == 401) {
                             return false
                         } else {
-                            // refused (for example the cloud's daily write limit): no point retrying right now
-                            cloudPausedUntil = System.currentTimeMillis() + 10 * 60 * 1000L
+                            // Refused. If it is the cloud's daily write limit (resets at 00:00 UTC = 05:00 Karachi), wait for the reset;
+                            // any other refusal is retried after a short pause.
+                            val msg = runCatching { resp.body?.string().orEmpty() }.getOrDefault("")
+                            val dailyLimit = resp.code == 429 || Regex("limit|quota|too many|exceeded|D1_ERROR", RegexOption.IGNORE_CASE).containsMatchIn(msg)
+                            cloudPausedUntil = pauseUntilAfterRefusal(System.currentTimeMillis(), dailyLimit)
                             attempt = 3
                         }
                     }

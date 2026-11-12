@@ -876,6 +876,54 @@ class MainActivity : Activity() {
         renderAudioSubDrawer()
     }
 
+    private val subtitleService by lazy { com.streamvault.tv.data.SubtitleService(this) }
+
+    /**
+     * Online subtitles for a movie or episode, fetched when playback starts (not for the whole catalogue).
+     * Up to three languages (English, Urdu, Hindi, Arabic in that order of preference). The result is remembered on the TV,
+     * so Resume and replays need no network at all. Returns an empty list when nothing is found: playback never waits long.
+     */
+    private fun loadOnlineSubtitleConfigs(dedupKey: String, title: String): List<MediaItem.SubtitleConfiguration> {
+        if (dedupKey.startsWith("live:")) return emptyList()
+        val item = runCatching { db.getItemByDedupKey(dedupKey) }.getOrNull() ?: return emptyList()
+        val sxe = Regex("""\bS(\d+)\s*E(\d+)\b""").find(title)
+        val season = sxe?.groupValues?.get(1)?.toIntOrNull()
+        val episode = sxe?.groupValues?.get(2)?.toIntOrNull()
+        if (item.mediaType == com.streamvault.tv.data.MediaType.SERIES && (season == null || episode == null)) return emptyList()
+        val cacheFile = java.io.File(cacheDir, "subs_${dedupKey.replace(Regex("[^a-zA-Z0-9_-]"), "_")}_${season ?: 0}_${episode ?: 0}.json")
+        return runCatching {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeoutOrNull(9000L) {
+                    var tracks: List<com.streamvault.tv.data.SubtitleTrackItem> = emptyList()
+                    if (cacheFile.exists() && cacheFile.length() > 2) {
+                        val arr = org.json.JSONArray(cacheFile.readText())
+                        tracks = (0 until arr.length()).map { i ->
+                            val o = arr.getJSONObject(i)
+                            com.streamvault.tv.data.SubtitleTrackItem(o.getString("id"), o.getString("name"), o.getString("lang"), o.getString("name"), false, o.getString("url"), o.optString("format", "srt"))
+                        }
+                    } else {
+                        val found = subtitleService.searchOnlineSubtitles(item.tmdbId, item.imdbId, season, episode, listOf("en", "ur", "hi", "ar"))
+                        tracks = listOf("en", "ur", "hi", "ar").mapNotNull { l -> found.firstOrNull { it.languageCode == l } }.take(3)
+                        if (tracks.isNotEmpty()) {
+                            val arr = org.json.JSONArray()
+                            tracks.forEach { t -> arr.put(org.json.JSONObject().put("id", t.id).put("name", t.languageName).put("lang", t.languageCode).put("url", t.downloadUrl).put("format", t.format)) }
+                            cacheFile.writeText(arr.toString())
+                        }
+                    }
+                    tracks.mapIndexedNotNull { i, t ->
+                        val f = subtitleService.downloadAndPrepareSubtitleFile(t) ?: return@mapIndexedNotNull null
+                        MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(f))
+                            .setMimeType(if (t.format.equals("vtt", true)) MimeTypes.TEXT_VTT else MimeTypes.APPLICATION_SUBRIP)
+                            .setLanguage(t.languageCode)
+                            .setLabel(t.languageName)
+                            .setSelectionFlags(if (i == 0) C.SELECTION_FLAG_DEFAULT else 0)
+                            .build()
+                    }
+                } ?: emptyList()
+            }
+        }.getOrDefault(emptyList())
+    }
+
     private fun startNativeExoPlayer(url: String, title: String, startMs: Long, dedupKey: String, expectedDurationMs: Long = 0L, containerExt: String = "") {
         isPlayingVideo = true
         currentDedupKey = dedupKey
@@ -929,6 +977,8 @@ class MainActivity : Activity() {
                 Log.w("StreamVault", "Redirect resolution notice: ${e.message}")
             }
 
+            val onlineSubs = loadOnlineSubtitleConfigs(dedupKey, title)
+
             runOnUiThread {
                 if (!isPlayingVideo) return@runOnUiThread
 
@@ -950,6 +1000,7 @@ class MainActivity : Activity() {
 
                 val mediaItemBuilder = MediaItem.Builder()
                     .setUri(Uri.parse(finalPlayUrl))
+                if (onlineSubs.isNotEmpty()) mediaItemBuilder.setSubtitleConfigurations(onlineSubs)
 
                 if (isMkv) {
                     mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_MATROSKA)

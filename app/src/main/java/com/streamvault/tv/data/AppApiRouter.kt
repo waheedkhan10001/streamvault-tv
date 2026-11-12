@@ -22,6 +22,9 @@ class AppApiRouter(
         val queryString = if (fullPath.contains("?")) fullPath.substringAfter("?") else ""
         val queryParams = parseQueryParams(queryString)
 
+        // Anything the person causes counts as activity; the screen's own status polling does not.
+        if (path != "/api/state" && path != "/api/sync/status" && path != "/api/progress") prefs.noteUiActivity()
+
         val token = authHeader?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotBlank() }
         val hasSession = !token.isNullOrBlank() || prefs.hasActiveSession()
 

@@ -731,6 +731,15 @@ class StreamVaultDatabase(context: Context) :
         }
     }
 
+    /** Titles with no TMDB votes and no rating were only "described" by the provider: send them to TMDB too. */
+    fun requeueProviderOnlyTitles(): Int {
+        val db = writableDatabase
+        // a rating with no votes can only have come from the provider (the "10" some new titles showed): clear it
+        db.execSQL("UPDATE media_items SET rating = 0.0 WHERE vote_count = 0 AND rating > 0.0")
+        db.execSQL("UPDATE media_items SET is_enriched = 0 WHERE is_enriched = 1 AND vote_count = 0 AND rating = 0.0 AND is_adult = 0 AND is_extra = 0")
+        db.rawQuery("SELECT changes()", null).use { c -> return if (c.moveToFirst()) c.getInt(0) else 0 }
+    }
+
     fun getEnrichmentCounts(): Pair<Int, Int> {
         val db = readableDatabase
         var total = 0
@@ -1032,18 +1041,18 @@ class StreamVaultDatabase(context: Context) :
         profileId: String = "",
         offset: Int = 0
     ): List<MediaItem> {
-        if (item.genres.isEmpty() && item.director.isBlank() && item.cast.isEmpty()) return emptyList()
         val db = readableDatabase
         val kidsClause = if (isKids) "AND " + ContentCertifications.kidsClause("m.certification") else ""
 
-        // Each condition is 1 when it matches; summing them lets the BEST matches fill the candidate pool
-        // (not just the 300 highest-rated titles that share one genre).
+        // Each condition is 1 when it matches; the sum is computed ONCE per row (not twice) and lets the BEST matches fill
+        // the candidate pool. A title that has no genres yet (details not loaded) is matched by its provider category instead.
         val conds = mutableListOf<String>()
         val condArgs = mutableListOf<String>()
-        item.genres.take(4).forEach { conds.add("('|' || m.genres_text || '|' LIKE ?)"); condArgs.add("%|$it|%") }
+        item.genres.take(3).forEach { conds.add("('|' || m.genres_text || '|' LIKE ?)"); condArgs.add("%|$it|%") }
         if (item.director.isNotBlank()) { conds.add("(m.director != '' AND m.director = ?)"); condArgs.add(item.director) }
-        item.cast.take(3).forEach { conds.add("(m.cast_text LIKE ?)"); condArgs.add("%$it%") }
+        item.cast.take(2).forEach { conds.add("(m.cast_text LIKE ?)"); condArgs.add("%$it%") }
         if (matchMode == "setting" && item.language.isNotBlank()) { conds.add("(m.language = ?)"); condArgs.add(item.language) }
+        if (item.genres.isEmpty() && item.categoryName.isNotBlank()) { conds.add("(m.category_name = ?)"); condArgs.add(item.categoryName) }
         if (conds.isEmpty()) return emptyList()
 
         val hasProfile = profileId.isNotBlank()
@@ -1056,26 +1065,51 @@ class StreamVaultDatabase(context: Context) :
             "media_items m LEFT JOIN profile_media_state pms ON pms.dedup_key = m.dedup_key AND pms.profile_id = ?"
         } else "media_items m"
         val args = mutableListOf<String>()
+        args.addAll(condArgs)         // the match-count column comes first in the statement
         if (hasProfile) args.add(profileId)
         args.add(item.mediaType.name)
         args.add(item.dedupKey)
-        args.addAll(condArgs)         // WHERE ... OR-list
-        args.addAll(condArgs)         // ORDER BY match count
 
         val matchCount = conds.joinToString(" + ")
         val cursor = db.rawQuery(
-            "SELECT $selectSql FROM $fromSql WHERE m.media_type = ? AND m.dedup_key != ? AND m.is_adult = 0 AND m.is_extra = 0 $kidsClause " +
-                "AND (" + conds.joinToString(" OR ") + ") ORDER BY ($matchCount) DESC, m.rating DESC, m.year DESC LIMIT 900",
+            "SELECT * FROM (SELECT $selectSql, ($matchCount) AS match_count FROM $fromSql " +
+                "WHERE m.media_type = ? AND m.dedup_key != ? AND m.is_adult = 0 AND m.is_extra = 0 $kidsClause) " +
+                "WHERE match_count > 0 ORDER BY match_count DESC, rating DESC, year DESC LIMIT 600",
             args.toTypedArray()
         )
         val candidates = readMediaList(cursor)
+        val taste = if (hasProfile) loadTaste(profileId) else null
         data class Scored(val m: MediaItem, val score: Int)
         val scored = candidates.mapNotNull { cand ->
             if (hideWatched && cand.isWatched) return@mapNotNull null
-            RelatedScoring.score(item, cand, matchMode)?.let { Scored(cand, it) }
+            RelatedScoring.score(item, cand, matchMode, taste)?.let { Scored(cand, it) }
         }
         return scored.sortedByDescending { RelatedScoring.sortKey(it.score, it.m.rating) }
             .drop(offset).take(limit).map { it.m }
+    }
+
+    /** What this profile's own star ratings say (4-5 stars liked, 1-2 stars disliked). Null when the profile has rated nothing. */
+    fun loadTaste(profileId: String): Taste? {
+        val liked = HashSet<String>(); val disliked = HashSet<String>(); val people = HashSet<String>()
+        readableDatabase.rawQuery(
+            "SELECT m.genres_text, m.director, m.cast_text, pms.user_rating FROM profile_media_state pms " +
+                "JOIN media_items m ON m.dedup_key = pms.dedup_key WHERE pms.profile_id = ? AND pms.user_rating > 0 LIMIT 300",
+            arrayOf(profileId)
+        ).use { c ->
+            while (c.moveToNext()) {
+                val genres = (c.getString(0) ?: "").split("|").filter { it.isNotBlank() }
+                val stars = c.getDouble(3)
+                if (stars >= 4.0) {
+                    liked.addAll(genres)
+                    (c.getString(1) ?: "").takeIf { it.isNotBlank() }?.let { people.add(it) }
+                    (c.getString(2) ?: "").split("|").take(3).filter { it.isNotBlank() }.forEach { people.add(it) }
+                } else if (stars <= 2.0) disliked.addAll(genres)
+            }
+        }
+        // a genre both liked and disliked cancels out
+        val both = liked.intersect(disliked)
+        val t = Taste(liked - both, disliked - both, people)
+        return if (t.isEmpty) null else t
     }
 
     fun getAllDistinctGenres(): List<String> {
