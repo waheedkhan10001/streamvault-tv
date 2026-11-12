@@ -805,13 +805,18 @@ class CatalogSyncEngine(
     fun pullCatalogFromCloud(onProgress: (Int, Int) -> Unit = { _, _ -> }): Int {
         val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return 0
         val cloudBase = prefs.getCloudSyncBaseUrl()
-        var offset = 0
-        val limit = 100
+        // Pages continue from where the last one ended (not "skip N"), so the cloud never re-reads earlier pages
+        var afterUpdated = 0L
+        var afterItem = ""
+        var firstPage = true
+        var knownTotal = 0
+        val limit = 200
         var hasMore = true
         var totalImported = 0
 
         while (hasMore) {
-            val url = "$cloudBase/api/catalog/pull?limit=$limit&offset=$offset"
+            val url = "$cloudBase/api/catalog/pull?limit=$limit" +
+                (if (firstPage) "" else "&after_updated=$afterUpdated&after_item=" + URLEncoder.encode(afterItem, "UTF-8"))
             val req = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $token")
@@ -824,6 +829,8 @@ class CatalogSyncEngine(
                     val itemsArr = json.optJSONArray("items") ?: JSONArray()
                     val totalCount = json.optInt("total", 0)
                     val moreFlag = json.optBoolean("hasMore", false)
+                    afterUpdated = json.optLong("nextAfterUpdated", afterUpdated)
+                    afterItem = json.optString("nextAfterItem", afterItem)
                     val parsedItems = mutableListOf<MediaItem>()
                     for (i in 0 until itemsArr.length()) {
                         val it = itemsArr.getJSONObject(i)
@@ -874,14 +881,14 @@ class CatalogSyncEngine(
                     Triple(parsedItems, totalCount, moreFlag)
                 }
 
+                if (firstPage) { knownTotal = total; firstPage = false }
                 if (items.isNotEmpty()) {
                     db.upsertMediaBatch(items, markNewIfInserted = false)
                     totalImported += items.size
-                    onProgress(totalImported, total)
+                    onProgress(totalImported, knownTotal)
                 }
 
-                hasMore = more && items.isNotEmpty()
-                offset += limit
+                hasMore = more && afterItem.isNotEmpty()
             } catch (e: Exception) {
                 break
             }

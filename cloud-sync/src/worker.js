@@ -823,8 +823,9 @@ export default {
       if (method === 'GET' && pathname === '/api/auth/poll-code') {
         const codeParam = url.searchParams.get('code') || '';
         if (!codeParam) return errorResponse('Code parameter required', 400, corsHeaders);
+        // Only checks the counter, never writes: the TV asks every 3 seconds and each write used up the daily allowance.
         const limitedPoll = await enforceLimit(env.DB, `ip:pollcode:${clientIp}`, 60, 60,
-          'Too many requests. Please wait a minute.', corsHeaders);
+          'Too many requests. Please wait a minute.', corsHeaders, false);
         if (limitedPoll) return limitedPoll;
 
         const cleanCode = codeParam.trim().toUpperCase();
@@ -835,6 +836,9 @@ export default {
         ).bind(cleanCode).first();
 
         if (!record || now > record.expires_at) {
+          // Only unknown/expired codes count against the limit (this is what a code-guessing attempt looks like).
+          // A TV waiting on its own live code is not counted, so waiting does not write to the database.
+          await rateLimit(env.DB, `ip:pollcode:${clientIp}`, 60, 60, true);
           return jsonResponse({ status: 'expired' }, 200, corsHeaders);
         }
 
@@ -1300,22 +1304,41 @@ export default {
       // B. Pull Catalog Items (Delta Sync via updated_since)
       if (method === 'GET' && pathname === '/api/catalog/pull') {
         const updatedSince = parseInt(url.searchParams.get('updated_since') || '0', 10);
-        const limit = Math.min(parseInt(url.searchParams.get('limit') || '100', 10), 200);
-        const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+        const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '100', 10) || 100, 1), 200);
+        // Paging continues from where the last page ended (updated_at + item_id), so a page never re-reads the pages before it.
+        // (The old ?offset= form still works for older apps.)
+        const legacyOffset = url.searchParams.has('offset') && !url.searchParams.has('after_item');
+        const offset = legacyOffset ? (parseInt(url.searchParams.get('offset') || '0', 10) || 0) : 0;
+        const afterUpdated = parseInt(url.searchParams.get('after_updated') || String(updatedSince), 10) || 0;
+        const afterItem = url.searchParams.get('after_item') || '';
+        const firstPage = !url.searchParams.has('after_item') && offset === 0;
 
-        const rows = await env.DB.prepare(
-          `SELECT item_id, playlist_id, dedup_key, media_type, title, clean_title, year, tmdb_id,
-                  overview, poster_path, backdrop_path, rating, runtime_mins, genres_json,
-                  versions_json, episodes_json, is_adult, is_removed, removed_at, updated_at
-           FROM catalog_items
-           WHERE account_id = ? AND updated_at > ?
-           ORDER BY updated_at ASC
-           LIMIT ? OFFSET ?`
-        ).bind(auth.accountId, updatedSince, limit, offset).all();
+        const rows = legacyOffset
+          ? await env.DB.prepare(
+              `SELECT item_id, playlist_id, dedup_key, media_type, title, clean_title, year, tmdb_id,
+                      overview, poster_path, backdrop_path, rating, runtime_mins, genres_json,
+                      versions_json, episodes_json, is_adult, is_removed, removed_at, updated_at
+               FROM catalog_items
+               WHERE account_id = ? AND updated_at > ?
+               ORDER BY updated_at ASC, item_id ASC
+               LIMIT ? OFFSET ?`
+            ).bind(auth.accountId, updatedSince, limit, offset).all()
+          : await env.DB.prepare(
+              `SELECT item_id, playlist_id, dedup_key, media_type, title, clean_title, year, tmdb_id,
+                      overview, poster_path, backdrop_path, rating, runtime_mins, genres_json,
+                      versions_json, episodes_json, is_adult, is_removed, removed_at, updated_at
+               FROM catalog_items
+               WHERE account_id = ? AND updated_at >= ? AND (updated_at > ? OR item_id > ?) AND updated_at > ?
+               ORDER BY updated_at ASC, item_id ASC
+               LIMIT ?`
+            ).bind(auth.accountId, afterUpdated, afterUpdated, afterItem, updatedSince, limit).all();
 
-        const countRow = await env.DB.prepare(
-          `SELECT COUNT(*) as total FROM catalog_items WHERE account_id = ? AND updated_at > ?`
-        ).bind(auth.accountId, updatedSince).first();
+        // The total is only counted once (first page); later pages do not re-count the whole account.
+        const countRow = firstPage
+          ? await env.DB.prepare(
+              `SELECT COUNT(*) as total FROM catalog_items WHERE account_id = ? AND updated_at > ?`
+            ).bind(auth.accountId, updatedSince).first()
+          : null;
 
         const items = (rows.results || []).map(r => ({
           itemId: r.item_id,
@@ -1341,11 +1364,14 @@ export default {
         }));
 
         const total = (countRow && countRow.total) || 0;
+        const last = items.length ? items[items.length - 1] : null;
         return jsonResponse({
           success: true,
           items,
           total,
-          hasMore: offset + items.length < total
+          hasMore: items.length === limit,
+          nextAfterUpdated: last ? last.updatedAt : afterUpdated,
+          nextAfterItem: last ? last.itemId : afterItem
         }, 200, corsHeaders);
       }
 
@@ -1360,8 +1386,8 @@ export default {
           env.DB.prepare(
             `UPDATE catalog_items
              SET is_removed = 1, removed_at = ?, updated_at = ?
-             WHERE account_id = ? AND dedup_key = ?`
-          ).bind(now, now, auth.accountId, k)
+             WHERE item_id = ? AND account_id = ?`
+          ).bind(now, now, `${auth.accountId}:${k}`, auth.accountId)
         );
         await env.DB.batch(stmts);
         return jsonResponse({ success: true, count: stmts.length }, 200, corsHeaders);
@@ -1447,7 +1473,8 @@ export default {
 
         const isDetail = /^(movie|tv)\/\d+$/.test(subPath);
         const toStore = (tmdbRes.ok && isDetail) ? slimTmdbDetail(resText) : resText;
-        if (tmdbRes.ok) {
+        // Only title details are stored (a new TV can reuse them). Searches are not: only this account asks, and each stored row spends the daily write allowance.
+        if (tmdbRes.ok && isDetail) {
           // Titles change rarely: details are kept 90 days, searches 7 days
           const expiresAt = now + (isDetail ? 90 : 7) * 86400 * 1000;
           await env.DB.prepare(

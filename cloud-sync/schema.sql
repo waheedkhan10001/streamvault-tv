@@ -85,8 +85,6 @@ CREATE TABLE IF NOT EXISTS catalog_items (
   FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_catalog_acc_upd ON catalog_items(account_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_catalog_acc_dedup ON catalog_items(account_id, dedup_key);
-CREATE INDEX IF NOT EXISTS idx_catalog_removed ON catalog_items(is_removed, removed_at);
 
 -- 6. Shared TMDB Cache (Shared across all accounts so subsequent enrichments hit cache)
 CREATE TABLE IF NOT EXISTS tmdb_cache (
@@ -99,7 +97,6 @@ CREATE TABLE IF NOT EXISTS tmdb_cache (
   expires_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_tmdb_cache_expires ON tmdb_cache(expires_at);
 
 -- 7. User Profiles (Personal settings, preferences; primary profile can't be deleted)
 CREATE TABLE IF NOT EXISTS profiles (

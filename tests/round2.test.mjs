@@ -116,14 +116,14 @@ async function run() {
               INSERT INTO accounts VALUES ('a1','keep@me.com','h',1,1,1);`);
     const dir = path.join(ROOT, 'cloud-sync/migrations');
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
-    assert.equal(files.length, 3, 'three migration files');
+    assert.equal(files.length, 4, 'four migration files');
     for (const f of files) old.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
     const oldCols = old.prepare('PRAGMA table_info(accounts)').all().map(c => c.name);
     assert.ok(oldCols.includes('pin_hash') && oldCols.includes('pin_salt'), 'migrated DB has both PIN columns');
     assert.ok(old.prepare("SELECT name FROM sqlite_master WHERE name='rate_limits'").get(), 'rate_limits created');
     assert.equal(old.prepare('SELECT email FROM accounts').get().email, 'keep@me.com', 'existing rows preserved');
     old.exec(fs.readFileSync(path.join(dir, files[0]), 'utf8')); // 0001 must be re-runnable
-    pass('schema.sql + 3 migrations verified on real SQLite (existing data kept, 0001 re-runnable).');
+    pass('schema.sql + 4 migrations verified on real SQLite (existing data kept, 0001 re-runnable).');
   }
 
   // ---- 2. TMDB key ------------------------------------------------------------
