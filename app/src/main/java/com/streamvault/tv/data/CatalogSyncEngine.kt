@@ -719,7 +719,8 @@ class CatalogSyncEngine(
                         put("title", it.cleanTitle)
                         put("cleanTitle", it.cleanTitle)
                         put("year", it.year)
-                        put("tmdbId", it.tmdbId)
+                        // -1 = "looked up, not on TMDB": a new TV then skips the search for this title
+                        put("tmdbId", if (it.isEnriched && it.tmdbId <= 0 && it.voteCount == 0) -1 else it.tmdbId)
                         put("overview", it.plot)
                         put("posterPath", it.posterUrl)
                         put("backdropPath", it.backdropUrl)
@@ -821,6 +822,7 @@ class CatalogSyncEngine(
         var afterItem = ""
         var first = true
         var filled = 0
+        var skipped = 0
         var pages = 0
         while (pages++ < 2000) {
             val url = "$cloudBase/api/catalog/pull?limit=200" +
@@ -832,12 +834,15 @@ class CatalogSyncEngine(
                     val json = JSONObject(resp.body?.string() ?: "{}")
                     val arr = json.optJSONArray("items") ?: JSONArray()
                     val pairs = ArrayList<Pair<String, Int>>(arr.length())
+                    val notOnTmdb = ArrayList<String>()
                     for (i in 0 until arr.length()) {
                         val o = arr.getJSONObject(i)
                         if (o.optBoolean("isRemoved", false)) continue
-                        pairs.add(o.optString("dedupKey") to o.optInt("tmdbId", 0))
+                        val id = o.optInt("tmdbId", 0)
+                        if (id == -1) notOnTmdb.add(o.optString("dedupKey")) else pairs.add(o.optString("dedupKey") to id)
                     }
                     filled += db.fillMissingTmdbIds(pairs)
+                    skipped += db.markNotOnTmdb(notOnTmdb)
                     afterUpdated = json.optLong("nextAfterUpdated", afterUpdated)
                     afterItem = json.optString("nextAfterItem", afterItem)
                     json.optBoolean("hasMore", false) && afterItem.isNotEmpty()
@@ -848,7 +853,7 @@ class CatalogSyncEngine(
                 return null
             }
         }
-        DiagLog.add("Cloud ids: $filled titles got their TMDB id from the account")
+        DiagLog.add("Cloud ids: $filled titles got their TMDB id from the account, $skipped known not to be on TMDB")
         return filled
     }
 

@@ -757,6 +757,28 @@ class StreamVaultDatabase(context: Context) :
         return filled
     }
 
+    /**
+     * The cloud copy says "this title is not on TMDB" (another TV already looked it up and found nothing).
+     * Marks it as done here too, exactly like a lookup that found nothing, so this TV does not search for it again.
+     * Titles that are already done, or already have an id, are left alone.
+     */
+    fun markNotOnTmdb(keys: List<String>): Int {
+        var marked = 0
+        for (k in keys) {
+            val it = getItemByDedupKey(k) ?: continue
+            if (it.isEnriched || it.tmdbId > 0) continue
+            updateEnrichedMetadata(
+                dedupKey = k, tmdbId = 0, imdbId = it.imdbId, year = it.year, rating = it.rating, voteCount = it.voteCount,
+                genres = it.genres.ifEmpty { listOf("General") }, plot = it.plot, cast = it.cast, director = it.director,
+                runtimeMins = it.runtimeMins, posterUrl = it.posterUrl, backdropUrl = it.backdropUrl, language = it.language,
+                hasEmbeddedSubs = it.hasEmbeddedSubtitles, embeddedSubLangs = it.embeddedSubtitleLanguages,
+                embeddedAudioLangs = it.embeddedAudioLanguages, certification = it.certification
+            )
+            marked++
+        }
+        return marked
+    }
+
     /** Titles with no TMDB votes and no rating were only "described" by the provider: send them to TMDB too. */
     fun requeueProviderOnlyTitles(): Int {
         val db = writableDatabase

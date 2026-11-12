@@ -43,5 +43,15 @@ class CloudIdsTest {
         assertEquals(555, db.getItemByDedupKey("b:2001")!!.tmdbId) // kept its own id
     }
 
+    @Test fun titlesKnownNotToBeOnTmdbAreMarkedDone_othersAreLeftAlone() {
+        db.upsertMediaBatch(listOf(item("x:2001"), item("y:2001", tmdb = 77)), markNewIfInserted = false, mergeVersions = true)
+        assertEquals(false, db.getItemByDedupKey("x:2001")!!.isEnriched)
+        val marked = db.markNotOnTmdb(listOf("x:2001", "y:2001", "missing:2001"))
+        assertEquals(1, marked)                                               // only "x"
+        assertEquals(true, db.getItemByDedupKey("x:2001")!!.isEnriched)       // will not be searched again
+        assertEquals(false, db.getItemByDedupKey("y:2001")!!.isEnriched)      // has an id: normal lookup still pending
+        assertEquals(0, db.markNotOnTmdb(listOf("x:2001")))                   // already done: nothing to do
+    }
+
     @Test fun anEmptyListChangesNothing() = assertEquals(0, db.fillMissingTmdbIds(emptyList()))
 }
