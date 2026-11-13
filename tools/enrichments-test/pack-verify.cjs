@@ -38,6 +38,18 @@ const ok = (c, m) => { L.push((c ? 'OK   ' : 'FAIL ') + m); if (!c) bad++; };
   }
   ok(badP === 0, 'posters: ' + okP + ' of ' + (okP + badP) + ' sampled start with a JPEG marker' + (badP ? ' — NOT JPEG: ' + badEx.join('; ') : '') + ' (' + withPoster.length + ' stored)');
   ok(r_end(withPoster), 'every poster lies inside the posters section');
+  // poster size picture: how big are they and what width are they really (w342 posters should be 342 pixels wide)
+  const lens = withPoster.map((r) => r.poster_len).sort((x, y) => x - y);
+  const q = (f) => Math.round(lens[Math.min(lens.length - 1, Math.floor(lens.length * f))] / 1024);
+  L.push('INFO poster sizes KB: min ' + Math.round(lens[0] / 1024) + '  median ' + q(0.5) + '  90% ' + q(0.9) + '  99% ' + q(0.99) + '  max ' + Math.round(lens[lens.length - 1] / 1024) + '  average ' + Math.round(lens.reduce((x, y) => x + y, 0) / lens.length / 1024) + '  total ' + (lens.reduce((x, y) => x + y, 0) / 1048576).toFixed(0) + ' MB');
+  const widths = {};
+  for (let i = 0; i < withPoster.length; i += step) {
+    const r = withPoster[i]; const b = PF.readSlice(pack, h.postersOffset + r.poster_off, Math.min(r.poster_len, 131072));
+    let w = 0;
+    for (let k = 2; k + 9 < b.length;) { if (b[k] !== 0xff) { k++; continue; } const m = b[k + 1]; if (m === 0xff) { k++; continue; } if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) { w = b.readUInt16BE(k + 7); break; } k += 2 + b.readUInt16BE(k + 2); }
+    widths[w] = (widths[w] || 0) + 1;
+  }
+  L.push('INFO poster pixel widths (sample): ' + Object.entries(widths).sort((x, y) => y[1] - x[1]).slice(0, 6).map(([k, v]) => k + 'px x' + v).join(', '));
   function r_end(list) { return list.every((r) => r.poster_off >= 0 && r.poster_off + r.poster_len <= h.postersLength); }
   db.close(); fs.unlinkSync(tmp);
   L.push(bad ? '\n' + bad + ' CHECK(S) FAILED' : '\nALL CHECKS PASSED');
