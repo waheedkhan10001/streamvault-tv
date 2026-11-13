@@ -1,0 +1,57 @@
+name: Enrichments pack build
+
+# DEVELOPMENT ONLY. Builds the one Enrichments pack file (database + posters + name index) and uploads it to Cloudflare R2.
+# limit = how many titles (0 = all, about 1 hour). A limited run uploads to test/, a full run to packs/.
+# Needs repository secrets: IPTV_SERVER, IPTV_USER, IPTV_PASS, TMDB_API_KEY, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'How many titles to build (0 = all ~51,000)'
+        default: '2000'
+      posters:
+        description: 'Download posters (true/false)'
+        default: 'true'
+      upload:
+        description: 'Upload the pack to Cloudflare R2 (true/false)'
+        default: 'true'
+
+jobs:
+  pack-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the upload library
+        working-directory: tools/enrichments-test
+        run: npm install --no-save --no-audit --no-fund @aws-sdk/client-s3@3 @aws-sdk/lib-storage@3
+      - name: Build the pack
+        working-directory: tools/enrichments-test
+        env:
+          IPTV_SERVER: ${{ secrets.IPTV_SERVER }}
+          IPTV_USER: ${{ secrets.IPTV_USER }}
+          IPTV_PASS: ${{ secrets.IPTV_PASS }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          LIMIT: ${{ github.event.inputs.limit }}
+          POSTERS: ${{ github.event.inputs.posters }}
+          UPLOAD: ${{ github.event.inputs.upload }}
+        run: node pack-build.cjs
+      - name: Check the finished file
+        working-directory: tools/enrichments-test
+        run: node pack-verify.cjs out
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrichments-pack-build-results
+          path: |
+            tools/enrichments-test/out/pack-build-summary.txt
+            tools/enrichments-test/out/pack-build-samples.txt
+            tools/enrichments-test/out/pack-verify.txt
+            tools/enrichments-test/out/manifest.json
