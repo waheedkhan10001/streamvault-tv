@@ -48,6 +48,8 @@ class AppApiRouter(
                     (method == "POST" && path == "/api/auth/signout") -> handleSignOut()
 
                 // 1. App State Endpoint
+                method == "GET" && path == "/api/pack/status" -> packStatusJson()
+                method == "POST" && path == "/api/pack/start" -> startPackDownload()
                 method == "GET" && path == "/api/state" -> handleGetState()
 
                 // 2. Home Catalog Rows
@@ -133,6 +135,29 @@ class AppApiRouter(
         val primary = profiles.find { it.isPrimary } ?: profiles.first()
         prefs.setActiveProfileId(primary.id)
         return primary
+    }
+
+    // ---- Enrichments pack: one big download before "Ready" (see PackManager)
+    val packManager: PackManager by lazy { PackManager(context, prefs) }
+    private val packRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun packStatusJson(): String {
+        val st = packManager.currentStatus()
+        val installed = packManager.installedVersion()
+        val o = st.toJson()
+        o.put("ready", installed != null)
+        o.put("installedVersion", installed ?: JSONObject.NULL)
+        o.put("running", packRunning.get())
+        return o.toString()
+    }
+
+    private fun startPackDownload(): String {
+        if (packRunning.compareAndSet(false, true)) {
+            Thread({
+                try { packManager.downloadAndInstall() } finally { packRunning.set(false) }
+            }, "pack-download").also { it.isDaemon = true }.start()
+        }
+        return packStatusJson()
     }
 
     private fun handleGetState(): String {
