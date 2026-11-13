@@ -934,7 +934,7 @@ function packMb(n) { return (n / 1048576).toFixed(n > 1073741824 ? 0 : 1); }
 async function ensurePackReady() {
   let st = null;
   try { const r = await fetch('/api/pack/status'); if (r.ok) st = await r.json(); } catch (_) {}
-  if (!st || st.ready) return;                       // already installed (or status unavailable)
+  if (!st || typeof st.ready !== 'boolean' || st.ready) return;   // already installed, or status unavailable (older app / test server)
   let box = document.getElementById('packOverlay');
   if (!box) {
     box = document.createElement('div');
