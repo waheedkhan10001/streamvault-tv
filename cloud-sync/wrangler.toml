@@ -9,3 +9,8 @@ compatibility_date = "2024-04-01"
 binding = "DB"
 database_name = "streamvault-db"
 database_id = "d1d96b37-9099-4455-8428-954c322cfa37"
+
+# R2 bucket holding the enrichments pack (packs/latest.json + packs/<version>/streamvault-pack.svpack)
+[[r2_buckets]]
+binding = "PACKS"
+bucket_name = "streamvault-enrichments"

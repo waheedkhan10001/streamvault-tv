@@ -1404,6 +1404,61 @@ export default {
       }
 
       // ----------------------------------------------------------------
+      // ENRICHMENTS PACK (R2): signed-in users only. Small manifest + big file with Range (resume) support.
+      // ----------------------------------------------------------------
+
+      if (method === 'GET' && (pathname === '/api/pack/latest' || pathname === '/api/pack/file')) {
+        const auth = await authenticate(request, env);
+        if (!auth) return errorResponse('Unauthorized', 401, corsHeaders);
+        if (!env.PACKS) return errorResponse('Pack storage is not configured', 503, corsHeaders);
+
+        const latestObj = await env.PACKS.get('packs/latest.json');
+        if (!latestObj) return errorResponse('No pack published yet', 404, corsHeaders);
+        let manifest;
+        try { manifest = JSON.parse(await latestObj.text()); } catch (_) { return errorResponse('Pack manifest is unreadable', 500, corsHeaders); }
+        if (!manifest || typeof manifest.key !== 'string' || !manifest.key.startsWith('packs/')) {
+          return errorResponse('Pack manifest is invalid', 500, corsHeaders);
+        }
+
+        if (pathname === '/api/pack/latest') {
+          return jsonResponse({ success: true, pack: manifest }, 200, corsHeaders);
+        }
+
+        // /api/pack/file : stream the pack named in the manifest; "Range: bytes=START-" resumes a download.
+        const head = await env.PACKS.head(manifest.key);
+        if (!head) return errorResponse('Pack file not found', 404, corsHeaders);
+        const total = head.size;
+        const baseHeaders = {
+          ...corsHeaders,
+          'Content-Type': 'application/octet-stream',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'no-store',
+          'ETag': head.httpEtag,
+          'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, ETag'
+        };
+        const rangeHeader = request.headers.get('Range');
+        if (rangeHeader) {
+          const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+          let start = m && m[1] !== '' ? Number(m[1]) : NaN;
+          let end = m && m[2] !== '' ? Number(m[2]) : total - 1;
+          if (m && m[1] === '' && m[2] !== '') { start = Math.max(0, total - Number(m[2])); end = total - 1; } // suffix range
+          if (!m || !Number.isFinite(start) || start >= total || end < start) {
+            return new Response(null, { status: 416, headers: { ...baseHeaders, 'Content-Range': `bytes */${total}` } });
+          }
+          end = Math.min(end, total - 1);
+          const part = await env.PACKS.get(manifest.key, { range: { offset: start, length: end - start + 1 } });
+          if (!part) return errorResponse('Pack file not found', 404, corsHeaders);
+          return new Response(part.body, {
+            status: 206,
+            headers: { ...baseHeaders, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': String(end - start + 1) }
+          });
+        }
+        const whole = await env.PACKS.get(manifest.key);
+        if (!whole) return errorResponse('Pack file not found', 404, corsHeaders);
+        return new Response(whole.body, { status: 200, headers: { ...baseHeaders, 'Content-Length': String(total) } });
+      }
+
+      // ----------------------------------------------------------------
       // SHARED TMDB PROXY & CACHE (Proxy TMDB so key is not in APK)
       // ----------------------------------------------------------------
 
