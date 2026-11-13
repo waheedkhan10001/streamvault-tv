@@ -77,9 +77,14 @@ function rawVariants(raw) {
   const segs = r.split(/\s*_+\s+|\s+_+\s*|\s+\|\s+|\s+-\s+/).map((x) => x.trim()).filter(Boolean);
   const cut = (x) => (x || '').split(CUT)[0].replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
   const out = [];
-  if (segs[0]) { out.push(cut(segs[0])); out.push(cut(segs[0]).replace(new RegExp('\\b(' + LANGS + ')\\b', 'gi'), ' ').replace(/\s+/g, ' ').trim()); }
-  if (segs[1] && segs[0] && segs[0].length < 14) out.push(cut(segs[0] + ' ' + segs[1])); // "STATUS_ IT'S COMPLICATED_ actors"
-  return out;
+  const bare = (x) => cut(x).replace(new RegExp('\\b(' + LANGS + ')\\b', 'gi'), ' ').replace(/\s+/g, ' ').trim();
+  // the title is the first part that is more than just "Malayalam Full Movie" / "Hindi Movie" style words
+  const idx = segs.findIndex((x) => bare(x).length >= 2);
+  if (idx >= 0) {
+    out.push(cut(segs[idx])); out.push(bare(segs[idx]));
+    if (segs[idx + 1] && segs[idx].length < 14) out.push(cut(segs[idx] + ' ' + segs[idx + 1])); // "STATUS_ IT'S COMPLICATED_ actors"
+  }
+  return out.filter((v) => v.length >= 3 && !/^(?:new\s+|latest\s+)?(?:\w+\s+)?movies?$/i.test(v)); // never search for just "Movies" / "New Punjabi Movies"
 }
 function variants(raw, clean, german) {
   const out = []; const add = (x) => { x = String(x || '').replace(/\s+/g, ' ').trim(); if (x.length > 1 && !out.includes(x)) out.push(x); };
