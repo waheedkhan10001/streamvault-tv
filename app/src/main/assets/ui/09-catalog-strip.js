@@ -125,3 +125,13 @@ async function pollCatalogStrip() {
   catalogStripTimer = setTimeout(pollCatalogStrip, delay);
 }
 window.addEventListener('load', () => { setTimeout(pollCatalogStrip, 1500); });
+
+
+// Rating as shown on screen: rating with a small source letter (I = IMDb, T = TMDB); the detail screen also shows the vote count.
+function ratingText(m, withVotes) {
+  const r = Number(m.rating) || 0;
+  const src = m.ratingSource === 'I' || m.ratingSource === 'T' ? m.ratingSource + ' ' : '';
+  const v = Number(m.voteCount) || 0;
+  const votes = withVotes && v > 0 ? ` (${v.toLocaleString('en-US')} votes)` : '';
+  return `${src}${r.toFixed(1)}${votes}`;
+}

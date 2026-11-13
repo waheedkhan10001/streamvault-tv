@@ -580,7 +580,7 @@ class CatalogSyncEngine(
             prefs.setFlag("requeue_provider_enriched_v1")
         }
         val (enriched, total) = db.getEnrichmentCounts()
-        if (total > 0 && enriched < total) startBackgroundTmdbEnrichment()
+        if (total > 0 && (enriched < total || packNeedsApply())) startBackgroundTmdbEnrichment()
         else if (db.countCloudPending() > 0) scope.launch(Dispatchers.IO) { runCatching { flushPendingCloudUploads() } }
     }
 
@@ -594,93 +594,45 @@ class CatalogSyncEngine(
         while (kotlin.coroutines.coroutineContext.isActive && (prefs.msSinceUiActivity() < 2500L || prefs.isPlaybackActive.get())) delay(400)
     }
 
+    private fun packFlagKey(f: java.io.File) = "pack_applied_${f.lastModified()}"
+
+    /** True when a pack is installed whose details have not been copied into the catalog yet. */
+    private fun packNeedsApply(): Boolean {
+        val f = packDbProvider?.invoke() ?: return false
+        return f.exists() && !prefs.getFlag(packFlagKey(f))
+    }
+
+    /** Where the installed pack's database is (set by the app once the pack is ready); null while no pack is installed. */
+    @Volatile var packDbProvider: (() -> java.io.File?)? = null
+
+    /**
+     * Fills the catalog with details, ratings, age ratings and posters from the installed pack.
+     * (Name kept so existing callers keep working; the TV no longer asks TMDB itself.)
+     */
     fun startBackgroundTmdbEnrichment(onProgress: () -> Unit = {}) {
         if (enrichJob?.isActive == true) return
         enrichJob = scope.launch(enrichDispatcher) {
-            val creds = prefs.loadCredentials()
-            val apiKey = creds.tmdbApiKey.ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY }
-            // First run on a new TV / after a reinstall: take the TMDB ids from the account (once, only when it completes)
-            if (!prefs.getFlag("cloud_ids_pulled_v1") && !prefs.getAuthToken().isNullOrBlank()) {
-                if (runCatching { pullTmdbIdsFromCloud() }.getOrNull() != null) prefs.setFlag("cloud_ids_pulled_v1")
+            val packDb = packDbProvider?.invoke()
+            if (packDb == null || !packDb.exists()) {
+                DiagLog.add("Content pack not installed yet: details will be filled in once it is")
+                return@launch
             }
-            runCatching { flushPendingCloudUploads() }     // details the cloud could not take earlier
-
-            // Titles whose lookup failed in this run are skipped for now (retried next start). Without this, the same
-            // failing titles sat at the head of the queue and were tried again and again, so the rest never got looked up.
-            val failedKeys = HashSet<String>()
-            while (isActive) {
-                val queue = db.getUnenrichedMediaQueue(creds.preferredLanguages, limit = 600 + failedKeys.size)
-                    .filter { it.dedupKey !in failedKeys }
-                    .take(600)
-                if (queue.isEmpty()) {
-                    val (enriched, total) = db.getEnrichmentCounts()
-                    _syncState.value = _syncState.value.copy(
-                        phase = if (failedKeys.isEmpty()) "100% Catalog Enriched ($enriched Titles Ready)"
-                        else "Details loaded ($enriched of $total). ${failedKeys.size} titles could not be looked up right now and will be tried again later",
-                        enrichedCount = enriched,
-                        totalToEnrich = total
-                    )
-                    runCatching { flushPendingCloudUploads() }     // last chance to send anything the cloud refused earlier
-                    DiagLog.add("Details and ratings finished: $enriched of $total titles, ${failedKeys.size} could not be looked up")
-                    break
-                }
-
-                var updatedInBatch = 0
-                val enrichedBatch = mutableListOf<MediaItem>()
-                // Step 1: titles any TV on the cloud has already looked up come back 200 at a time (no TMDB calls)
-                val fromCache = if (apiKey == XtreamCredentials.DEFAULT_TMDB_KEY || apiKey.isBlank()) prefillFromSharedCache(queue) else emptySet()
-                if (fromCache.isNotEmpty()) {
-                    val (enriched, total) = db.getEnrichmentCounts()
-                    _syncState.value = _syncState.value.copy(
-                        phase = "Loading details: $enriched / $total Titles",
-                        enrichedCount = enriched,
-                        totalToEnrich = total
-                    )
-                    onProgress()
-                }
-                for (item in queue) {
-                    if (!isActive) break
-                    if (item.dedupKey in fromCache) continue
-                    waitUntilQuiet()
-                    val enrichedOk = enrichSingleItemFromTmdb(item, apiKey)
-                    if (!enrichedOk && !prefs.isPlaybackActive.get() && creds.isConfigured) {
-                        // Gentle fallback to IPTV server VOD info only when not playing video
-                        enrichFallbackFromXtreamServer(item, creds)
-                        delay(1500) // Safe 1.5s trickle delay for IPTV fallback
-                    } else {
-                        delay(30) // ~33 requests/sec to TMDB (well within TMDB's 40-50 req/sec limit)
-                    }
-                    val updatedItem = db.getItemByDedupKey(item.dedupKey)
-                    if (updatedItem != null) {
-                        enrichedBatch.add(updatedItem)
-                        if (!updatedItem.isEnriched) failedKeys.add(item.dedupKey)
-                    } else {
-                        failedKeys.add(item.dedupKey)
-                    }
-                    updatedInBatch++
-                    if (updatedInBatch % 25 == 0) {
-                        // counting 70k rows is not free: do it every 100 titles, not every 25
-                        if (updatedInBatch % 100 == 0) {
-                            val (enriched, total) = db.getEnrichmentCounts()
-                            _syncState.value = _syncState.value.copy(
-                                phase = "TMDB Enriching: $enriched / $total Titles",
-                                enrichedCount = enriched,
-                                totalToEnrich = total
-                            )
-                        }
-                        if (enrichedBatch.isNotEmpty()) {
-                            uploadCatalogSyncBatch(enrichedBatch.toList())
-                            enrichedBatch.clear()
-                        }
-                        onProgress()
-                    }
-                }
-                if (enrichedBatch.isNotEmpty()) {
-                    uploadCatalogSyncBatch(enrichedBatch.toList())
-                    enrichedBatch.clear()
-                }
-                onProgress()
+            // First time this pack is applied: every title goes through it once, so nothing keeps older details, ratings or age ratings
+            if (!prefs.getFlag(packFlagKey(packDb))) {
+                runCatching { db.requeueAllForPack() }
             }
+            val result = runCatching {
+                PackApplier(db, packDb).applyAll(isActive = { isActive }, onProgress = onProgress)
+            }.onFailure { DiagLog.add("Applying the content pack failed: ${it.message}") }.getOrNull()
+            val (enriched, total) = db.getEnrichmentCounts()
+            _syncState.value = _syncState.value.copy(
+                phase = "100% Catalog Enriched ($enriched Titles Ready)",
+                enrichedCount = enriched,
+                totalToEnrich = total
+            )
+            if (result != null) prefs.setFlag(packFlagKey(packDb))
+            if (result != null) DiagLog.add("Content pack applied: ${result.applied} titles filled, ${result.unmatched} not in the pack")
+            onProgress()
         }
     }
 

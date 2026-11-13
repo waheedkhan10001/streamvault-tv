@@ -254,6 +254,7 @@ class MainActivity : Activity() {
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
         )
         apiRouter = com.streamvault.tv.data.AppApiRouter(this, db, prefs, syncEngine)
+        syncEngine.packDbProvider = { apiRouter.packManager.takeIf { it.isReady() }?.dbFile }
         runCatching {
             if (prefs.loadCredentials().isConfigured && prefs.shouldRunAutoDeltaSync()) {
                 syncEngine.triggerSync(isManual = false)      // first load, a load that never finished, or older than 24 h
@@ -325,6 +326,13 @@ class MainActivity : Activity() {
                     // otherwise sign-up, login and the pairing code never reach the server.
                     if (isLocalApiRequest(url.scheme, urlStr)) {
                         val path = url.path ?: ""
+                        // Posters come straight out of the content pack file: /api/pack/poster/<offset>_<length>
+                        if (path.startsWith("/api/pack/poster/")) {
+                            val parts = path.removePrefix("/api/pack/poster/").split("_")
+                            val bytes = if (parts.size == 2) apiRouter.packManager.readPoster(parts[0].toLongOrNull() ?: -1L, parts[1].toIntOrNull() ?: 0) else null
+                            return if (bytes != null) WebResourceResponse("image/jpeg", null, java.io.ByteArrayInputStream(bytes))
+                            else WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                        }
                         val query = url.query ?: ""
                         val fullPath = if (query.isNotEmpty()) "$path?$query" else path
                         val method = request.method ?: "GET"

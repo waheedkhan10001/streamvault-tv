@@ -195,7 +195,7 @@ async function loadHome(vp) {
   let htmlStr = '';
   if (hero) {
     const backdrop = hero.backdropUrl || hero.posterUrl || '';
-    const ratingDisplay = hero.rating > 0 ? `★ ${hero.rating}` : '';
+    const ratingDisplay = hero.rating > 0 ? `★ ${ratingText(hero)}` : '';
     htmlStr += `
       <div class="hero" style="background-image:url('${backdrop}');">
         <div class="hero-content">
@@ -262,7 +262,7 @@ function getSeriesSeasonTag(m) {
 function renderPosterCard(m) {
   const isSeries = m.mediaType === 'SERIES';
   const seriesTag = isSeries ? getSeriesSeasonTag(m) : null;
-  const ratingStr = m.rating > 0 ? `★ ${m.rating}` : '';
+  const ratingStr = m.rating > 0 ? `★ ${ratingText(m)}` : '';
   const yearStr = m.year ? String(m.year) : '';
   const quality = (m.qualityBadges || [])[0] || 'HD';
   const lang = m.language || 'English';

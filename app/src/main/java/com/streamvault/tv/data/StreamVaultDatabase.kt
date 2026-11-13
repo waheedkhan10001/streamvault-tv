@@ -81,6 +81,11 @@ class StreamVaultDatabase(context: Context) :
         try { db.execSQL("ALTER TABLE live_channels ADD COLUMN added_timestamp INTEGER DEFAULT 0") } catch (_: Exception) {}
         try { db.execSQL("UPDATE media_items SET is_extra = 1 WHERE is_extra = 0 AND is_adult = 0 AND (" + EXTRA_CATEGORY_TOKENS.joinToString(" OR ") { "lower(category_name) LIKE '%${it.replace("'", "''")}%'" } + ")") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN certification TEXT DEFAULT ''") } catch (_: Exception) {}
+        // From the enrichments pack: which rating is shown (I = IMDb, T = TMDB), the score used for sorting, Kids decision
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN rating_source TEXT DEFAULT ''") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN sort_score REAL DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN kids_ok INTEGER DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN pack_applied INTEGER DEFAULT 0") } catch (_: Exception) {}
 
         db.execSQL(
             """
@@ -180,7 +185,11 @@ class StreamVaultDatabase(context: Context) :
                 search_blob TEXT DEFAULT '',
                 is_adult INTEGER DEFAULT 0,
                 is_extra INTEGER DEFAULT 0,
-                certification TEXT DEFAULT ''
+                certification TEXT DEFAULT '',
+                rating_source TEXT DEFAULT '',
+                sort_score REAL DEFAULT 0,
+                kids_ok INTEGER DEFAULT 0,
+                pack_applied INTEGER DEFAULT 0
             )
             """.trimIndent()
         )
@@ -194,6 +203,8 @@ class StreamVaultDatabase(context: Context) :
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_adult ON media_items(is_adult)")
         try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_extra ON media_items(is_extra)") } catch (_: Exception) {}
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_cert ON media_items(certification)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_kids ON media_items(kids_ok)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_sort ON media_items(sort_score DESC)")
 
         db.execSQL(
             """
@@ -319,7 +330,8 @@ class StreamVaultDatabase(context: Context) :
                            backdrop_url, imdb_id, in_watchlist, is_watched, resume_position_ms,
                            duration_ms, has_embedded_subtitles, embedded_sub_langs, embedded_audio_langs,
                            certification, tmdb_id, vote_count, rating, year, poster_url,
-                           versions_json, category_name, quality_badges, added_timestamp
+                           versions_json, category_name, quality_badges, added_timestamp,
+                           rating_source, sort_score, kids_ok, pack_applied
                     FROM media_items WHERE dedup_key = ?
                     """.trimIndent(),
                     arrayOf(item.dedupKey)
@@ -355,6 +367,10 @@ class StreamVaultDatabase(context: Context) :
                 val existingCategory = if (exists) existingCursor.getString(22) ?: "" else ""
                 val existingBadges = if (exists) existingCursor.getString(23) ?: "" else ""
                 val existingAdded = if (exists) existingCursor.getLong(24) else 0L
+                val existingRatingSource = if (exists) existingCursor.getString(25) ?: "" else ""
+                val existingSortScore = if (exists) existingCursor.getDouble(26) else 0.0
+                val existingKidsOk = if (exists) existingCursor.getInt(27) else 0
+                val existingPackApplied = if (exists) existingCursor.getInt(28) else 0
                 existingCursor.close()
 
                 // Chunked import: the same title can arrive in several chunks, so copies are merged with what is saved.
@@ -448,6 +464,11 @@ class StreamVaultDatabase(context: Context) :
                     put("is_adult", if (isAdult) 1 else 0)
                     put("is_extra", if (!isAdult && checkIsExtra(item.categoryName)) 1 else 0)
                     put("certification", finalCert)
+                    // Pack decisions survive a re-sync; titles the pack has not seen use their own age rating
+                    put("rating_source", existingRatingSource)
+                    put("sort_score", existingSortScore)
+                    put("pack_applied", existingPackApplied)
+                    put("kids_ok", if (existingPackApplied == 1) existingKidsOk else ContentCertifications.kidsOkFromCertification(finalCert))
                 }
 
                 db.insertWithOnConflict("media_items", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -712,6 +733,11 @@ class StreamVaultDatabase(context: Context) :
      * 1. Preferred languages first
      * 2. Newest release year & highest server rating first
      */
+    /** Sends every mainstream title through the content pack once (used the first time a pack is applied). */
+    fun requeueAllForPack() {
+        writableDatabase.execSQL("UPDATE media_items SET is_enriched = 0 WHERE pack_applied = 0 AND is_adult = 0 AND is_extra = 0")
+    }
+
     fun getUnenrichedMediaQueue(preferredLanguages: Set<String>, limit: Int = 500): List<MediaItem> {
         val db = readableDatabase
         val cursor = db.rawQuery(
@@ -993,7 +1019,7 @@ class StreamVaultDatabase(context: Context) :
         val orderSql = when (filter.sortBy) {
             SortOption.NEWLY_ADDED -> "ORDER BY m.added_timestamp DESC, m.year DESC"
             SortOption.RELEASE_YEAR_DESC -> "ORDER BY m.year DESC, m.rating DESC"
-            SortOption.RATING_DESC -> "ORDER BY m.rating DESC, m.vote_count DESC"
+            SortOption.RATING_DESC -> "ORDER BY m.sort_score DESC, m.vote_count DESC"
             SortOption.TITLE_ASC -> "ORDER BY m.clean_title COLLATE NOCASE ASC"
             SortOption.RANDOM -> "ORDER BY RANDOM()"
         }
@@ -2165,6 +2191,7 @@ class StreamVaultDatabase(context: Context) :
 
                 val isAdult = c.getColumnIndex("is_adult").let { if (it >= 0) c.getInt(it) == 1 else false }
                 val cert = c.getColumnIndex("certification").let { if (it >= 0) c.getString(it) ?: "" else "" }
+                val ratingSource = c.getColumnIndex("rating_source").let { if (it >= 0) c.getString(it) ?: "" else "" }
 
                 val inWatchlist = c.getColumnIndex("p_in_watchlist").let { if (it >= 0) c.getInt(it) == 1 else c.getInt(c.getColumnIndexOrThrow("in_watchlist")) == 1 }
                 val isWatched = c.getColumnIndex("p_is_watched").let { if (it >= 0) c.getInt(it) == 1 else c.getInt(c.getColumnIndexOrThrow("is_watched")) == 1 }
@@ -2218,6 +2245,7 @@ class StreamVaultDatabase(context: Context) :
                         durationMs = durationMs,
                         isAdult = isAdult,
                         certification = cert,
+                        ratingSource = ratingSource,
                         userRating = userRating,
                         versions = versions
                     )

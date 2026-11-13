@@ -154,7 +154,9 @@ class AppApiRouter(
     private fun startPackDownload(): String {
         if (packRunning.compareAndSet(false, true)) {
             Thread({
-                try { packManager.downloadAndInstall() } finally { packRunning.set(false) }
+                try {
+                    if (packManager.downloadAndInstall()) syncEngine.startBackgroundTmdbEnrichment()   // fills the catalog from the pack
+                } finally { packRunning.set(false) }
             }, "pack-download").also { it.isDaemon = true }.start()
         }
         return packStatusJson()
@@ -1434,6 +1436,7 @@ class AppApiRouter(
             put("durationMs", item.durationMs)
             put("isAdult", item.isAdult)
             put("certification", item.certification)
+            put("ratingSource", item.ratingSource)
             put("userRating", item.userRating)
             put("versions", JSONArray(item.versions.map { v ->
                 JSONObject().apply {
