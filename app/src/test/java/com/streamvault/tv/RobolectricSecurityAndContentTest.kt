@@ -60,12 +60,11 @@ class RobolectricSecurityAndContentTest {
         val expected = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
         assertEquals(expected, ContentCertifications.KIDS_CERTIFICATIONS)
 
-        val clause = ContentCertifications.kidsClause("certification")
-        assertTrue("Kids clause must check certification IN list", clause.contains("certification IN ("))
-        for (cert in expected) {
-            assertTrue("Kids clause must contain cert '$cert'", clause.contains("'$cert'"))
-        }
-        assertTrue("Kids clause must exclude empty certification", clause.contains("certification != ''"))
+        // Kids decisions now come from the content pack (kids_ok); titles the pack has not seen use their own US rating
+        assertEquals("kids_ok = 1", ContentCertifications.kidsClause("certification"))
+        assertEquals("m.kids_ok = 1", ContentCertifications.kidsClause("m.certification"))
+        for (cert in expected) assertEquals(1, ContentCertifications.kidsOkFromCertification(cert))
+        for (cert in listOf("R", "TV-MA", "NC-17", "")) assertEquals(0, ContentCertifications.kidsOkFromCertification(cert))
     }
 
     @Test
