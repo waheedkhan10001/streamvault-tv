@@ -30,13 +30,14 @@ const ok = (c, m) => { L.push((c ? 'OK   ' : 'FAIL ') + m); if (!c) bad++; };
   ok(one("SELECT COUNT(*) c FROM titles WHERE (rating_source='I' AND rating_votes<10) OR (rating_source='T' AND rating_votes<5)").c === 0, 'rating rule respected (I>=10 votes, T>=5 votes)');
   ok(one('SELECT COUNT(*) c FROM titles WHERE kids_ok=1 AND certification=\'\'').c === 0, 'no Kids title without an age rating');
   const withPoster = db.prepare('SELECT pid, poster_off, poster_len FROM titles WHERE poster_off IS NOT NULL').all();
-  let badP = 0, okP = 0;
+  let badP = 0, okP = 0; const badEx = [];
   const step = Math.max(1, Math.floor(withPoster.length / 400));
   for (let i = 0; i < withPoster.length; i += step) {
     const r = withPoster[i]; const b = PF.readSlice(pack, h.postersOffset + r.poster_off, Math.min(r.poster_len, 4));
-    if (b[0] === 0xff && b[1] === 0xd8) okP++; else badP++;
+    if (b[0] === 0xff && b[1] === 0xd8) okP++; else { badP++; if (badEx.length < 5) badEx.push('pid ' + r.pid + ' starts with bytes ' + b.toString('hex')); }
   }
-  ok(badP === 0 && r_end(withPoster), 'posters: ' + okP + ' sampled start with a JPEG marker, none broken (' + withPoster.length + ' stored)');
+  ok(badP === 0, 'posters: ' + okP + ' of ' + (okP + badP) + ' sampled start with a JPEG marker' + (badP ? ' — NOT JPEG: ' + badEx.join('; ') : '') + ' (' + withPoster.length + ' stored)');
+  ok(r_end(withPoster), 'every poster lies inside the posters section');
   function r_end(list) { return list.every((r) => r.poster_off >= 0 && r.poster_off + r.poster_len <= h.postersLength); }
   db.close(); fs.unlinkSync(tmp);
   L.push(bad ? '\n' + bad + ' CHECK(S) FAILED' : '\nALL CHECKS PASSED');

@@ -303,7 +303,7 @@ async function fetchPoster(url) {
   for (let a = 0; a < 4; a++) {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      if (r.status === 200) return Buffer.from(await r.arrayBuffer());
+      if (r.status === 200) { const b = Buffer.from(await r.arrayBuffer()); if (b.length > 200 && b[0] === 0xff && b[1] === 0xd8) return b; await sleep(800 * (a + 1)); continue; } // must really be a JPEG
       if (r.status === 404) return null;
       await sleep(800 * (a + 1));
     } catch (e) { await sleep(800 * (a + 1)); }
