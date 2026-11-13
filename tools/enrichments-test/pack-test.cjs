@@ -119,20 +119,83 @@ async function resolve(item) {
     if (!best) { item.status = 'notfound'; return; }
     id = best.id;
   }
-  const d = await tmdb((isTv ? '/tv/' : '/movie/') + id, { append_to_response: append });
-  if (!d) { item.status = 'notfound'; item.method = method; return; }
-  item.method = method; item.rec = slim(d, item.type);
   const names = variants(g.raw, g.clean);
-  const ts = Math.max(0, ...names.map((n) => Math.max(sim(n, item.rec.t), sim(n, item.rec.ot))));
-  // a series name carries the year of the LATEST season, TMDB keeps the first year, so only a later name year is fine
-  const yearOk = !g.year || !item.rec.y || (isTv ? g.year >= item.rec.y - 1 : Math.abs(g.year - item.rec.y) <= 1);
-  item.sim = ts; item.yearOk = yearOk;
-  item.status = (ts >= 0.6 && yearOk) ? 'confident' : (method === 'id' && ts >= 0.9 && isTv) ? 'confident' : 'doubtful';
+  const judge = (rec) => {
+    const ts = Math.max(0, ...names.map((n) => Math.max(sim(n, rec.t), sim(n, rec.ot))));
+    // a series name carries the year of the LATEST season, TMDB keeps the first year, so only a later name year is fine
+    const yearOk = !g.year || !rec.y || (isTv ? g.year >= rec.y - 1 : Math.abs(g.year - rec.y) <= 1);
+    return { ts, yearOk };
+  };
+  const load = async (tid) => { const d = await tmdb((isTv ? '/tv/' : '/movie/') + tid, { append_to_response: append }); return d ? slim(d, item.type) : null; };
+  const rec = await load(id);
+  if (!rec) { item.status = 'notfound'; item.method = method; return; }
+  let j = judge(rec);
+  item.method = method; item.rec = rec;
+  // the provider's id points at a film whose name does not fit at all: it is probably wrong, so search by name instead
+  if (method === 'id' && j.ts < 0.3) {
+    const best = await searchBest(isTv, g.year || 0, names);
+    if (best && best.id !== id) {
+      const r2 = await load(best.id);
+      if (r2) { const j2 = judge(r2); if (j2.ts >= 0.6 && j2.yearOk) { item.rec = r2; item.method = 'search'; item.fixedId = true; j = j2; } }
+    }
+  }
+  item.sim = j.ts; item.yearOk = j.yearOk;
+  item.status = (j.ts >= 0.6 && j.yearOk) ? 'confident' : (item.method === 'id' && j.ts >= 0.9 && isTv) ? 'confident' : 'doubtful';
+}
+
+// IMDb's free non-commercial ratings file (id -> average rating, votes). Streamed, only the ids we need are kept.
+const { Readable } = require('stream');
+const readline = require('readline');
+async function loadImdbRatings(wanted) {
+  for (let a = 0; a < 4; a++) {
+    try {
+      const r = await fetch('https://datasets.imdbws.com/title.ratings.tsv.gz');
+      if (r.status !== 200) { log('IMDb file answered ' + r.status + ', retrying'); await sleep(3000 * (a + 1)); continue; }
+      const rl = readline.createInterface({ input: Readable.fromWeb(r.body).pipe(zlib.createGunzip()), crlfDelay: Infinity });
+      const map = new Map(); let first = true, total = 0;
+      for await (const line of rl) {
+        if (first) { first = false; continue; }
+        total++;
+        const p = line.split('\t');
+        if (wanted.has(p[0])) map.set(p[0], { r: parseFloat(p[1]), v: parseInt(p[2], 10) });
+      }
+      return { map, total };
+    } catch (e) { log('IMDb file problem: ' + e.message); await sleep(3000 * (a + 1)); }
+  }
+  return null;
+}
+function imdbStats(found, got) {
+  const L = [], ex = [];
+  const rows = found.map((x) => ({ x, im: x.rec.imdb ? got.map.get(x.rec.imdb) : null }));
+  const pct = (n) => (found.length ? (100 * n / found.length).toFixed(1) : '0') + '%';
+  const withId = rows.filter((z) => z.x.rec.imdb).length, withIm = rows.filter((z) => z.im).length;
+  L.push('Rows in IMDb ratings file: ' + fmt(got.total) + '   our found titles: ' + fmt(found.length) + '   with an IMDb id: ' + fmt(withId) + ' (' + pct(withId) + ')   with an IMDb rating: ' + fmt(withIm) + ' (' + pct(withIm) + ')');
+  for (const n of [1, 10, 25, 50, 100, 1000]) L.push('  IMDb rating with at least ' + fmt(n) + ' votes: ' + fmt(rows.filter((z) => z.im && z.im.v >= n).length) + ' (' + pct(rows.filter((z) => z.im && z.im.v >= n).length) + ')');
+  for (const n of [1, 5, 10, 50]) L.push('  TMDB rating with at least ' + fmt(n) + ' votes: ' + fmt(rows.filter((z) => z.x.rec.r > 0 && z.x.rec.v >= n).length) + ' (' + pct(rows.filter((z) => z.x.rec.r > 0 && z.x.rec.v >= n).length) + ')');
+  L.push('Rule "IMDb first, else TMDB" (among titles found on TMDB; titles not found on TMDB have no rating at all):');
+  for (const [n, m] of [[10, 5], [25, 5], [50, 10], [100, 10]]) {
+    let I = 0, T = 0, none = 0;
+    for (const z of rows) { if (z.im && z.im.v >= n) I++; else if (z.x.rec.r > 0 && z.x.rec.v >= m) T++; else none++; }
+    L.push('  IMDb >= ' + n + ' votes, else TMDB >= ' + m + ' votes:  shows I: ' + fmt(I) + '   shows T: ' + fmt(T) + '   Not rated: ' + fmt(none) + ' (' + pct(none) + ')');
+  }
+  const both = rows.filter((z) => z.im && z.im.v >= 25 && z.x.rec.r > 0 && z.x.rec.v >= 10);
+  if (both.length) {
+    const d = both.map((z) => Math.abs(z.im.r - z.x.rec.r));
+    L.push('Where both have a rating (IMDb >= 25 votes, TMDB >= 10 votes): ' + fmt(both.length) + ' titles; average difference ' + (d.reduce((a, b) => a + b, 0) / d.length).toFixed(2) + ' points; differ by 1+ point: ' + fmt(d.filter((v) => v >= 1).length) + '; by 2+ points: ' + fmt(d.filter((v) => v >= 2).length));
+    for (const z of both.filter((q) => Math.abs(q.im.r - q.x.rec.r) >= 2).slice(0, 25)) ex.push('  "' + z.x.g.raw + '"  =>  "' + z.x.rec.t + '" (' + z.x.rec.y + ')   IMDb ' + z.im.r + ' (' + fmt(z.im.v) + ' votes)   TMDB ' + z.x.rec.r.toFixed(1) + ' (' + fmt(z.x.rec.v) + ' votes)');
+  }
+  return { L, ex };
 }
 
 (async () => {
   const base = SERVER + '/player_api.php?username=' + encodeURIComponent(USER) + '&password=' + encodeURIComponent(PASS) + '&action=';
-  const get = async (a) => (await getJson(base + a, PASS)).data;
+  const get = async (a) => { // the provider sometimes answers 502 for a moment: wait and try again
+    let last;
+    for (let t = 0; t < 8; t++) {
+      try { return (await getJson(base + a, PASS)).data; } catch (e) { last = e; log('Provider busy (' + redact(e.message, PASS) + '), retrying in ' + 15 * (t + 1) + ' s'); await sleep(15000 * (t + 1)); }
+    }
+    throw last;
+  };
   log('Reading the provider list ...');
   const [vodCats, vod, serCats, ser] = await Promise.all([get('get_vod_categories'), get('get_vod_streams'), get('get_series_categories'), get('get_series')]).catch((e) => { console.log('Provider error: ' + redact(e.message, PASS)); process.exit(1); });
   const cm = (arr) => new Map(arr.map((c) => [String(c.category_id), String(c.category_name ?? '')]));
@@ -169,6 +232,12 @@ async function resolve(item) {
     }, 500, 'Posters');
   }
 
+  // IMDb ratings coverage
+  let imdb = null;
+  { const wanted = new Set(found.filter((x) => x.rec.imdb).map((x) => x.rec.imdb));
+    const got = await loadImdbRatings(wanted);
+    imdb = got ? imdbStats(found, got) : { L: ['IMDb ratings file could NOT be downloaded (see run log).'], ex: [] }; }
+
   const scale = totalUnique / items.length;
   const out = [];
   const add = (s = '') => out.push(s);
@@ -179,6 +248,7 @@ async function resolve(item) {
   add('Provider gave a TMDB id: ' + fmt(by('id')) + '   found by name+year search: ' + fmt(by('search')) + '   not found at all: ' + fmt(by(null, 'notfound')));
   add('Found by search -> confident (name and year agree): ' + fmt(items.filter((x) => x.method === 'search' && x.status === 'confident').length) + '   doubtful (name or year disagree): ' + fmt(items.filter((x) => x.method === 'search' && x.status === 'doubtful').length));
   add('Provider id used -> name and year agree: ' + fmt(items.filter((x) => x.method === 'id' && x.status === 'confident').length) + '   disagree (provider id may be wrong): ' + fmt(items.filter((x) => x.method === 'id' && x.status === 'doubtful').length));
+  add('Provider id looked wrong (name did not fit) and was replaced by a name search: ' + fmt(items.filter((x) => x.fixedId).length));
   add('Titles with no year in the provider name: ' + fmt(items.filter((x) => !x.g.year).length) + '   of those found by search and doubtful: ' + fmt(items.filter((x) => !x.g.year && x.method === 'search' && x.status === 'doubtful').length));
   add('');
   add('== DATABASE SIZE (title, year, plot, cast, director, genres, ratings, age rating, ids) ==');
@@ -193,6 +263,9 @@ async function resolve(item) {
     add('WHOLE SET estimate: ' + (whole / 1073741824).toFixed(2) + ' GB   ->  at 40 Mbps (5 MB/s): ' + (whole / 5242880 / 60).toFixed(1) + ' min; at 68 Mbps (8.5 MB/s): ' + (whole / 8912896 / 60).toFixed(1) + ' min');
   }
   add('');
+  add('== IMDB RATINGS (IMDb first, TMDB as fallback) ==');
+  for (const l of imdb.L) add(l);
+  add('');
   add('Run time: ' + ((Date.now() - t0) / 60000).toFixed(1) + ' min');
   fs.writeFileSync('pack-test-summary.txt', out.join('\n') + '\n');
 
@@ -202,6 +275,7 @@ async function resolve(item) {
   sm.push('DOUBTFUL MATCHES (name or year disagree) — for a human eye'); sm.push(...take(items.filter((x) => x.rec && x.status === 'doubtful').map(row), 80));
   sm.push(''); sm.push('CONFIDENT SEARCH MATCHES (random look)'); sm.push(...take(items.filter((x) => x.rec && x.method === 'search' && x.status === 'confident').map(row), 30));
   sm.push(''); sm.push('NOT FOUND'); sm.push(...take(items.filter((x) => x.status === 'notfound').map((x) => '  "' + x.g.raw + '"'), 60));
+  sm.push(''); sm.push('BIG IMDb vs TMDB DIFFERENCES (2+ points, both with enough votes)'); sm.push(...imdb.ex);
   fs.writeFileSync('pack-test-samples.txt', sm.join('\n') + '\n');
   console.log('\n' + out.join('\n'));
 })();

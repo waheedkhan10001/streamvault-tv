@@ -133,6 +133,7 @@ function parse(rawTitle, categoryName = '', tmdbId = 0) {
 const ADULT_TOKENS = ['xxx', '18+', 'adult', 'porn', 'erotic', 'nsfw', 'redhat', 'team skeet', 'brazzers', 'playboy', 'hustler', 'penthouse', 'bangbros', 'naughty'];
 function checkIsAdult(cleanTitle, rawTitle, categoryName, genresText) {
   const text = (cleanTitle + ' ' + rawTitle + ' ' + categoryName + ' ' + genresText).toLowerCase();
+  if (/^\s*xx\b/i.test(categoryName || '')) return true; // categories like "XX | HINDI XX" are adult (613 titles)
   return ADULT_TOKENS.some((t) => text.includes(t));
 }
 const EXTRA_TOKENS = ['naat', 'islamic', 'dance |', 'dance mix', 'stage drama', 'dasi muj', 'songs |', 'explained movies', 'motu patlu',
@@ -210,7 +211,8 @@ function analyse(entries, catMap, idField) {
     const extra = checkIsExtra(catName);
     const target = (adult || extra) ? vault : main;
     let g = target.get(p.dedupKey);
-    if (!g) { g = { key: p.dedupKey, raw: name, clean: p.cleanTitle, year: p.year, norm: p.normalized, tmdb, copies: 0, adult: false, cat: catName, cats: new Set() }; target.set(p.dedupKey, g); }
+    if (!g) { g = { key: p.dedupKey, raw: name, clean: p.cleanTitle, year: p.year, norm: p.normalized, tmdb, copies: 0, adult: false, cat: catName, cats: new Set(), lang: p.language,
+        prov: { plot: String(e.plot ?? e.description ?? ''), genre: genreStr, rating: parseFloat(e.rating_5based ?? e.rating ?? 0) || 0, cast: String(e.cast ?? ''), director: String(e.director ?? ''), rel: String(e.releaseDate ?? e.releasedate ?? e.release_date ?? '') } }; target.set(p.dedupKey, g); }
     g.copies++; g.adult = g.adult || adult; g.cats.add(catName);
     if (!g.tmdb && tmdb) g.tmdb = tmdb;
   }
