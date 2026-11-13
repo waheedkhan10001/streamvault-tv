@@ -89,12 +89,12 @@ function enrichmentIsComplete(sync) {
 }
 function enrichStatusText(sync) {
   const enr = Number((sync && sync.enrichedCount) || 0), tot = Number((sync && sync.totalToEnrich) || 0);
-  if (sync && sync.isSyncing) return { text: 'Waiting for the catalogue to finish loading', color: '#9CA3AF' };
+  if (sync && sync.isSyncing) return { text: 'Waiting for catalogue', color: '#9CA3AF' };
   if (enrichmentIsComplete(sync)) {
     const missing = Math.max(0, tot - enr);
-    return { text: '✓ Complete — ' + formatCount(enr) + ' titles ready' + (missing ? ' (' + formatCount(missing) + ' not found online)' : ''), color: '#10B981' };
+    return { text: '✓ Complete — ' + formatCount(enr) + ' titles ready', color: '#10B981' };
   }
-  if (tot > 0 && enr < tot) return { text: 'Loading — ' + formatCount(enr) + ' of ' + formatCount(tot) + ' titles. Browsing works meanwhile', color: '#FBBF24' };
+  if (tot > 0 && enr < tot) return { text: 'Loading — ' + formatCount(enr) + ' of ' + formatCount(tot), color: '#FBBF24' };
   return { text: tot > 0 ? '✓ Complete' : 'Nothing to load yet', color: tot > 0 ? '#10B981' : '#9CA3AF' };
 }
 function updateEnrichStatusRow(sync) {
@@ -107,7 +107,7 @@ async function pollCatalogStrip() {
   let delay = 12000;
   try {
     if (getStoredAuthToken()) {
-      await refreshAppStatus();
+      await refreshSyncStatusOnly();
       const sync = (appStatus && appStatus.syncStatus) || {};
       if (catalogStripWasSyncing && !sync.isSyncing && sync.note) showToast(escapeHtml(sync.note));
       catalogStripWasSyncing = !!sync.isSyncing;
@@ -127,11 +127,15 @@ async function pollCatalogStrip() {
 window.addEventListener('load', () => { setTimeout(pollCatalogStrip, 1500); });
 
 
-// Rating as shown on screen: rating with a small source letter (I = IMDb, T = TMDB); the detail screen also shows the vote count.
+// Rating as shown on screen: a coloured star + the number. Yellow star = IMDb rating, bronze star = TMDB rating
+// (the detail screen also shows the vote count).
+function ratingStar(m) {
+  const color = m && m.ratingSource === 'T' ? '#CD7F32' : '#FFC83D';
+  return `<span style="color:${color}">★</span>`;
+}
 function ratingText(m, withVotes) {
   const r = Number(m.rating) || 0;
-  const src = m.ratingSource === 'I' || m.ratingSource === 'T' ? m.ratingSource + ' ' : '';
   const v = Number(m.voteCount) || 0;
   const votes = withVotes && v > 0 ? ` (${v.toLocaleString('en-US')} votes)` : '';
-  return `${src}${r.toFixed(1)}${votes}`;
+  return `${r.toFixed(1)}${votes}`;
 }

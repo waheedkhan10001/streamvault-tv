@@ -545,7 +545,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
               </div>
 
               <div style="display:flex;gap:7px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px;flex-wrap:wrap;">
-                <span class="badge-rating" style="padding:2px 7px;font-size:11px;">${item.rating > 0 ? '★ ' + ratingText(item, true) : 'Not rated'}</span>
+                <span class="badge-rating" style="padding:2px 7px;font-size:11px;">${item.rating > 0 ? ratingStar(item) + ' ' + ratingText(item, true) : 'Not rated'}</span>
                 ${(item.qualityBadges || []).slice(0, 1).map((q) => `<span class="badge-quality" style="padding:2px 7px;font-size:11px;">${q}</span>`).join('')}
                 <span class="badge-language" style="padding:2px 7px;font-size:11px;">${item.language || 'English'}</span>
                 <span class="badge-audio" style="background:#2E1065;color:var(--theme-pale);border:1px solid var(--theme-deep);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;">Multi-Audio</span>

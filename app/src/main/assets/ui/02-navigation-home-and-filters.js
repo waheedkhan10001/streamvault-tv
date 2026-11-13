@@ -151,7 +151,7 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     loadSettings(vp);
     const paintEnrich = () => updateEnrichStatusRow((appStatus && appStatus.syncStatus) || {});
     setTimeout(paintEnrich, 120);
-    setTimeout(async () => { try { await refreshAppStatus(); } catch (_) {} paintEnrich(); }, 700);
+    setTimeout(async () => { try { await refreshSyncStatusOnly(); } catch (_) {} paintEnrich(); }, 700);
   }
 }
 
@@ -195,7 +195,7 @@ async function loadHome(vp) {
   let htmlStr = '';
   if (hero) {
     const backdrop = hero.backdropUrl || hero.posterUrl || '';
-    const ratingDisplay = hero.rating > 0 ? `★ ${ratingText(hero)}` : '';
+    const ratingDisplay = hero.rating > 0 ? `${ratingStar(hero)} ${ratingText(hero)}` : '';
     htmlStr += `
       <div class="hero" style="background-image:url('${backdrop}');">
         <div class="hero-content">
@@ -262,7 +262,7 @@ function getSeriesSeasonTag(m) {
 function renderPosterCard(m) {
   const isSeries = m.mediaType === 'SERIES';
   const seriesTag = isSeries ? getSeriesSeasonTag(m) : null;
-  const ratingStr = m.rating > 0 ? `★ ${ratingText(m)}` : '';
+  const ratingStr = m.rating > 0 ? `${ratingStar(m)} ${ratingText(m)}` : '';
   const yearStr = m.year ? String(m.year) : '';
   const quality = (m.qualityBadges || [])[0] || 'HD';
   const lang = m.language || 'English';

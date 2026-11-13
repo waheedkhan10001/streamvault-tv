@@ -17,7 +17,18 @@ class AppApiRouter(
     private val syncEngine: CatalogSyncEngine
 ) {
 
+    /** Times every request; anything slower than 400 ms is written to the problem report so lag can be traced to its cause. */
     fun handle(method: String, fullPath: String, bodyStr: String, authHeader: String? = null): String {
+        val t0 = System.currentTimeMillis()
+        try {
+            return handleInner(method, fullPath, bodyStr, authHeader)
+        } finally {
+            val ms = System.currentTimeMillis() - t0
+            if (ms >= 400) DiagLog.add("Slow request: $method ${fullPath.substringBefore("?").take(60)} took $ms ms")
+        }
+    }
+
+    private fun handleInner(method: String, fullPath: String, bodyStr: String, authHeader: String? = null): String {
         val path = if (fullPath.contains("?")) fullPath.substringBefore("?") else fullPath
         val queryString = if (fullPath.contains("?")) fullPath.substringAfter("?") else ""
         val queryParams = parseQueryParams(queryString)
@@ -185,23 +196,7 @@ class AppApiRouter(
             put("hasCustomPin", prefs.hasCustomParentalPin())
         }
 
-        val syncObj = JSONObject().apply {
-            put("isSyncing", syncState.isSyncing)
-            put("phase", syncState.phase)
-            put("newlyAddedCount", syncState.newlyAddedCount)
-            put("totalMovies", total)
-            put("totalSeries", 0)
-            put("enrichedCount", enriched)
-            put("totalToEnrich", total)
-            put("percentComplete", if (total > 0) (enriched * 100) / total else 100)
-            put("stage", syncState.stage)
-            put("processedItems", syncState.processedItems)
-            put("estimatedTotal", syncState.estimatedTotal)
-            put("removedCount", syncState.removedCount)
-            put("note", syncState.note ?: JSONObject.NULL)
-            put("error", syncState.errorMessage ?: JSONObject.NULL)
-            put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
-        }
+        val syncObj = buildSyncObj()
 
         val smartRowsArr = JSONArray()
         for (sr in db.getPinnedSmartRows()) {
@@ -1296,9 +1291,32 @@ class AppApiRouter(
         }.toString()
     }
 
+    private fun buildSyncObj(): JSONObject {
+        val (enriched, total) = db.getEnrichmentCountsCached()
+        val syncState = syncEngine.syncState.value
+        return JSONObject().apply {
+            put("isSyncing", syncState.isSyncing)
+            put("phase", syncState.phase)
+            put("newlyAddedCount", syncState.newlyAddedCount)
+            put("totalMovies", total)
+            put("totalSeries", 0)
+            put("enrichedCount", enriched)
+            put("totalToEnrich", total)
+            put("percentComplete", if (total > 0) (enriched * 100) / total else 100)
+            put("stage", syncState.stage)
+            put("processedItems", syncState.processedItems)
+            put("estimatedTotal", syncState.estimatedTotal)
+            put("removedCount", syncState.removedCount)
+            put("note", syncState.note ?: JSONObject.NULL)
+            put("error", syncState.errorMessage ?: JSONObject.NULL)
+            put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
+                }
+    }
+
     private fun handleGetSyncStatus(): String {
         return JSONObject().apply {
             put("ok", true)
+            put("syncStatus", buildSyncObj())
             put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
             put("syncState", syncEngine.syncState.value.phase)
         }.toString()

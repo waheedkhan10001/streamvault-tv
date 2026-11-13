@@ -518,6 +518,10 @@ export default {
         const codeId = crypto.randomUUID();
         const expiresAt = now + 10 * 60 * 1000; // 10 minutes
 
+        // A new code replaces any earlier one: older unused codes stop working
+        await env.DB.prepare(
+          `UPDATE email_codes SET is_used = 1 WHERE email = ? AND purpose = 'verify_email' AND is_used = 0`
+        ).bind(cleanEmail).run();
         await env.DB.prepare(
           `INSERT INTO email_codes (code_id, email, code, purpose, attempts, is_used, expires_at, created_at)
            VALUES (?, ?, ?, 'verify_email', 0, 0, ?, ?)`
@@ -645,6 +649,10 @@ export default {
         const codeId = crypto.randomUUID();
         const expiresAt = now + 10 * 60 * 1000; // 10 minutes
 
+        // A new code replaces any earlier one: older unused codes stop working
+        await env.DB.prepare(
+          `UPDATE email_codes SET is_used = 1 WHERE email = ? AND purpose = 'verify_email' AND is_used = 0`
+        ).bind(cleanEmail).run();
         await env.DB.prepare(
           `INSERT INTO email_codes (code_id, email, code, purpose, attempts, is_used, expires_at, created_at)
            VALUES (?, ?, ?, 'verify_email', 0, 0, ?, ?)`

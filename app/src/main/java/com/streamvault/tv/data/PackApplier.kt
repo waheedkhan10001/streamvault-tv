@@ -43,14 +43,23 @@ class PackApplier(private val db: StreamVaultDatabase, private val packDbFile: F
     }
 
     /** Applies the pack to every catalog title that has not been looked up yet. Blocking: run on a background thread. */
-    fun applyAll(isActive: () -> Boolean = { true }, onProgress: () -> Unit = {}): Result {
+    fun applyAll(isActive: () -> Boolean = { true }, shouldPause: () -> Boolean = { false }, onProgress: () -> Unit = {}): Result {
         var applied = 0
         var unmatched = 0
-        val pack = SQLiteDatabase.openDatabase(packDbFile.path, null, SQLiteDatabase.OPEN_READONLY)
+        val pack = SQLiteDatabase.openDatabase(packDbFile.path, null, SQLiteDatabase.OPEN_READWRITE)
         try {
+            // Lookups by TMDB id used to scan the whole pack table for every title: an index makes each one instant
+            val t0 = System.currentTimeMillis()
+            runCatching { pack.execSQL("CREATE INDEX IF NOT EXISTS idx_titles_tmdb ON titles(type, tmdb_id)") }
+            DiagLog.add("Pack index ready in ${System.currentTimeMillis() - t0} ms")
+            var batchNo = 0
             while (isActive()) {
-                val batch = db.getUnenrichedMediaQueue(emptySet(), limit = 500)
+                // stay out of the way while someone is browsing or watching
+                while (isActive() && shouldPause()) Thread.sleep(400)
+                val tq = System.currentTimeMillis()
+                val batch = db.getUnenrichedMediaQueue(emptySet(), limit = 200, ordered = false)
                 if (batch.isEmpty()) break
+                val tb = System.currentTimeMillis()
                 val wdb = db.writableDatabase
                 wdb.beginTransactionNonExclusive()
                 try {
@@ -63,7 +72,10 @@ class PackApplier(private val db: StreamVaultDatabase, private val packDbFile: F
                 } finally {
                     wdb.endTransaction()
                 }
+                batchNo++
+                if (batchNo % 10 == 1) DiagLog.add("Pack fill batch $batchNo: read ${tb - tq} ms, apply ${System.currentTimeMillis() - tb} ms (${batch.size} titles)")
                 onProgress()
+                Thread.sleep(20)
             }
         } finally {
             pack.close()
@@ -133,12 +145,8 @@ class PackApplier(private val db: StreamVaultDatabase, private val packDbFile: F
                 if (bd.isNotBlank()) put("backdrop_url", bd)
                 put("is_enriched", 1)
                 put("pack_applied", 1)
-                // search text includes the new details so search finds cast, director and plot words
-                put(
-                    "search_blob",
-                    listOf(item.cleanTitle, item.rawTitle, plot, cast.replace('|', ' '), director, genres.replace('|', ' '), item.categoryName)
-                        .joinToString(" ").lowercase(Locale.ROOT)
-                )
+                // search text: title, cast, director, genres (word-start matching; plot is not searched)
+                put("search_blob", buildSearchBlob(item.cleanTitle, item.rawTitle, cast.replace('|', ' '), director, genres.replace('|', ' ')))
             }
             wdb.update("media_items", cv, "dedup_key = ?", arrayOf(item.dedupKey))
             return true

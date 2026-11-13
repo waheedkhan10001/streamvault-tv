@@ -111,4 +111,21 @@ class PackApplierTest {
         assertEquals(8.2, nemo.rating, 0.001)
         assertEquals("A clownfish searches.", nemo.plot)
     }
+
+    @Test
+    fun searchMatchesWordStartsAndPutsTitlesFirst() {
+        db.upsertMediaBatch(
+            listOf(
+                item("a", "Seaward Bound", 2001),                      // "war" is inside a word: must not match
+                item("b", "Bad Apples", 2018).copy(plot = "A quiet war story"),   // plot is not searched
+                item("c", "The Great War", 2010),
+                item("d", "War Games", 1983),
+                item("e", "Quiet Film", 2005).copy(director = "Warren Beatty")   // matches through the director, after title matches
+            ),
+            markNewIfInserted = false
+        )
+        val res = db.queryMedia(SuperFilterState(searchQuery = "war"), isKids = false, isAdultVaultUnlocked = false, isVaultTab = false).map { it.dedupKey }
+        assertEquals(setOf("c", "d", "e"), res.toSet())
+        assertEquals("e", res.last())
+    }
 }

@@ -594,7 +594,7 @@ class CatalogSyncEngine(
         while (kotlin.coroutines.coroutineContext.isActive && (prefs.msSinceUiActivity() < 2500L || prefs.isPlaybackActive.get())) delay(400)
     }
 
-    private fun packFlagKey(f: java.io.File) = "pack_applied_${f.lastModified()}"
+    private fun packFlagKey(f: java.io.File) = "pack_applied_v2_${f.lastModified()}"
 
     /** True when a pack is installed whose details have not been copied into the catalog yet. */
     private fun packNeedsApply(): Boolean {
@@ -622,7 +622,17 @@ class CatalogSyncEngine(
                 runCatching { db.requeueAllForPack() }
             }
             val result = runCatching {
-                PackApplier(db, packDb).applyAll(isActive = { isActive }, onProgress = onProgress)
+                PackApplier(db, packDb).applyAll(
+                    isActive = { isActive },
+                    shouldPause = { prefs.msSinceUiActivity() < 2500L || prefs.isPlaybackActive.get() },
+                    onProgress = {
+                        val (e, t) = db.getEnrichmentCounts()
+                        _syncState.value = _syncState.value.copy(
+                            phase = "Enriching details and ratings ($e of $t)", enrichedCount = e, totalToEnrich = t
+                        )
+                        onProgress()
+                    }
+                )
             }.onFailure { DiagLog.add("Applying the content pack failed: ${it.message}") }.getOrNull()
             val (enriched, total) = db.getEnrichmentCounts()
             _syncState.value = _syncState.value.copy(

@@ -26,6 +26,7 @@ async function newApp(browser) {
         const p = path.split('?')[0]; const J = o => JSON.stringify(o);
         window.__calls.push(p);
         if (p === '/api/state') return J({ ok: true, totalCatalogCount: 30, syncStatus: window.__sync || {}, credentials: { serverUrl: 'http://x', username: 'u', hasPassword: true }, parentalControl: { isLocked: true, showAdult: false, showExtras: false, hasCustomPin: true } });
+        if (p === '/api/sync/status') return J({ ok: true, syncStatus: window.__sync || {} });
         if (p === '/api/session') return J({ ok: true, authenticated: true, token: TOKEN });
         if (p === '/api/auth/me') return J({ ok: true, account, token: TOKEN });
         if (p === '/api/profiles') return J({ ok: true, profiles, activeProfileId: 'p1' });

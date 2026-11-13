@@ -416,15 +416,7 @@ class StreamVaultDatabase(context: Context) :
 
                 val isAdult = item.isAdult || checkIsAdult(item.cleanTitle, item.rawTitle, item.categoryName, finalGenres)
 
-                val searchBlob = buildString {
-                    append(item.cleanTitle.lowercase(Locale.ROOT)).append(' ')
-                    append(item.rawTitle.lowercase(Locale.ROOT)).append(' ')
-                    append(finalPlot.lowercase(Locale.ROOT)).append(' ')
-                    append(finalCast.lowercase(Locale.ROOT)).append(' ')
-                    append(finalDirector.lowercase(Locale.ROOT)).append(' ')
-                    append(finalGenres.lowercase(Locale.ROOT)).append(' ')
-                    append(item.categoryName.lowercase(Locale.ROOT))
-                }
+                val searchBlob = buildSearchBlob(item.cleanTitle, item.rawTitle, finalCast, finalDirector, finalGenres)
 
                 val cv = ContentValues().apply {
                     put("dedup_key", item.dedupKey)
@@ -692,15 +684,7 @@ class StreamVaultDatabase(context: Context) :
         val finalLang = if (language.isNotBlank() && oldLang == "English") language else oldLang
         val finalIsAdult = isAdult || checkIsAdult(cleanTitle, rawTitle, catName, mergedGenres.joinToString("|"))
 
-        val searchBlob = buildString {
-            append(cleanTitle.lowercase(Locale.ROOT)).append(' ')
-            append(rawTitle.lowercase(Locale.ROOT)).append(' ')
-            append(plot.lowercase(Locale.ROOT)).append(' ')
-            append(cast.joinToString(" ").lowercase(Locale.ROOT)).append(' ')
-            append(director.lowercase(Locale.ROOT)).append(' ')
-            append(mergedGenres.joinToString(" ").lowercase(Locale.ROOT)).append(' ')
-            append(catName.lowercase(Locale.ROOT))
-        }
+        val searchBlob = buildSearchBlob(cleanTitle, rawTitle, cast.joinToString(" "), director, mergedGenres.joinToString(" "))
 
         val cv = ContentValues().apply {
             if (tmdbId > 0) put("tmdb_id", tmdbId)
@@ -735,16 +719,17 @@ class StreamVaultDatabase(context: Context) :
      */
     /** Sends every mainstream title through the content pack once (used the first time a pack is applied). */
     fun requeueAllForPack() {
-        writableDatabase.execSQL("UPDATE media_items SET is_enriched = 0 WHERE pack_applied = 0 AND is_adult = 0 AND is_extra = 0")
+        // every title goes through the pack once more (also rebuilds the search text)
+        writableDatabase.execSQL("UPDATE media_items SET is_enriched = 0 WHERE is_adult = 0 AND is_extra = 0")
     }
 
-    fun getUnenrichedMediaQueue(preferredLanguages: Set<String>, limit: Int = 500): List<MediaItem> {
+    fun getUnenrichedMediaQueue(preferredLanguages: Set<String>, limit: Int = 500, ordered: Boolean = true): List<MediaItem> {
         val db = readableDatabase
         val cursor = db.rawQuery(
             """
             SELECT * FROM media_items
             WHERE is_enriched = 0 AND is_adult = 0 AND is_extra = 0
-            ORDER BY year DESC, rating DESC, added_timestamp DESC
+            ${if (ordered) "ORDER BY year DESC, rating DESC, added_timestamp DESC" else ""}
             LIMIT ?
             """.trimIndent(),
             arrayOf(limit.toString())
@@ -914,10 +899,10 @@ class StreamVaultDatabase(context: Context) :
 
         // Search query across Title, Plot, Cast, Director
         if (filter.searchQuery.isNotBlank()) {
-            val tokens = filter.searchQuery.trim().lowercase(Locale.ROOT).split(Regex("""\s+"""))
-            for (token in tokens) {
+            // Word-start matching: every typed word must START a word in the title, cast, director or genre
+            for (token in searchTokens(filter.searchQuery)) {
                 whereClauses.add("m.search_blob LIKE ?")
-                args.add("%$token%")
+                args.add("% $token%")
             }
         }
 
@@ -1016,13 +1001,18 @@ class StreamVaultDatabase(context: Context) :
         }
 
         val whereSql = if (whereClauses.isEmpty()) "" else "WHERE " + whereClauses.joinToString(" AND ")
-        val orderSql = when (filter.sortBy) {
+        // Titles that match the typed words come before matches found only in cast / director / genre
+        val titleFirst = searchTokens(filter.searchQuery).takeIf { it.isNotEmpty() }
+            ?.joinToString(" AND ") { "(' ' || lower(m.clean_title)) LIKE '% $it%'" }
+            ?.let { "CASE WHEN $it THEN 0 ELSE 1 END" }
+        val orderSql0 = when (filter.sortBy) {
             SortOption.NEWLY_ADDED -> "ORDER BY m.added_timestamp DESC, m.year DESC"
             SortOption.RELEASE_YEAR_DESC -> "ORDER BY m.year DESC, m.rating DESC"
             SortOption.RATING_DESC -> "ORDER BY m.sort_score DESC, m.vote_count DESC"
             SortOption.TITLE_ASC -> "ORDER BY m.clean_title COLLATE NOCASE ASC"
             SortOption.RANDOM -> "ORDER BY RANDOM()"
         }
+        val orderSql = if (titleFirst != null && filter.sortBy != SortOption.RANDOM) orderSql0.replaceFirst("ORDER BY ", "ORDER BY $titleFirst, ") else orderSql0
 
         val selectSql = if (profileId.isNotBlank()) {
             """
@@ -2255,3 +2245,23 @@ class StreamVaultDatabase(context: Context) :
         return list
     }
 }
+
+
+/** Lower-case words made only of letters and digits, separated by single spaces (same rule for stored text and typed text). */
+internal fun searchWords(s: String): List<String> {
+    val sb = StringBuilder(s.length)
+    var i = 0
+    val n = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC).lowercase(Locale.ROOT)
+    while (i < n.length) {
+        val cp = n.codePointAt(i)
+        sb.appendCodePoint(if (Character.isLetterOrDigit(cp)) cp else ' '.code)
+        i += Character.charCount(cp)
+    }
+    return sb.toString().split(' ').filter { it.isNotEmpty() }
+}
+
+internal fun searchTokens(query: String): List<String> = searchWords(query)
+
+/** Text searched by the search box: title, cast, director and genres (no plot, no category), each word starting after a space. */
+internal fun buildSearchBlob(cleanTitle: String, rawTitle: String, cast: String, director: String, genres: String): String =
+    " " + searchWords("$cleanTitle $rawTitle $cast $director $genres").distinct().joinToString(" ")
