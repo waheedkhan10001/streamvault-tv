@@ -880,13 +880,16 @@ function openResetPinModal() {
   }
 }
 
+let diagPages = [], diagPageNo = 0;
 function openDiagModal() {
   const m = document.getElementById('diagModal');
   if (!m) return;
   m.style.display = 'flex';
-  loadDiagText();
+  const pre = document.getElementById('diagText');
+  if (pre) pre.textContent = 'Loading the report… (it can take a few seconds while the TV is busy)';
   const c = document.getElementById('btnDiagClose');
   if (c) c.focus();
+  setTimeout(loadDiagText, 30);
 }
 function closeDiagModal() {
   const m = document.getElementById('diagModal');
@@ -894,6 +897,13 @@ function closeDiagModal() {
   const b = document.getElementById('btnReportProblem');
   if (b && b.offsetParent !== null) b.focus();
 }
+function renderDiagPage() {
+  const pre = document.getElementById('diagText');
+  if (!pre || !diagPages.length) return;
+  if (diagPageNo >= diagPages.length) diagPageNo = 0;
+  pre.textContent = 'Page ' + (diagPageNo + 1) + ' of ' + diagPages.length + '   (take a photo of EVERY page)\n' + diagPages[diagPageNo].join('\n');
+}
+function diagNextPage() { diagPageNo = (diagPageNo + 1) % Math.max(1, diagPages.length); renderDiagPage(); }
 async function loadDiagText() {
   const pre = document.getElementById('diagText');
   if (!pre) return;
@@ -901,14 +911,20 @@ async function loadDiagText() {
     const r = await fetch('/api/diag');
     const d = r && r.ok ? await r.json() : null;
     if (!d) { pre.textContent = 'The report is not available on this device.'; return; }
-    const until = d.cloudPausedUntil && d.cloudPausedUntil > Date.now() ? new Date(d.cloudPausedUntil).toLocaleString() : 'no';
-    pre.textContent = [
-      `StreamVault ${d.appVersion}  |  ${d.device}`,
-      `Titles: ${d.titles}  |  with details: ${d.enriched}  |  waiting for the cloud: ${d.cloudPending}  |  cloud paused until: ${until}  |  signed in: ${d.signedIn ? 'yes' : 'no'}`,
-      d.lastCrash ? `Last crash: ${String(d.lastCrash).slice(0, 300)}` : 'No crash recorded.',
-      '--- latest events ---',
-      ...(d.lines && d.lines.length ? d.lines.slice(-22) : ['(nothing recorded yet)'])
-    ].join('\n');
+    const lines = (d.report && d.report.length ? d.report : (d.lines || [])).flatMap((l) => {
+      const t = String(l); const out = [];
+      for (let i = 0; i < t.length; i += 150) out.push(t.slice(i, i + 150));
+      return out.length ? out : [''];
+    });
+    // pages: a new page starts at each "=== SECTION ===" once the current page has enough lines
+    diagPages = []; let cur = [];
+    for (const l of lines) {
+      if ((l.startsWith('===') && cur.length >= 14) || cur.length >= 24) { diagPages.push(cur); cur = []; }
+      cur.push(l);
+    }
+    if (cur.length) diagPages.push(cur);
+    diagPageNo = 0;
+    renderDiagPage();
   } catch (_) { pre.textContent = 'The report could not be loaded.'; }
 }
 

@@ -145,8 +145,9 @@
   <div style="background:var(--panel);border:1px solid var(--card-border);border-radius:12px;padding:16px 20px;width:min(860px,92vw);max-height:90vh;display:flex;flex-direction:column;">
     <div style="font-size:15px;font-weight:900;margin-bottom:6px;">Report a problem</div>
     <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">Take a photo of this screen and send it. It contains no passwords or stream addresses.</div>
-    <pre id="diagText" style="flex:1;overflow:hidden;font-size:9.5px;line-height:1.35;color:#E5E7EB;background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;margin:0 0 10px 0;">Loading…</pre>
+    <pre id="diagText" style="flex:1;overflow:hidden;min-height:300px;font-size:9.5px;line-height:1.35;color:#E5E7EB;background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 10px;white-space:pre-wrap;word-break:break-word;margin:0 0 10px 0;">Loading…</pre>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button tabindex="0" id="btnDiagNext" class="btn tv-focusable" style="padding:5px 14px;font-size:11px;" onclick="diagNextPage()" onfocus="playNavSound()">Next page</button>
       <button tabindex="0" id="btnDiagRefresh" class="btn tv-focusable" style="padding:5px 14px;font-size:11px;" onclick="loadDiagText()" onfocus="playNavSound()">Refresh</button>
       <button tabindex="0" id="btnDiagClose" class="btn btn-primary tv-focusable" style="padding:5px 14px;font-size:11px;" onclick="closeDiagModal()" onfocus="playNavSound()">Close</button>
     </div>

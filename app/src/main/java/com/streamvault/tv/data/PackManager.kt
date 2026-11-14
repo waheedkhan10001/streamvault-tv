@@ -99,6 +99,7 @@ class PackManager(private val context: Context, private val prefs: PreferencesMa
      * Returns true when a pack is installed and ready (this one or the one already installed).
      */
     fun downloadAndInstall(): Boolean {
+        postersBase = -1L
         cancelled = false
         val token = prefs.getAuthToken()
         if (token == null) { set(Phase.ERROR, message = "Sign in first"); return isReady() }
@@ -210,12 +211,13 @@ class PackManager(private val context: Context, private val prefs: PreferencesMa
     }
 
     /** Poster bytes for a title row (poster_off / poster_len from the database), read straight from the pack file. */
+    @Volatile private var postersBase = -1L
     fun readPoster(posterOff: Long, posterLen: Int): ByteArray? {
         if (posterLen <= 0 || !packFile.exists()) return null
         return runCatching {
-            val base = readHeader(packFile).optLong("postersOffset")
+            if (postersBase < 0) postersBase = readHeader(packFile).optLong("postersOffset")   // read the header once, not for every poster
             RandomAccessFile(packFile, "r").use { raf ->
-                raf.seek(base + posterOff)
+                raf.seek(postersBase + posterOff)
                 ByteArray(posterLen).also { raf.readFully(it) }
             }
         }.getOrNull()

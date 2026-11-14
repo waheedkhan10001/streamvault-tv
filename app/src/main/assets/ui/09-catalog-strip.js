@@ -139,3 +139,35 @@ function ratingText(m, withVotes) {
   const votes = withVotes && v > 0 ? ` (${v.toLocaleString('en-US')} votes)` : '';
   return `${r.toFixed(1)}${votes}`;
 }
+
+
+// ---- Problem-report helpers: the screen reports freezes, errors and tab opening times to the report screen ----
+(function () {
+  const q = [];
+  function note(t) { if (q.length < 60) q.push(t); }
+  window.svDiagNote = note;
+  // freeze detector: a 100 ms timer that fires much later means the screen was stuck
+  let last = performance.now();
+  setInterval(() => {
+    const now = performance.now(), gap = now - last - 100;
+    last = now;
+    if (gap > 200) note('screen froze ' + Math.round(gap) + ' ms (tab ' + currentTab + ')');
+  }, 100);
+  window.addEventListener('error', (e) => note('script error: ' + String(e.message).slice(0, 120) + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno));
+  window.addEventListener('unhandledrejection', (e) => note('unhandled: ' + String((e.reason && e.reason.message) || e.reason).slice(0, 120)));
+  // how long each tab takes from open to drawn
+  try {
+    const orig = window.navigateToTab;
+    window.navigateToTab = async function () {
+      const t0 = performance.now(), tab = arguments[0];
+      const r = await orig.apply(this, arguments);
+      note('tab ' + tab + ' opened in ' + Math.round(performance.now() - t0) + ' ms');
+      return r;
+    };
+  } catch (_) {}
+  setInterval(() => {
+    if (!q.length) return;
+    const events = q.splice(0, q.length);
+    fetch('/api/diag/js', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ events }) }).catch(() => {});
+  }, 8000);
+})();

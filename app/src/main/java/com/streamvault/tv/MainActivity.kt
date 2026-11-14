@@ -52,6 +52,9 @@ class MainActivity : Activity() {
 
     private lateinit var rootLayout: FrameLayout
     private lateinit var webView: WebView
+    /** Two workers answer the screen's requests, so a light request is not stuck behind a heavy one. */
+    val apiPool: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newFixedThreadPool(2) { r -> Thread(r, "sv-api") }
+    fun evalJs(js: String) { if (::webView.isInitialized) webView.evaluateJavascript(js, null) }
 
     // Track structure for multi-audio and subtitles
     data class StreamTrack(
@@ -182,6 +185,25 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun handleApiRequest(method: String, path: String, body: String): String {
             return activity.apiRouter.handle(method, path, body)
+        }
+
+        /**
+         * Same as handleApiRequestWithAuth, but the answer comes back later (window.__svApiDone) so the screen never freezes
+         * while the database works: the old call blocked every key press until the query finished.
+         */
+        @JavascriptInterface
+        fun handleApiRequestAsync(callId: String, method: String, path: String, body: String, authToken: String?) {
+            activity.apiPool.execute {
+                val res = try {
+                    val authHeader = if (!authToken.isNullOrBlank()) "Bearer $authToken" else null
+                    activity.apiRouter.handle(method, path, body, authHeader)
+                } catch (e: Throwable) {
+                    """{"ok":false,"error":${org.json.JSONObject.quote(e.message ?: "error")}}"""
+                }
+                activity.runOnUiThread {
+                    activity.evalJs("window.__svApiDone && window.__svApiDone(${org.json.JSONObject.quote(callId)}, ${org.json.JSONObject.quote(res)})")
+                }
+            }
         }
 
         @JavascriptInterface

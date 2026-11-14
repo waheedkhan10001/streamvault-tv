@@ -50,14 +50,20 @@ class PackApplier(private val db: StreamVaultDatabase, private val packDbFile: F
         try {
             // Lookups by TMDB id used to scan the whole pack table for every title: an index makes each one instant
             val t0 = System.currentTimeMillis()
-            runCatching { pack.execSQL("CREATE INDEX IF NOT EXISTS idx_titles_tmdb ON titles(type, tmdb_id)") }
-            DiagLog.add("Pack index ready in ${System.currentTimeMillis() - t0} ms")
+            // The pack's own index only covers tmdb_id > 0, and SQLite cannot use such an index when the id is a bound value:
+            // every lookup then read the whole table (about 100 ms per title on the TV). A plain index under a NEW name fixes that.
+            runCatching { pack.execSQL("CREATE INDEX IF NOT EXISTS idx_titles_lookup ON titles(type, tmdb_id)") }
+            DiagLog.add("Pack lookup index ready in ${System.currentTimeMillis() - t0} ms")
             var batchNo = 0
             while (isActive()) {
                 // stay out of the way while someone is browsing or watching
-                while (isActive() && shouldPause()) Thread.sleep(400)
+                if (isActive() && shouldPause()) {
+                    val tp = System.currentTimeMillis()
+                    while (isActive() && shouldPause()) Thread.sleep(300)
+                    DiagStats.fillPausedMs += System.currentTimeMillis() - tp
+                }
                 val tq = System.currentTimeMillis()
-                val batch = db.getUnenrichedMediaQueue(emptySet(), limit = 200, ordered = false)
+                val batch = db.getUnenrichedMediaQueue(emptySet(), limit = 50, ordered = false)
                 if (batch.isEmpty()) break
                 val tb = System.currentTimeMillis()
                 val wdb = db.writableDatabase
@@ -73,9 +79,11 @@ class PackApplier(private val db: StreamVaultDatabase, private val packDbFile: F
                     wdb.endTransaction()
                 }
                 batchNo++
-                if (batchNo % 10 == 1) DiagLog.add("Pack fill batch $batchNo: read ${tb - tq} ms, apply ${System.currentTimeMillis() - tb} ms (${batch.size} titles)")
+                val applyMs = System.currentTimeMillis() - tb
+                DiagStats.fillBatch(batch.size, applyMs + (tb - tq))
+                if (batchNo % 40 == 1) DiagLog.add("Pack fill batch $batchNo: read ${tb - tq} ms, apply $applyMs ms (${batch.size} titles)")
                 onProgress(batch.size)
-                Thread.sleep(60)   // a short rest so browsing stays smooth
+                Thread.sleep(80)   // a short rest so browsing stays smooth
             }
         } finally {
             pack.close()

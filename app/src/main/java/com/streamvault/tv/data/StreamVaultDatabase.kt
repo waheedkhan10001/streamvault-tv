@@ -803,6 +803,43 @@ class StreamVaultDatabase(context: Context) :
 
     @Volatile private var enrichCountCache: Triple<Int, Int, Long>? = null
     /** Same numbers, but counted at most once every few seconds: the screen asks for them all the time and counting 70k rows is not free. */
+    /** Facts for the problem report: row counts, the indexes that exist, and how SQLite plans the main screens' searches. */
+    fun diagFacts(): List<String> {
+        val out = mutableListOf<String>()
+        val d = readableDatabase
+        fun one(sql: String): String = runCatching {
+            d.rawQuery(sql, null).use { c -> if (c.moveToFirst()) (0 until c.columnCount).joinToString(" / ") { c.getString(it) ?: "-" } else "-" }
+        }.getOrElse { "error: ${it.message}" }
+        out += "Rows (all / with details / adult / extras / from pack / with poster): " +
+            one("SELECT COUNT(*), SUM(is_enriched=1), SUM(is_adult=1), SUM(is_extra=1), SUM(pack_applied=1), SUM(poster_url<>'') FROM media_items")
+        out += "Movies / series / live channels / episodes: " +
+            one("SELECT (SELECT COUNT(*) FROM media_items WHERE media_type='MOVIE'), (SELECT COUNT(*) FROM media_items WHERE media_type='SERIES'), (SELECT COUNT(*) FROM live_channels), (SELECT COUNT(*) FROM series_episodes)")
+        val f = java.io.File(d.path)
+        out += "Database file: ${f.length() / 1048576} MB, write-log ${java.io.File(d.path + "-wal").length() / 1048576} MB"
+        val idx = mutableListOf<String>()
+        runCatching { d.rawQuery("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='media_items' AND name NOT LIKE 'sqlite_%'", null).use { while (it.moveToNext()) idx += it.getString(0) } }
+        out += "Indexes on titles (${idx.size}): " + idx.joinToString(", ")
+        val plans = listOf(
+            "Movies tab (newest added)" to "SELECT dedup_key FROM media_items WHERE is_adult=0 AND is_extra=0 AND media_type='MOVIE' ORDER BY added_timestamp DESC LIMIT 120",
+            "Highest rated" to "SELECT dedup_key FROM media_items WHERE is_adult=0 AND is_extra=0 AND rating>=6.8 ORDER BY sort_score DESC, vote_count DESC LIMIT 10",
+            "Genre row" to "SELECT dedup_key FROM media_items WHERE is_adult=0 AND is_extra=0 AND ('|' || genres_text || '|' LIKE '%|Action|%') ORDER BY sort_score DESC LIMIT 24",
+            "Fill queue" to "SELECT dedup_key FROM media_items WHERE is_enriched=0 AND is_adult=0 AND is_extra=0 LIMIT 50"
+        )
+        for ((name, sql) in plans) {
+            val t = System.currentTimeMillis()
+            val plan = runCatching {
+                val sb = StringBuilder()
+                d.rawQuery("EXPLAIN QUERY PLAN $sql", null).use { while (it.moveToNext()) sb.append(it.getString(3)).append("; ") }
+                sb.toString().take(150)
+            }.getOrElse { "error" }
+            val ms = System.currentTimeMillis() - t
+            val run = System.currentTimeMillis()
+            runCatching { d.rawQuery(sql, null).use { c -> while (c.moveToNext()) { } } }
+            out += "Plan $name: $plan | runs in ${System.currentTimeMillis() - run} ms"
+        }
+        return out
+    }
+
     /** The fill reports its own progress here, so screens never need to count rows while it runs. */
     fun setEnrichmentCountsCache(enriched: Int, total: Int) { enrichCountCache = Triple(enriched, total, System.currentTimeMillis()) }
 

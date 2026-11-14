@@ -1,6 +1,9 @@
 // Smart Universal Network Routing for Cloud and Native Standalone TV
 const CLOUD_SYNC_BASE = 'https://streamvault-sync.streamvault-app.workers.dev';
 
+window.__svApiSeq = 0;
+window.__svApiPending = {};
+window.__svApiDone = function (id, res) { const f = window.__svApiPending[id]; if (f) { delete window.__svApiPending[id]; f(res); } };
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function(input, init) {
   const token = localStorage.getItem('sv_auth_token') || '';
@@ -61,6 +64,32 @@ window.fetch = function(input, init) {
     }
 
     // 2. Native Standalone TV Engine (Direct In-Memory / SQLite via Kotlin bridge)
+    // The answer arrives later, so the screen keeps responding to the remote while the database works.
+    if (window.AndroidApp && typeof window.AndroidApp.handleApiRequestAsync === 'function') {
+      const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
+      const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
+      return new Promise((resolve) => {
+        const id = 'c' + (++window.__svApiSeq);
+        const timer = setTimeout(() => {
+          if (window.__svApiPending[id]) { delete window.__svApiPending[id]; resolve(new Response(JSON.stringify({ error: 'timeout', ok: false }), { status: 504 })); }
+        }, 180000);
+        window.__svApiPending[id] = (resStr) => {
+          clearTimeout(timer);
+          let status = 200;
+          try {
+            const parsed = JSON.parse(resStr);
+            if (parsed && (parsed.status === 401 || (parsed.error && String(parsed.error).includes('Unauthorized')))) status = 401;
+          } catch (_) {}
+          resolve(new Response(resStr, { status: status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }));
+        };
+        try {
+          window.AndroidApp.handleApiRequestAsync(id, method, input, body, token || '');
+        } catch (err) {
+          clearTimeout(timer); delete window.__svApiPending[id];
+          resolve(new Response(JSON.stringify({ error: err.message, ok: false }), { status: 500 }));
+        }
+      });
+    }
     if (window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
       const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
       const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
@@ -913,7 +942,7 @@ function renderSidebar(lockedToPlaylist = false) {
 // Sidebar Up/Down: the highlight moves at once (instant); the tab itself opens only after a short pause, so a fast
 // run through the tabs never queues up page loads. Enter / OK opens it immediately.
 let sidebarOpenTimer = null;
-const SIDEBAR_OPEN_DELAY_MS = 320;
+const SIDEBAR_OPEN_DELAY_MS = 600;
 function sidebarFocusThenOpen(btn) {
   btn.focus();
   playNavSound();
