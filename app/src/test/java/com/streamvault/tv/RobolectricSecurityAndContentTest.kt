@@ -114,14 +114,14 @@ class RobolectricSecurityAndContentTest {
         )
         val kidsKeys = kidsResults.map { it.dedupKey }.toSet()
 
-        // Must ONLY contain the 7 approved kids certifications (G, PG, TV-Y, TV-G, TV-Y7, TV-PG, U)
-        assertEquals("Kids catalog must contain only the 7 approved kids titles", 7, kidsResults.size)
+        // Must ONLY contain all-ages ratings (G, TV-Y, TV-G, U): not PG, TV-PG or TV-Y7
+        assertEquals("Kids catalog must contain only the 4 all-ages titles", 4, kidsResults.size)
         assertTrue(kidsKeys.contains("nemo"))
-        assertTrue(kidsKeys.contains("shrek"))
+        assertFalse("Kids mode must reject shrek (not all-ages)", kidsKeys.contains("shrek"))
         assertTrue(kidsKeys.contains("bluey"))
         assertTrue(kidsKeys.contains("peppa"))
-        assertTrue(kidsKeys.contains("sponge"))
-        assertTrue(kidsKeys.contains("incredibles"))
+        assertFalse("Kids mode must reject sponge (not all-ages)", kidsKeys.contains("sponge"))
+        assertFalse("Kids mode must reject incredibles (not all-ages)", kidsKeys.contains("incredibles"))
         assertTrue(kidsKeys.contains("paddington"))
 
         // Must strictly exclude R, TV-MA, NC-17, uncertified, and adult
