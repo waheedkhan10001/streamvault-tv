@@ -911,7 +911,15 @@ async function loadDiagText() {
     const r = await fetch('/api/diag');
     const d = r && r.ok ? await r.json() : null;
     if (!d) { pre.textContent = 'The report is not available on this device.'; return; }
-    const lines = (d.report && d.report.length ? d.report : (d.lines || [])).flatMap((l) => {
+    const until = d.cloudPausedUntil && d.cloudPausedUntil > Date.now() ? new Date(d.cloudPausedUntil).toLocaleString() : 'no';
+    const basic = [
+      `StreamVault ${d.appVersion}  |  ${d.device}`,
+      `Titles: ${d.titles}  |  with details: ${d.enriched}  |  waiting for the cloud: ${d.cloudPending}  |  cloud paused until: ${until}  |  signed in: ${d.signedIn ? 'yes' : 'no'}`,
+      d.lastCrash ? `Last crash: ${String(d.lastCrash).slice(0, 300)}` : 'No crash recorded.',
+      '--- latest events ---',
+      ...(d.lines && d.lines.length ? d.lines.slice(-22) : ['(nothing recorded yet)'])
+    ];
+    const lines = (d.report && d.report.length ? d.report : basic).flatMap((l) => {
       const t = String(l); const out = [];
       for (let i = 0; i < t.length; i += 150) out.push(t.slice(i, i + 150));
       return out.length ? out : [''];
