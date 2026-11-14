@@ -104,6 +104,7 @@ class CatalogSyncEngine(
         val seenMovieKeys = HashSet<String>(100_000)
         val seenSeriesKeys = HashSet<String>(20_000)
         val seenLiveStreams = HashSet<String>(20_000)
+        val unchanged = HashSet<MediaType>()   // lists identical to the last reading: not read again, nothing to remove
     }
 
     private class CountingInputStream(inner: java.io.InputStream) : java.io.FilterInputStream(inner) {
@@ -111,6 +112,14 @@ class CatalogSyncEngine(
         override fun read(): Int { val r = super.read(); if (r >= 0) bytes++; return r }
         override fun read(b: ByteArray, off: Int, len: Int): Int { val n = super.read(b, off, len); if (n > 0) bytes += n; return n }
     }
+
+    // Reading the provider list is background work: low priority, and it steps aside while the remote is being used
+    private val importDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "sv-import").apply { priority = Thread.MIN_PRIORITY; isDaemon = true }
+    }.asCoroutineDispatcher()
+
+    /** Where the downloaded provider list is kept while it is read (set by the app). */
+    @Volatile var cacheDir: java.io.File? = null
 
     fun triggerSync(isManual: Boolean = false, onCatalogUpdated: () -> Unit = {}) {
         val creds = prefs.loadCredentials()
@@ -122,7 +131,7 @@ class CatalogSyncEngine(
         if (_syncState.value.isSyncing && !isManual) return
 
         syncJob?.cancel()
-        syncJob = scope.launch(Dispatchers.IO) {
+        syncJob = scope.launch(importDispatcher) {
             // Respect 1-Connection Playback Lock
             if (prefs.isPlaybackActive.get() && !isManual) {
                 return@launch
@@ -200,17 +209,17 @@ class CatalogSyncEngine(
 
                 // 4c. Tidy up: fold duplicate listings and forget what the provider no longer lists (only after a COMPLETE download)
                 _syncState.value = _syncState.value.copy(phase = "Tidying up the catalogue...", stage = "Tidying up", processedItems = 0, estimatedTotal = 0)
-                if (moviesDone) db.foldLooseDuplicates(MediaType.MOVIE)
-                if (seriesDone) db.foldLooseDuplicates(MediaType.SERIES)
+                if (moviesDone && MediaType.MOVIE !in ctx.unchanged) db.foldLooseDuplicates(MediaType.MOVIE)
+                if (seriesDone && MediaType.SERIES !in ctx.unchanged) db.foldLooseDuplicates(MediaType.SERIES)
                 var removedTitles = 0
                 var looksIncomplete = false
                 // Safety: if the list is empty or far smaller than before, nothing is deleted
                 fun listLooksComplete(before: Int, nowListed: Int) = before == 0 || (nowListed > 0 && nowListed * 2 >= before)
-                if (moviesDone) {
+                if (moviesDone && MediaType.MOVIE !in ctx.unchanged) {
                     if (listLooksComplete(prevMovies, ctx.seenMovieKeys.size)) removedTitles += db.removeUnseenMedia(MediaType.MOVIE, ctx.seenMovieStreams).first
                     else looksIncomplete = true
                 }
-                if (seriesDone) {
+                if (seriesDone && MediaType.SERIES !in ctx.unchanged) {
                     if (listLooksComplete(prevSeries, ctx.seenSeriesKeys.size)) removedTitles += db.removeUnseenMedia(MediaType.SERIES, ctx.seenSeriesStreams).first
                     else looksIncomplete = true
                 }
@@ -226,6 +235,11 @@ class CatalogSyncEngine(
                 }
                 onCatalogUpdated()
 
+                runCatching {
+                    val merged = db.foldSameTmdbTitles()
+                    if (merged > 0) DiagLog.add("Merged $merged listings of the same film into one card")
+                    db.refreshStatistics()
+                }
                 prefs.lastFullSyncTimestamp = System.currentTimeMillis()
                 DiagLog.add("Provider refresh finished in ${(System.currentTimeMillis() - importStartedAt) / 1000} s (${newMovies + newSeries} new, $removedTitles removed)")
                 val (enriched, total) = db.getEnrichmentCounts()
@@ -307,12 +321,14 @@ class CatalogSyncEngine(
         fun flushChunk() {
             if (dedupMap.isEmpty()) return
             for (chunk in dedupMap.values.toList().chunked(500)) {
+                var waited = 0
+                while (prefs.msSinceUiActivity() < 1500L && waited < 60) { Thread.sleep(250); waited++ }   // step aside for the remote (at most 15 s each time)
                 totalNew += db.upsertMediaBatch(chunk, markNewIfInserted = markNew, mergeVersions = true)
             }
             dedupMap.clear()
         }
 
-        httpClient.newCall(req).execute().use { resp ->
+        fun checkResponse(resp: okhttp3.Response) {
             if (!resp.isSuccessful) {
                 throw IllegalStateException(
                     when (resp.code) {
@@ -323,177 +339,111 @@ class CatalogSyncEngine(
                     }
                 )
             }
-            val rawStream = resp.body?.byteStream() ?: return 0
-            val contentLength = resp.body?.contentLength() ?: -1L
-            val counting = CountingInputStream(rawStream)
-            val reader = JsonReader(InputStreamReader(counting, Charsets.UTF_8))
+        }
 
-            // A list is expected. Providers answer with an object ({"user_info":{"auth":0}}) when the login is wrong.
-            if (reader.peek() == JsonToken.BEGIN_OBJECT) {
-                throw IllegalStateException("The IPTV server did not accept this username and password")
-            }
-            if (reader.peek() != JsonToken.BEGIN_ARRAY) return 0
-            reader.beginArray()
-            var count = 0
-            while (reader.hasNext()) {
-                if (reader.peek() != JsonToken.BEGIN_OBJECT) {
-                    reader.skipValue()
-                    continue
+        fun parseStream(rawStream: java.io.InputStream, contentLength: Long) {
+                val counting = CountingInputStream(rawStream)
+                val reader = JsonReader(InputStreamReader(counting, Charsets.UTF_8))
+
+                // A list is expected. Providers answer with an object ({"user_info":{"auth":0}}) when the login is wrong.
+                if (reader.peek() == JsonToken.BEGIN_OBJECT) {
+                    throw IllegalStateException("The IPTV server did not accept this username and password")
                 }
-                var streamId = ""
-                var name = ""
-                var poster = ""
-                var backdrop = ""
-                var rating = 0.0
-                var categoryId = ""
-                var containerExt = "mp4"
-                var addedTs = 0L
-                var tmdbId = 0
-                var plot = ""
-                var castStr = ""
-                var director = ""
-                var genreStr = ""
-                var releaseDate = ""
-
-                reader.beginObject()
+                if (reader.peek() != JsonToken.BEGIN_ARRAY) return
+                reader.beginArray()
+                var count = 0
                 while (reader.hasNext()) {
-                    val key = reader.nextName()
-                    if (reader.peek() == JsonToken.NULL) {
-                        reader.nextNull()
+                    if (reader.peek() != JsonToken.BEGIN_OBJECT) {
+                        reader.skipValue()
                         continue
                     }
-                    when (key) {
-                        "stream_id", "series_id" -> streamId = reader.nextStringOrNumber()
-                        "name", "title" -> name = reader.nextStringOrNumber()
-                        "stream_icon", "cover" -> poster = reader.nextStringOrNumber()
-                        "rating" -> rating = reader.nextStringOrNumber().toDoubleOrNull() ?: 0.0
-                        "category_id" -> categoryId = reader.nextStringOrNumber()
-                        "container_extension" -> containerExt = reader.nextStringOrNumber()
-                        "added", "last_modified" -> addedTs = reader.nextStringOrNumber().toLongOrNull() ?: 0L
-                        "tmdb", "tmdb_id" -> tmdbId = reader.nextStringOrNumber().toIntOrNull() ?: 0
-                        "plot" -> plot = reader.nextStringOrNumber()
-                        "cast" -> castStr = reader.nextStringOrNumber()
-                        "director" -> director = reader.nextStringOrNumber()
-                        "genre" -> genreStr = reader.nextStringOrNumber()
-                        "releaseDate", "release_date" -> releaseDate = reader.nextStringOrNumber()
-                        "backdrop_path" -> {
-                            if (reader.peek() == JsonToken.BEGIN_ARRAY) {
-                                reader.beginArray()
-                                if (reader.hasNext() && reader.peek() == JsonToken.STRING) {
-                                    backdrop = reader.nextString()
-                                }
-                                while (reader.hasNext()) reader.skipValue()
-                                reader.endArray()
-                            } else {
-                                backdrop = reader.nextStringOrNumber()
-                            }
+                    var streamId = ""
+                    var name = ""
+                    var poster = ""
+                    var backdrop = ""
+                    var rating = 0.0
+                    var categoryId = ""
+                    var containerExt = "mp4"
+                    var addedTs = 0L
+                    var tmdbId = 0
+                    var plot = ""
+                    var castStr = ""
+                    var director = ""
+                    var genreStr = ""
+                    var releaseDate = ""
+
+                    reader.beginObject()
+                    while (reader.hasNext()) {
+                        val key = reader.nextName()
+                        if (reader.peek() == JsonToken.NULL) {
+                            reader.nextNull()
+                            continue
                         }
-                        else -> reader.skipValue()
+                        when (key) {
+                            "stream_id", "series_id" -> streamId = reader.nextStringOrNumber()
+                            "name", "title" -> name = reader.nextStringOrNumber()
+                            "stream_icon", "cover" -> poster = reader.nextStringOrNumber()
+                            "rating" -> rating = reader.nextStringOrNumber().toDoubleOrNull() ?: 0.0
+                            "category_id" -> categoryId = reader.nextStringOrNumber()
+                            "container_extension" -> containerExt = reader.nextStringOrNumber()
+                            "added", "last_modified" -> addedTs = reader.nextStringOrNumber().toLongOrNull() ?: 0L
+                            "tmdb", "tmdb_id" -> tmdbId = reader.nextStringOrNumber().toIntOrNull() ?: 0
+                            "plot" -> plot = reader.nextStringOrNumber()
+                            "cast" -> castStr = reader.nextStringOrNumber()
+                            "director" -> director = reader.nextStringOrNumber()
+                            "genre" -> genreStr = reader.nextStringOrNumber()
+                            "releaseDate", "release_date" -> releaseDate = reader.nextStringOrNumber()
+                            "backdrop_path" -> {
+                                if (reader.peek() == JsonToken.BEGIN_ARRAY) {
+                                    reader.beginArray()
+                                    if (reader.hasNext() && reader.peek() == JsonToken.STRING) {
+                                        backdrop = reader.nextString()
+                                    }
+                                    while (reader.hasNext()) reader.skipValue()
+                                    reader.endArray()
+        }
+
+        // The list is saved to a file first and fingerprinted: when the provider's list is exactly the one read last time,
+        // there is nothing new, and the long reading step (about 20 minutes on the TV) is skipped.
+        val tmp = cacheDir?.let { java.io.File(it, "provider_${mediaType.name}.json") }
+        var downloadedHash = ""
+        val label = if (mediaType == MediaType.MOVIE) "movie" else "series"
+        if (tmp != null) {
+            val t0 = System.currentTimeMillis()
+            _syncState.value = _syncState.value.copy(phase = "Downloading the $label list...", stage = stageLabel)
+            httpClient.newCall(req).execute().use { resp ->
+                checkResponse(resp)
+                val body = resp.body ?: return 0
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                tmp.outputStream().use { out ->
+                    body.byteStream().use { ins ->
+                        val buf = ByteArray(65536)
+                        while (true) { val n = ins.read(buf); if (n < 0) break; md.update(buf, 0, n); out.write(buf, 0, n) }
                     }
                 }
-                reader.endObject()
-
-                if (streamId.isBlank() || name.isBlank()) continue
-                val catName = categoryMap[categoryId] ?: "Movies"
-                val parsed = TitleParser.parse(name, catName, tmdbId)
-                val yearFromDate = releaseDate.take(4).toIntOrNull() ?: 0
-                val finalYear = if (parsed.year > 0) parsed.year else yearFromDate
-
-                val serverGenres = genreStr.split(",", "/", "|")
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                val combinedGenres = (serverGenres + parsed.inferredGenres).distinct()
-
-                val version = StreamVersion(
-                    streamId = streamId,
-                    rawTitle = name,
-                    languageTag = parsed.language,
-                    qualityTag = parsed.qualityBadges.joinToString(" "),
-                    subtitleTag = parsed.subtitleHint,
-                    containerExtension = containerExt.ifBlank { "mp4" },
-                    categoryId = categoryId,
-                    categoryName = catName,
-                    addedTimestamp = addedTs
-                )
-
-                seenStreams.add(streamId)
-                seenKeys.add(parsed.dedupKey)
-                val isVault = StreamVaultDatabase.checkIsAdult(parsed.cleanTitle, name, catName, combinedGenres.joinToString(" ")) ||
-                    StreamVaultDatabase.checkIsExtra(catName)
-                val target: MutableMap<String, MediaItem> = if (isVault) ctx.vaultBuffer else dedupMap
-                val existing = target[parsed.dedupKey]
-                if (existing == null) {
-                    target[parsed.dedupKey] = MediaItem(
-                        dedupKey = parsed.dedupKey,
-                        primaryStreamId = streamId,
-                        tmdbId = tmdbId,
-                        mediaType = mediaType,
-                        cleanTitle = parsed.cleanTitle,
-                        rawTitle = name,
-                        year = finalYear,
-                        rating = 0.0, // the IPTV provider's rating is not trusted; TMDB enrichment fills it
-                        genres = combinedGenres,
-                        plot = plot,
-                        cast = castStr.split(",").map { it.trim() }.filter { it.isNotBlank() },
-                        director = director,
-                        posterUrl = poster,
-                        backdropUrl = backdrop,
-                        language = parsed.language,
-                        qualityBadges = parsed.qualityBadges,
-                        hasEmbeddedSubtitles = parsed.subtitleHint.isNotBlank() || containerExt.equals("mkv", ignoreCase = true),
-                        embeddedSubtitleLanguages = if (parsed.subtitleHint.isNotBlank()) listOf("English") else emptyList(),
-                        hasOnlineSubtitles = true,
-                        categoryId = categoryId,
-                        categoryName = catName,
-                        addedTimestamp = addedTs,
-                        isEnriched = false,   // provider text is only a fallback: every title still gets its TMDB rating, age rating and cast
-                        versions = listOf(version)
-                    )
-                } else {
-                    // Merge duplicate stream version onto the same unified Netflix card!
-                    val mergedQualities = (existing.qualityBadges + parsed.qualityBadges).distinct()
-                    val mergedGenres = (existing.genres + combinedGenres).distinct()
-                    val mergedVersions = existing.versions + version
-                    val bestPoster = if (existing.posterUrl.isNotBlank()) existing.posterUrl else poster
-                    val bestRating = existing.rating   // the IPTV provider's own rating is never used (TMDB fills it later)
-                    val bestAdded = maxOf(existing.addedTimestamp, addedTs)
-                    target[parsed.dedupKey] = existing.copy(
-                        qualityBadges = mergedQualities,
-                        genres = mergedGenres,
-                        posterUrl = bestPoster,
-                        rating = bestRating,
-                        addedTimestamp = bestAdded,
-                        versions = mergedVersions,
-                        plot = existing.plot.ifBlank { plot },
-                        cast = if (existing.cast.isNotEmpty()) existing.cast else castStr.split(",").map { it.trim() }.filter { it.isNotBlank() },
-                        director = existing.director.ifBlank { director },
-                        backdropUrl = existing.backdropUrl.ifBlank { backdrop },
-                        tmdbId = if (existing.tmdbId > 0) existing.tmdbId else tmdbId,
-                        year = if (existing.year > 0) existing.year else finalYear
-                    )
-                }
-
-                count++
-                if (dedupMap.size >= 1500) flushChunk()
-                if (ctx.vaultBuffer.size >= 8000) totalNew += saveVaultBuffer(ctx, markNew)
-                if (count % 1500 == 0) {
-                    val fraction = if (contentLength > 0) counting.bytes.toDouble() / contentLength else 0.0
-                    val estimate = when {
-                        fraction > 0.05 -> (count / fraction).toInt()
-                        previousTotal > 0 -> previousTotal
-                        else -> 0
-                    }
-                    _syncState.value = _syncState.value.copy(
-                        processedItems = count,
-                        stage = stageLabel,
-                        estimatedTotal = estimate,
-                        phase = "Parsed $count ${if (mediaType == MediaType.MOVIE) "Movies" else "Series"} (${seenKeys.size} unique cards)..."
-                    )
-                }
+                downloadedHash = md.digest().joinToString("") { "%02x".format(it) }
             }
-            reader.endArray()
+            DiagLog.add("Provider $label list downloaded: ${tmp.length() / 1048576} MB in ${(System.currentTimeMillis() - t0) / 1000} s")
+            if (previousTotal > 0 && downloadedHash == prefs.getString("list_hash_${mediaType.name}")) {
+                tmp.delete()
+                ctx.unchanged.add(mediaType)
+                DiagLog.add("Provider $label list is unchanged since the last check: nothing to read")
+                return 0
+            }
+        }
+        val tParse = System.currentTimeMillis()
+        if (tmp != null) {
+            tmp.inputStream().buffered(65536).use { parseStream(it, tmp.length()) }
+            tmp.delete()
+        } else {
+            httpClient.newCall(req).execute().use { resp ->
+                checkResponse(resp)
+                parseStream(resp.body?.byteStream() ?: return 0, resp.body?.contentLength() ?: -1L)
+            }
         }
         flushChunk()
+        if (downloadedHash.isNotEmpty()) prefs.putString("list_hash_${mediaType.name}", downloadedHash)
+        DiagLog.add("Provider $label list read and saved in ${(System.currentTimeMillis() - tParse) / 1000} s ($totalNew new)")
         return totalNew
     }
 
@@ -583,6 +533,9 @@ class CatalogSyncEngine(
             prefs.setFlag("requeue_provider_enriched_v1")
         }
         val (enriched, total) = db.getEnrichmentCounts()
+        if (total > 0 && enriched >= total && !packNeedsApply()) scope.launch(enrichDispatcher) {
+            runCatching { val m = db.foldSameTmdbTitles(); if (m > 0) DiagLog.add("Merged $m listings of the same film into one card") }
+        }
         if (total > 0 && (enriched < total || packNeedsApply())) startBackgroundTmdbEnrichment()
         else if (db.countCloudPending() > 0) scope.launch(Dispatchers.IO) { runCatching { flushPendingCloudUploads() } }
     }
@@ -652,6 +605,13 @@ class CatalogSyncEngine(
                 enrichedCount = enriched,
                 totalToEnrich = total
             )
+            if (result != null) {
+                runCatching {
+                    val merged = db.foldSameTmdbTitles()
+                    if (merged > 0) DiagLog.add("Merged $merged listings of the same film into one card")
+                    db.refreshStatistics()
+                }
+            }
             if (result != null) prefs.setFlag(packFlagKey(packDb))
             if (result != null) DiagLog.add("Content pack applied: ${result.applied} titles filled, ${result.unmatched} not in the pack")
             onProgress()

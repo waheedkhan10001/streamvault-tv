@@ -177,6 +177,21 @@ window.handleAppBackKey = function() {
   const sidebarEl = document.querySelector('.sidebar');
   const focusOnSidebar = !!(document.activeElement && sidebarEl && sidebarEl.contains(document.activeElement));
   if (mainVp && !focusOnSidebar) {
+    // Back from far down the posters: first to the top row, then to the search box, then to the sidebar tab
+    const ae = document.activeElement;
+    const grid = document.getElementById('filterResultsGrid');
+    const searchBox = document.getElementById('filterSearchInput');
+    if (grid && ae && grid.contains(ae) && ae.classList && ae.classList.contains('poster-card')) {
+      const first = grid.querySelector('.poster-card');
+      if (first && first !== ae && Math.abs(ae.offsetTop - first.offsetTop) > 20) {
+        first.focus(); tvScrollIntoView(first, { block: 'center' }); playNavSound();
+        return true;
+      }
+    }
+    if (searchBox && ae !== searchBox && searchBox.offsetParent !== null && mainVp.contains(ae || mainVp)) {
+      searchBox.focus(); tvScrollIntoView(searchBox, { block: 'center' }); playNavSound();
+      return true;
+    }
     const activeSidebar = getActiveSidebarElement();
     if (activeSidebar) {
       activeSidebar.focus();

@@ -275,6 +275,7 @@ class MainActivity : Activity() {
             prefs,
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
         )
+        syncEngine.cacheDir = cacheDir
         apiRouter = com.streamvault.tv.data.AppApiRouter(this, db, prefs, syncEngine)
         syncEngine.packDbProvider = { apiRouter.packManager.takeIf { it.isReady() }?.dbFile }
         runCatching {

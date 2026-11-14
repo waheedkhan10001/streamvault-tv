@@ -480,7 +480,8 @@ class AppApiRouter(
         val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
         // Kids profiles cannot open a title that is not child-rated, even through a saved link or watchlist entry
         if (activeProf.isKids && !db.isKidsAllowed(dedupKey)) return """{"ok":false,"error":"This title is not available in Kids mode."}"""
-        val mlt = db.getMoreLikeThis(
+        // fast=1: the screen draws at once; "More Like This" comes from /api/related a moment later
+        val mlt = if (queryParams["fast"] == "1") emptyList() else db.getMoreLikeThis(
             item,
             isKids = activeProf.isKids,
             limit = 8,          // only the best few on the detail screen; "Show more" pages through the rest
@@ -489,17 +490,23 @@ class AppApiRouter(
             profileId = activeProf.id
         )
         // A series is checked against the provider every time it is opened, so new seasons/episodes always show.
-        // First time (nothing saved yet): wait for the list. Otherwise show what is saved now and refresh in the background.
+        // Providers often list one season per entry (several entries merge into one card), so every listing's episodes are gathered.
         val episodes = if (item.mediaType == MediaType.SERIES) {
-            val saved = db.getSeriesEpisodes(item.primaryStreamId)
-            if (saved.isEmpty()) {
-                runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(item) } }.getOrDefault(saved)
-            } else {
-                kotlin.concurrent.thread(isDaemon = true) {
-                    runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(item) } }
+            val ids = (listOf(item.primaryStreamId) + item.versions.map { it.streamId }).filter { it.isNotBlank() }.distinct().take(8)
+            val all = mutableListOf<SeriesEpisode>()
+            for (id in ids) {
+                val saved = db.getSeriesEpisodes(id)
+                val asItem = item.copy(primaryStreamId = id)
+                if (saved.isEmpty()) {
+                    all += runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(asItem) } }.getOrDefault(saved)
+                } else {
+                    all += saved
+                    kotlin.concurrent.thread(isDaemon = true) {
+                        runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(asItem) } }
+                    }
                 }
-                saved
             }
+            all.distinctBy { it.seasonNumber to it.episodeNumber }.sortedWith(compareBy({ it.seasonNumber }, { it.episodeNumber }))
         } else emptyList()
 
         val epArr = JSONArray()
@@ -1293,6 +1300,9 @@ class AppApiRouter(
         out += DiagStats.endpointLines().ifEmpty { listOf("(none yet)") }
         out += "=== HOME ROWS (ms each time they were worked out) ==="
         out += DiagStats.homeRowLines().ifEmpty { listOf("(not opened yet)") }
+        out += "=== DETAILS COVERAGE (normal titles only; Adult and Extras not counted) ==="
+        out += runCatching { db.coverageLines() }.getOrElse { listOf("coverage failed: ${it.message}") }
+        out += "Recently merged listings: " + (db.mergedTitleLines(8).ifEmpty { listOf("none") }).joinToString("  ||  ")
         out += "=== DATABASE ==="
         out += runCatching { db.diagFacts() }.getOrElse { listOf("database facts failed: ${it.message}") }
         out += "=== SCREEN (freezes over 200 ms, errors, tab opening times) ==="

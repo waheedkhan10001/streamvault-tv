@@ -55,7 +55,8 @@ data class XtreamCredentials(
 }
 
 object ContentCertifications {
-    val KIDS_CERTIFICATIONS: Set<String> = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
+    /** Kids = all-ages ratings ONLY (Saman, 2026-11-15: her children are 4 and 1). Not PG, not TV-Y7, not 6+. Same text the pack stores. */
+    val KIDS_CERTIFICATIONS: Set<String> = setOf("G", "TV-Y", "TV-G", "U", "UK U", "FSK 0", "AU G", "CA G", "IN U", "NL AL")
     val KIDS_CERTIFICATIONS_SQL_IN: String = KIDS_CERTIFICATIONS.joinToString(",") { "'$it'" }
 
     /**
@@ -64,7 +65,7 @@ object ContentCertifications {
      */
     fun kidsClause(column: String = "certification"): String {
         val prefix = if (column.contains(".")) column.substringBefore(".") + "." else ""
-        return "${prefix}kids_ok = 1"
+        return "(${prefix}kids_ok = 1 AND ${prefix}certification IN ($KIDS_CERTIFICATIONS_SQL_IN))"
     }
 
     /** Titles that have not been through the pack yet fall back to their own age rating (US list above). */

@@ -16,6 +16,8 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     previousTab = currentTab;
   }
   const leavingTab = currentTab;
+  // Coming into a tab from somewhere else always starts at the top; only a redraw of the same tab keeps the place
+  if (currentTab !== tabId) delete tabFocusMemory[tabId];
   const memAtOpen = tabFocusMemory[tabId];   // the screen's own first-title focus must not overwrite this before we use it
   currentTab = tabId;
   renderCatalogStrip();
@@ -325,7 +327,7 @@ function loadSuperFilter(vp, titleOverride = 'Search') {
                  onfocus="onSearchFilterFocus()"
                  onblur="onSearchFilterBlur(this)"
                  value="${escapeHtml(filterState.searchQuery)}"
-                 placeholder="${isVault ? 'Search 2,600+ 18+ Vault titles & studios...' : 'Search 60,000+ movies, series, actors, directors...'}"
+                 placeholder="${isVault ? 'Search 18+ titles & studios' : (currentTab === 'SERIES' ? 'Search series by title, actor or genre' : currentTab === 'MOVIES' ? 'Search movies by title, actor or genre' : 'Search movies and series by title, actor or genre')}"
                  oninput="onSearchFilterInput(this.value)"
                  onkeydown="onSearchInputKeyDown(this, event)" />
           <div id="searchSuggestionsContainer" class="search-suggestions-container" style="display:none;"></div>

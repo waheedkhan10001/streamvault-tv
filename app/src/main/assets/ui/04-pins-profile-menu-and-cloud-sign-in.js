@@ -1,3 +1,23 @@
+let checkResultWatcher = false;
+// After "Check for new titles": wait for the check to end, then say what it found
+async function announceCheckResult() {
+  if (checkResultWatcher) return;
+  checkResultWatcher = true;
+  try {
+    let started = false;
+    for (let i = 0; i < 900; i++) {   // up to ~30 min
+      await new Promise((r) => setTimeout(r, 2000));
+      await refreshSyncStatusOnly();
+      const sync = (appStatus && appStatus.syncStatus) || {};
+      if (sync.isSyncing) { started = true; continue; }
+      if (!started && i < 4) continue;   // give it a few seconds to start
+      if (sync.error) { showToast("⚠ Check failed: " + escapeHtml(String(sync.error)), 8000); }
+      else showToast('✓ ' + escapeHtml(String(sync.note || 'Your catalog is up to date.')), 8000);
+      break;
+    }
+  } catch (_) {} finally { checkResultWatcher = false; }
+}
+
 async function triggerFullEnrichmentSync() {
   playNavSound();
   await refreshAppStatus();
@@ -12,6 +32,7 @@ async function triggerFullEnrichmentSync() {
     showToast('✓ Checking for new titles. Only new titles are fetched.');
     await refreshAppStatus();
     watchPlaylistStatus();
+    announceCheckResult();
   } catch (_) {
     showToast('Could not check for new titles. Please try again.');
   }
@@ -96,6 +117,12 @@ function onPinInput(el) {
 function onInputKeyDown(el, event) {
   const isEnter = event.key === 'Enter' || event.keyCode === 13 || event.key === 'Select';
   const isBack = event.key === 'Backspace' || event.keyCode === 8;
+
+  // Up from the display name goes to the active profile box (not the nearest one, which was "Add Profile")
+  if ((event.key === 'ArrowUp' || event.keyCode === 38) && el.id === 'profNameInput') {
+    const act = document.querySelector('.profile-card-item.is-active-profile');
+    if (act) { event.preventDefault(); event.stopPropagation(); act.focus(); return; }
+  }
 
   if (isEnter) {
     event.preventDefault();
@@ -582,6 +609,7 @@ const ProfileSyncManager = {
   queueKey: 'sv_pending_profile_sync',
   lastSyncKey: 'sv_last_profile_sync_ts',
   timer: null,
+  lastError: '',
 
   getQueue() {
     try {
@@ -661,12 +689,14 @@ const ProfileSyncManager = {
             items: g.items
           })
         });
+        if (!res.ok) { this.lastError = 'cloud answered ' + res.status; }
         if (res.ok) {
           for (const it of g.items) {
             successfullySentKeys.push(`${g.profileId}:::${g.dataType}:::${it.itemKey}`);
           }
         }
       } catch (err) {
+        this.lastError = err.message || 'no connection';
         console.warn('[ProfileSync] Push failed:', err.message);
       }
     }
@@ -815,9 +845,13 @@ async function triggerCloudSync() {
       await ProfileSyncManager.pull(currentActiveProfile.id);
     }
     await loadPlaylistsData();
-    const now = Date.now();
-    ProfileSyncManager.setLastSyncTimestamp(now);
-    showToast('✓ Cloud Synchronized');
+    const left = ProfileSyncManager.getPendingCount();
+    if (left > 0) {
+      showToast('⚠ ' + left + ' change' + (left > 1 ? 's' : '') + ' could not be sent yet' + (ProfileSyncManager.lastError ? ' (' + escapeHtml(ProfileSyncManager.lastError) + ')' : '') + '. They stay saved here and will retry.', 7000);
+    } else {
+      ProfileSyncManager.setLastSyncTimestamp(Date.now());
+      showToast('✓ Cloud Synchronized');
+    }
     renderSyncStatus();
   } catch (err) {
     showToast('⚠ Sync error: ' + err.message);

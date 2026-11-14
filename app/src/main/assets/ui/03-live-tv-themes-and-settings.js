@@ -7,7 +7,7 @@ async function loadLiveTv(vp) {
                onclick="this.removeAttribute('readonly');this.focus();"
                onblur="this.setAttribute('readonly','true');"
                value="${escapeHtml(currentLiveSearch)}"
-               placeholder="Search 3,000 live channels by name or sport..."
+               placeholder="Search channels by name or sport"
                oninput="onLiveSearchInput(this.value)" />
       </div>
       <div class="live-tab-bar" id="liveTabBar">Loading tabs...</div>

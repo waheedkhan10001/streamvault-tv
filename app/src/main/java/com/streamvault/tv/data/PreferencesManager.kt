@@ -159,6 +159,9 @@ class PreferencesManager(context: Context) {
         set(value) { if (value == null) prefs.edit().remove("last_crash").apply() else prefs.edit().putString("last_crash", value).apply() }
 
     /** When the last provider refresh STARTED (finished or not): an interrupted refresh must not restart on every launch. */
+    fun getString(key: String): String = prefs.getString(key, "") ?: ""
+    fun putString(key: String, value: String) { prefs.edit().putString(key, value).apply() }
+
     var lastSyncAttemptTimestamp: Long
         get() = prefs.getLong("last_sync_attempt_ts", 0L)
         set(value) = prefs.edit().putLong("last_sync_attempt_ts", value).apply()

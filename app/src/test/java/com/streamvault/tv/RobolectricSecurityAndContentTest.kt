@@ -57,14 +57,16 @@ class RobolectricSecurityAndContentTest {
 
     @Test
     fun testKidsCertificationConstant_ContainsExactYoungChildCertifications() {
-        val expected = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
+        val expected = setOf("G", "TV-Y", "TV-G", "U", "UK U", "FSK 0", "AU G", "CA G", "IN U", "NL AL")
         assertEquals(expected, ContentCertifications.KIDS_CERTIFICATIONS)
 
         // Kids decisions now come from the content pack (kids_ok); titles the pack has not seen use their own US rating
-        assertEquals("kids_ok = 1", ContentCertifications.kidsClause("certification"))
-        assertEquals("m.kids_ok = 1", ContentCertifications.kidsClause("m.certification"))
+        // Kids shows all-ages ratings only (not PG, not TV-Y7)
+        val inList = ContentCertifications.KIDS_CERTIFICATIONS_SQL_IN
+        assertEquals("(kids_ok = 1 AND certification IN ($inList))", ContentCertifications.kidsClause("certification"))
+        assertEquals("(m.kids_ok = 1 AND m.certification IN ($inList))", ContentCertifications.kidsClause("m.certification"))
         for (cert in expected) assertEquals(1, ContentCertifications.kidsOkFromCertification(cert))
-        for (cert in listOf("R", "TV-MA", "NC-17", "")) assertEquals(0, ContentCertifications.kidsOkFromCertification(cert))
+        for (cert in listOf("PG", "TV-PG", "TV-Y7", "R", "TV-MA", "NC-17", "")) assertEquals(0, ContentCertifications.kidsOkFromCertification(cert))
     }
 
     @Test
