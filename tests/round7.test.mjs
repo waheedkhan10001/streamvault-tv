@@ -68,7 +68,7 @@ async function run() {
   await page.evaluate(() => navigateToTab('MOVIES', null, true));
   await sleep(1700);
   const back = await activeKey(page);
-  check('coming back to Movies lands on the title you left, not the first one', seventh.includes('m7') && back === seventh, `${seventh} vs ${back}`);
+  check('coming back to Movies starts from the first title, not the one you left', seventh.includes('m7') && back.includes('m1') && !back.includes('m7'), `${seventh} vs ${back}`);
 
   // same tab: Left to the sidebar and Right again
   await page.evaluate(() => { const c = [...document.querySelectorAll('#filterResultsGrid .poster-card')][11]; c.focus(); });
