@@ -498,9 +498,9 @@ class AppApiRouter(
                 val saved = db.getSeriesEpisodes(id)
                 val asItem = item.copy(primaryStreamId = id)
                 if (saved.isEmpty()) {
-                    all += runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(asItem) } }.getOrDefault(saved)
+                    all.addAll(runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(asItem) } }.getOrDefault(saved))
                 } else {
-                    all += saved
+                    all.addAll(saved)
                     kotlin.concurrent.thread(isDaemon = true) {
                         runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(asItem) } }
                     }

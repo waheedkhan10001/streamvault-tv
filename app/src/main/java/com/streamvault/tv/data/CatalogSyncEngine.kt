@@ -401,6 +401,114 @@ class CatalogSyncEngine(
                                     }
                                     while (reader.hasNext()) reader.skipValue()
                                     reader.endArray()
+                            } else {
+                                backdrop = reader.nextStringOrNumber()
+                            }
+                        }
+                        else -> reader.skipValue()
+                    }
+                }
+                reader.endObject()
+
+                if (streamId.isBlank() || name.isBlank()) continue
+                val catName = categoryMap[categoryId] ?: "Movies"
+                val parsed = TitleParser.parse(name, catName, tmdbId)
+                val yearFromDate = releaseDate.take(4).toIntOrNull() ?: 0
+                val finalYear = if (parsed.year > 0) parsed.year else yearFromDate
+
+                val serverGenres = genreStr.split(",", "/", "|")
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                val combinedGenres = (serverGenres + parsed.inferredGenres).distinct()
+
+                val version = StreamVersion(
+                    streamId = streamId,
+                    rawTitle = name,
+                    languageTag = parsed.language,
+                    qualityTag = parsed.qualityBadges.joinToString(" "),
+                    subtitleTag = parsed.subtitleHint,
+                    containerExtension = containerExt.ifBlank { "mp4" },
+                    categoryId = categoryId,
+                    categoryName = catName,
+                    addedTimestamp = addedTs
+                )
+
+                seenStreams.add(streamId)
+                seenKeys.add(parsed.dedupKey)
+                val isVault = StreamVaultDatabase.checkIsAdult(parsed.cleanTitle, name, catName, combinedGenres.joinToString(" ")) ||
+                    StreamVaultDatabase.checkIsExtra(catName)
+                val target: MutableMap<String, MediaItem> = if (isVault) ctx.vaultBuffer else dedupMap
+                val existing = target[parsed.dedupKey]
+                if (existing == null) {
+                    target[parsed.dedupKey] = MediaItem(
+                        dedupKey = parsed.dedupKey,
+                        primaryStreamId = streamId,
+                        tmdbId = tmdbId,
+                        mediaType = mediaType,
+                        cleanTitle = parsed.cleanTitle,
+                        rawTitle = name,
+                        year = finalYear,
+                        rating = 0.0, // the IPTV provider's rating is not trusted; TMDB enrichment fills it
+                        genres = combinedGenres,
+                        plot = plot,
+                        cast = castStr.split(",").map { it.trim() }.filter { it.isNotBlank() },
+                        director = director,
+                        posterUrl = poster,
+                        backdropUrl = backdrop,
+                        language = parsed.language,
+                        qualityBadges = parsed.qualityBadges,
+                        hasEmbeddedSubtitles = parsed.subtitleHint.isNotBlank() || containerExt.equals("mkv", ignoreCase = true),
+                        embeddedSubtitleLanguages = if (parsed.subtitleHint.isNotBlank()) listOf("English") else emptyList(),
+                        hasOnlineSubtitles = true,
+                        categoryId = categoryId,
+                        categoryName = catName,
+                        addedTimestamp = addedTs,
+                        isEnriched = false,   // provider text is only a fallback: every title still gets its TMDB rating, age rating and cast
+                        versions = listOf(version)
+                    )
+                } else {
+                    // Merge duplicate stream version onto the same unified Netflix card!
+                    val mergedQualities = (existing.qualityBadges + parsed.qualityBadges).distinct()
+                    val mergedGenres = (existing.genres + combinedGenres).distinct()
+                    val mergedVersions = existing.versions + version
+                    val bestPoster = if (existing.posterUrl.isNotBlank()) existing.posterUrl else poster
+                    val bestRating = existing.rating   // the IPTV provider's own rating is never used (TMDB fills it later)
+                    val bestAdded = maxOf(existing.addedTimestamp, addedTs)
+                    target[parsed.dedupKey] = existing.copy(
+                        qualityBadges = mergedQualities,
+                        genres = mergedGenres,
+                        posterUrl = bestPoster,
+                        rating = bestRating,
+                        addedTimestamp = bestAdded,
+                        versions = mergedVersions,
+                        plot = existing.plot.ifBlank { plot },
+                        cast = if (existing.cast.isNotEmpty()) existing.cast else castStr.split(",").map { it.trim() }.filter { it.isNotBlank() },
+                        director = existing.director.ifBlank { director },
+                        backdropUrl = existing.backdropUrl.ifBlank { backdrop },
+                        tmdbId = if (existing.tmdbId > 0) existing.tmdbId else tmdbId,
+                        year = if (existing.year > 0) existing.year else finalYear
+                    )
+                }
+
+                count++
+                if (dedupMap.size >= 1500) flushChunk()
+                if (ctx.vaultBuffer.size >= 8000) totalNew += saveVaultBuffer(ctx, markNew)
+                if (count % 1500 == 0) {
+                    val fraction = if (contentLength > 0) counting.bytes.toDouble() / contentLength else 0.0
+                    val estimate = when {
+                        fraction > 0.05 -> (count / fraction).toInt()
+                        previousTotal > 0 -> previousTotal
+                        else -> 0
+                    }
+                    _syncState.value = _syncState.value.copy(
+                        processedItems = count,
+                        stage = stageLabel,
+                        estimatedTotal = estimate,
+                        phase = "Parsed $count ${if (mediaType == MediaType.MOVIE) "Movies" else "Series"} (${seenKeys.size} unique cards)..."
+                    )
+                }
+            }
+            reader.endArray()
         }
 
         // The list is saved to a file first and fingerprinted: when the provider's list is exactly the one read last time,
