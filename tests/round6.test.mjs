@@ -75,7 +75,9 @@ async function run() {
   check('Left from the first card goes to the Movies tab', (await focusInfo(page)) === 'tab:MOVIES', await focusInfo(page));
   await press(page, 'ArrowRight', 1, 200);
   await press(page, 'Escape');
-  check('Back from the content goes to the Movies tab', (await focusInfo(page)) === 'tab:MOVIES', await focusInfo(page));
+  check('Back from the first row goes to the search box first', (await focusInfo(page)) === 'filterSearchInput' || await page.evaluate(() => document.activeElement && document.activeElement.id === 'filterSearchInput'), await focusInfo(page));
+  await press(page, 'Escape');
+  check('Back from the search box goes to the Movies tab', (await focusInfo(page)) === 'tab:MOVIES', await focusInfo(page));
   await page.evaluate(() => { const c = document.querySelector('#filterResultsGrid .poster-card'); c && c.focus(); document.body.focus && 0; });
   await page.evaluate(() => { document.activeElement.blur(); });
   await press(page, 'Escape');
