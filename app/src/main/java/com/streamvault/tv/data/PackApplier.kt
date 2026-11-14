@@ -43,7 +43,7 @@ class PackApplier(private val db: StreamVaultDatabase, private val packDbFile: F
     }
 
     /** Applies the pack to every catalog title that has not been looked up yet. Blocking: run on a background thread. */
-    fun applyAll(isActive: () -> Boolean = { true }, shouldPause: () -> Boolean = { false }, onProgress: () -> Unit = {}): Result {
+    fun applyAll(isActive: () -> Boolean = { true }, shouldPause: () -> Boolean = { false }, onProgress: (Int) -> Unit = {}): Result {
         var applied = 0
         var unmatched = 0
         val pack = SQLiteDatabase.openDatabase(packDbFile.path, null, SQLiteDatabase.OPEN_READWRITE)
@@ -74,8 +74,8 @@ class PackApplier(private val db: StreamVaultDatabase, private val packDbFile: F
                 }
                 batchNo++
                 if (batchNo % 10 == 1) DiagLog.add("Pack fill batch $batchNo: read ${tb - tq} ms, apply ${System.currentTimeMillis() - tb} ms (${batch.size} titles)")
-                onProgress()
-                Thread.sleep(20)
+                onProgress(batch.size)
+                Thread.sleep(60)   // a short rest so browsing stays smooth
             }
         } finally {
             pack.close()

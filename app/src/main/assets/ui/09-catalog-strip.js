@@ -89,7 +89,7 @@ function enrichmentIsComplete(sync) {
 }
 function enrichStatusText(sync) {
   const enr = Number((sync && sync.enrichedCount) || 0), tot = Number((sync && sync.totalToEnrich) || 0);
-  if (sync && sync.isSyncing) return { text: 'Waiting for catalogue', color: '#9CA3AF' };
+  if (sync && sync.isSyncing) return { text: 'Starts after the provider list is checked', color: '#9CA3AF' };
   if (enrichmentIsComplete(sync)) {
     const missing = Math.max(0, tot - enr);
     return { text: '✓ Complete — ' + formatCount(enr) + ' titles ready', color: '#10B981' };

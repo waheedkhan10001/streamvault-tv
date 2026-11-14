@@ -9,7 +9,7 @@ async function triggerFullEnrichmentSync() {
     const res = await fetch('/api/sync-now', { method: 'POST' });
     const d = await res.json().catch(() => ({}));
     if (d && d.ok === false) { showToast(d.error || 'Could not check for new titles'); return; }
-    showToast('✓ Checking for new titles. This can take a few minutes.');
+    showToast('✓ Checking for new titles. Only new titles are fetched.');
     await refreshAppStatus();
     watchPlaylistStatus();
   } catch (_) {

@@ -127,6 +127,8 @@ class CatalogSyncEngine(
             if (prefs.isPlaybackActive.get() && !isManual) {
                 return@launch
             }
+            val importStartedAt = System.currentTimeMillis()
+            prefs.lastSyncAttemptTimestamp = importStartedAt
             try {
                 val isFirstSync = prefs.lastFullSyncTimestamp == 0L
                 val ctx = ImportContext()
@@ -225,6 +227,7 @@ class CatalogSyncEngine(
                 onCatalogUpdated()
 
                 prefs.lastFullSyncTimestamp = System.currentTimeMillis()
+                DiagLog.add("Provider refresh finished in ${(System.currentTimeMillis() - importStartedAt) / 1000} s (${newMovies + newSeries} new, $removedTitles removed)")
                 val (enriched, total) = db.getEnrichmentCounts()
                 _syncState.value = _syncState.value.copy(
                     isSyncing = false,
@@ -618,23 +621,32 @@ class CatalogSyncEngine(
                 return@launch
             }
             // First time this pack is applied: every title goes through it once, so nothing keeps older details, ratings or age ratings
-            if (!prefs.getFlag(packFlagKey(packDb))) {
-                runCatching { db.requeueAllForPack() }
+            // The "reset" is done ONCE and remembered before filling starts, so a restart or power cut keeps the progress
+            val requeueKey = "pack_requeued_v2_${packDb.lastModified()}"
+            if (!prefs.getFlag(packFlagKey(packDb)) && !prefs.getFlag(requeueKey)) {
+                if (runCatching { db.requeueAllForPack() }.isSuccess) prefs.setFlag(requeueKey)
             }
+            var (fillDone, fillTotal) = db.getEnrichmentCounts()
+            val fillStart = System.currentTimeMillis()
+            var lastDone = fillDone
             val result = runCatching {
                 PackApplier(db, packDb).applyAll(
                     isActive = { isActive },
                     shouldPause = { prefs.msSinceUiActivity() < 2500L || prefs.isPlaybackActive.get() },
-                    onProgress = {
-                        val (e, t) = db.getEnrichmentCounts()
+                    onProgress = { n ->
+                        // counted in memory: no row counting while filling
+                        fillDone = minOf(fillDone + n, fillTotal)
+                        db.setEnrichmentCountsCache(fillDone, fillTotal)
                         _syncState.value = _syncState.value.copy(
-                            phase = "Enriching details and ratings ($e of $t)", enrichedCount = e, totalToEnrich = t
+                            phase = "Enriching details and ratings ($fillDone of $fillTotal)", enrichedCount = fillDone, totalToEnrich = fillTotal
                         )
                         onProgress()
                     }
                 )
             }.onFailure { DiagLog.add("Applying the content pack failed: ${it.message}") }.getOrNull()
+            DiagLog.add("Fill speed: ${fillDone - lastDone} titles in ${(System.currentTimeMillis() - fillStart) / 1000} s")
             val (enriched, total) = db.getEnrichmentCounts()
+            db.setEnrichmentCountsCache(enriched, total)
             _syncState.value = _syncState.value.copy(
                 phase = "100% Catalog Enriched ($enriched Titles Ready)",
                 enrichedCount = enriched,

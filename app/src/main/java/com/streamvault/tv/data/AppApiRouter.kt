@@ -1361,7 +1361,7 @@ class AppApiRouter(
 
     private fun handleGetPlaylists(): String {
         val creds = prefs.loadCredentials()
-        val (enriched, total) = db.getEnrichmentCounts()
+        val (enriched, total) = db.getEnrichmentCountsCached()
         val syncState = syncEngine.syncState.value
         val playlistsArr = JSONArray()
 

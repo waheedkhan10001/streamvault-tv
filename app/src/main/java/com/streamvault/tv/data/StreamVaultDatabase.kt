@@ -196,13 +196,15 @@ class StreamVaultDatabase(context: Context) :
 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_type ON media_items(media_type)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_year ON media_items(year DESC)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_rating ON media_items(rating DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_added ON media_items(added_timestamp DESC)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_enriched ON media_items(is_enriched, rating DESC)")
+        // Indexes that no query needs are gone: each one made every details update slower (rating, certification changed on every fill)
+        db.execSQL("DROP INDEX IF EXISTS idx_media_rating")
+        db.execSQL("DROP INDEX IF EXISTS idx_media_cert")
+        db.execSQL("DROP INDEX IF EXISTS idx_media_enriched")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_enriched2 ON media_items(is_enriched)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_lang ON media_items(language)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_adult ON media_items(is_adult)")
         try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_extra ON media_items(is_extra)") } catch (_: Exception) {}
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_cert ON media_items(certification)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_kids ON media_items(kids_ok)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_sort ON media_items(sort_score DESC)")
 
@@ -801,7 +803,10 @@ class StreamVaultDatabase(context: Context) :
 
     @Volatile private var enrichCountCache: Triple<Int, Int, Long>? = null
     /** Same numbers, but counted at most once every few seconds: the screen asks for them all the time and counting 70k rows is not free. */
-    fun getEnrichmentCountsCached(maxAgeMs: Long = 6000L): Pair<Int, Int> {
+    /** The fill reports its own progress here, so screens never need to count rows while it runs. */
+    fun setEnrichmentCountsCache(enriched: Int, total: Int) { enrichCountCache = Triple(enriched, total, System.currentTimeMillis()) }
+
+    fun getEnrichmentCountsCached(maxAgeMs: Long = 60000L): Pair<Int, Int> {
         val c = enrichCountCache
         if (c != null && System.currentTimeMillis() - c.third < maxAgeMs) return Pair(c.first, c.second)
         val fresh = getEnrichmentCounts()
