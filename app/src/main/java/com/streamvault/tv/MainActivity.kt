@@ -278,13 +278,17 @@ class MainActivity : Activity() {
         syncEngine.cacheDir = cacheDir
         apiRouter = com.streamvault.tv.data.AppApiRouter(this, db, prefs, syncEngine)
         syncEngine.packDbProvider = { apiRouter.packManager.takeIf { it.isReady() }?.dbFile }
-        runCatching {
-            if (prefs.loadCredentials().isConfigured && prefs.shouldRunAutoDeltaSync()) {
-                syncEngine.triggerSync(isManual = false)      // first load, a load that never finished, or older than 24 h
-            } else {
-                syncEngine.resumeEnrichmentIfNeeded()
+        // The screen comes first: the catalogue refresh / fill starts a few seconds later, on its own thread
+        Thread({
+            runCatching {
+                Thread.sleep(4000)
+                if (prefs.loadCredentials().isConfigured && prefs.shouldRunAutoDeltaSync()) {
+                    syncEngine.triggerSync(isManual = false)      // first load, a load that never finished, or older than 24 h
+                } else {
+                    syncEngine.resumeEnrichmentIfNeeded()
+                }
             }
-        }
+        }, "startup-sync").also { it.isDaemon = true }.start()
 
         try {
             toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 65)

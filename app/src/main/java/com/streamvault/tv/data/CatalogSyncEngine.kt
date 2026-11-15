@@ -642,7 +642,7 @@ class CatalogSyncEngine(
         }
         val (enriched, total) = db.getEnrichmentCounts()
         if (total > 0 && enriched >= total && !packNeedsApply()) scope.launch(enrichDispatcher) {
-            runCatching { val m = db.foldSameTmdbTitles(); if (m > 0) DiagLog.add("Merged $m listings of the same film into one card") }
+            runCatching { db.repairMergedNames(); val m = db.foldSameTmdbTitles(); if (m > 0) DiagLog.add("Merged $m listings of the same film into one card") }
         }
         if (total > 0 && (enriched < total || packNeedsApply())) startBackgroundTmdbEnrichment()
         else if (db.countCloudPending() > 0) scope.launch(Dispatchers.IO) { runCatching { flushPendingCloudUploads() } }

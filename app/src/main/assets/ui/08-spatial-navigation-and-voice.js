@@ -192,6 +192,12 @@ tvScrollIntoView(e.target, { block: 'nearest', inline: 'nearest' });
 
 function navigateSpatial(key) {
   const current = document.activeElement;
+  // Display name: Up goes to the ACTIVE profile box (the nearest box used to be "Add Profile")
+  if (key === 'ArrowUp' && current && current.id === 'profNameInput') {
+    const cards = Array.from(document.querySelectorAll('.profile-card-item')).filter((c) => !(c.getAttribute('onclick') || '').includes('promptAddNewProfile'));
+    const act = document.querySelector('.profile-card-item.is-active-profile') || cards[0];
+    if (act) { act.focus(); playNavSound(); return; }
+  }
   if (current && fastNavigate(current, key)) {
     return;
   }

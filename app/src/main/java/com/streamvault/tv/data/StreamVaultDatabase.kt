@@ -82,7 +82,16 @@ class StreamVaultDatabase(context: Context) :
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_adult INTEGER DEFAULT 0") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_extra INTEGER DEFAULT 0") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE live_channels ADD COLUMN added_timestamp INTEGER DEFAULT 0") } catch (_: Exception) {}
-        try { db.execSQL("UPDATE media_items SET is_extra = 1 WHERE is_extra = 0 AND is_adult = 0 AND (" + EXTRA_CATEGORY_TOKENS.joinToString(" OR ") { "lower(category_name) LIKE '%${it.replace("'", "''")}%'" } + ")") } catch (_: Exception) {}
+        // Scanning every title for Extras categories used to run on EVERY start (seconds on the TV, before anything showed);
+        // imports already classify new titles, so the scan is done once.
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS app_flags (k TEXT PRIMARY KEY, v TEXT)")
+            val done = db.rawQuery("SELECT 1 FROM app_flags WHERE k = 'extra_scan_v1'", null).use { it.moveToFirst() }
+            if (!done) {
+                db.execSQL("UPDATE media_items SET is_extra = 1 WHERE is_extra = 0 AND is_adult = 0 AND (" + EXTRA_CATEGORY_TOKENS.joinToString(" OR ") { "lower(category_name) LIKE '%${it.replace("'", "''")}%'" } + ")")
+                db.execSQL("INSERT OR REPLACE INTO app_flags (k, v) VALUES ('extra_scan_v1', '1')")
+            }
+        } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN certification TEXT DEFAULT ''") } catch (_: Exception) {}
         // From the enrichments pack: which rating is shown (I = IMDb, T = TMDB), the score used for sorting, Kids decision
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN rating_source TEXT DEFAULT ''") } catch (_: Exception) {}
@@ -665,6 +674,25 @@ class StreamVaultDatabase(context: Context) :
      * Safety: the years must agree (within 1) when both are known; if a year is missing, the titles must share a real word.
      * Watch progress, watched mark and watch-list of every folded listing are kept.
      */
+    private val langPrefix = Regex("^[A-Za-z]{2,3}:\\s")
+
+    /** Cards merged by an earlier version that ended up with a "DE: ..." name get the plain name of the listing that was merged into them. */
+    fun repairMergedNames() {
+        try {
+            val db = writableDatabase
+            val fixes = ArrayList<Triple<String, String, String>>()
+            db.rawQuery("SELECT target_key, note FROM dedup_alias", null).use { c ->
+                while (c.moveToNext()) {
+                    val note = c.getString(1) ?: continue
+                    val a = note.substringBefore(" -> ", "").trim()
+                    val b = note.substringAfter(" -> ", "").substringBefore(" (tmdb").trim()
+                    if (a.isNotEmpty() && b.isNotEmpty() && langPrefix.containsMatchIn(b) && !langPrefix.containsMatchIn(a)) fixes.add(Triple(c.getString(0), b, a))
+                }
+            }
+            for ((key, old, plain) in fixes) db.execSQL("UPDATE media_items SET clean_title = ? WHERE dedup_key = ? AND clean_title = ?", arrayOf(plain, key, old))
+        } catch (_: Exception) {}
+    }
+
     fun foldSameTmdbTitles(): Int {
         val db = writableDatabase
         class Row(val key: String, val type: String, val tmdb: Int, val year: Int, val title: String, val versions: String,
@@ -688,7 +716,9 @@ class StreamVaultDatabase(context: Context) :
         try {
             val now = System.currentTimeMillis()
             for (group in rows.groupBy { listOf(it.type, it.tmdb, it.adult, it.extra) }.values) {
-                val ordered = group.sortedWith(compareByDescending<Row> { runCatching { JSONArray(it.versions).length() }.getOrDefault(0) }
+                // The card keeps the plain (English) name: a listing named "DE: Title" never becomes the winner over a plain one
+                val ordered = group.sortedWith(compareBy<Row> { if (langPrefix.containsMatchIn(it.title)) 1 else 0 }
+                    .thenByDescending { runCatching { JSONArray(it.versions).length() }.getOrDefault(0) }
                     .thenByDescending { it.pack }.thenBy { it.key })
                 val target = ordered.first()
                 var targetVersions = target.versions

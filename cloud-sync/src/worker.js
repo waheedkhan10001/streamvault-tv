@@ -1687,6 +1687,16 @@ export default {
           return errorResponse('profileId, dataType, and items array required', 400, corsHeaders);
         }
         const now = Date.now();
+        // The TV makes its own profile ids; the cloud only knows the ones it was told about. A push for an unknown profile
+        // used to fail on the profile link (HTTP 500) and stay "pending" forever, so the profile is registered first.
+        const known = await env.DB.prepare(`SELECT profile_id FROM profiles WHERE profile_id = ? AND account_id = ?`).bind(profileId, auth.accountId).first();
+        if (!known) {
+          const owned = await env.DB.prepare(`SELECT 1 AS x FROM profiles WHERE profile_id = ?`).bind(profileId).first();
+          if (owned) return errorResponse('Profile belongs to another account', 403, corsHeaders);
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO profiles (profile_id, account_id, display_name, is_kids, is_primary, created_at, updated_at) VALUES (?, ?, 'TV profile', 0, 0, ?, ?)`
+          ).bind(profileId, auth.accountId, now, now).run();
+        }
         const stmts = items.map(it =>
           env.DB.prepare(
             `INSERT INTO profile_data (profile_id, account_id, data_type, item_key, data_json, updated_at)

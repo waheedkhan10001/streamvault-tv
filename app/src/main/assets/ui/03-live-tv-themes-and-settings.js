@@ -221,6 +221,7 @@ async function loadProfile(vp) {
   const activeProf = profiles.find(p => p.id === profilesData.activeProfileId) || profiles[0];
   if (!activeProf.theme) activeProf.theme = savedTheme;
   currentActiveProfile = { ...activeProf };
+  window.pendingKids = null;   // a toggle that was never saved is forgotten
   applyProfileTheme(currentActiveProfile.theme);
 
   vp.innerHTML = `

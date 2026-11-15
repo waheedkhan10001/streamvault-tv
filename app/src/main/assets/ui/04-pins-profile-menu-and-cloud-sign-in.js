@@ -916,28 +916,26 @@ function updateKidsModeToggleBtn(enabled) {
   }
 }
 
+// The toggle only marks a PENDING choice; the real profile (and every tab) changes when Save Profile is pressed
 function toggleProfileKidsMode() {
   playNavSound();
-  if (currentActiveProfile.isKids) {
+  const pending = (window.pendingKids === true || window.pendingKids === false) ? window.pendingKids : Boolean(currentActiveProfile.isKids);
+  if (pending) {
     // Currently ON -> Turning OFF requires Master PIN!
     openParentalPinModal({
       action: 'disable_kids',
       onComplete: (pin) => {
-        currentActiveProfile.isKids = false;
+        window.pendingKids = false;
         lastVerifiedPin = pin;
         updateKidsModeToggleBtn(false);
-        showToast('Kids Mode disabled. Click Save Profile to apply.');
+        showToast('Kids Mode will be turned off. Click Save Profile to apply.');
       }
     });
   } else {
     // Currently OFF -> Turning ON does NOT require PIN!
-    currentActiveProfile.isKids = true;
+    window.pendingKids = true;
     updateKidsModeToggleBtn(true);
-    // Turning Kids Mode on closes 18+ and Extras straight away
-    lockVault('adult', true);
-    lockVault('extras', true);
-    renderSidebar();
-    showToast('Kids Mode enabled');
+    showToast('Kids Mode will be turned on. Click Save Profile to apply.');
   }
 }
 

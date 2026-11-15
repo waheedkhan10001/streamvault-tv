@@ -36,6 +36,7 @@ async function newApp(browser, kids = false) {
         if (p === '/api/session') return J({ ok: true, authenticated: true, token: TOKEN });
         if (p === '/api/auth/me') return J({ ok: true, account, token: TOKEN });
         if (p === '/api/profiles') return J({ ok: true, profiles, activeProfileId: 'p1' });
+        if (p === '/api/profiles/update') { const b = JSON.parse(body || '{}'); profiles[0].isKids = !!b.isKids; return J({ ok: true, success: true, profile: profiles[0] }); }
         if (p === '/api/playlists') return J({ ok: true, playlists: [] });
         if (p === '/api/home') return J({ hero: catalog[0], rows: [{ title: 'Featured', items: catalog }] });
         if (p === '/api/query') { S.queries.push(JSON.parse(body || '{}')); return J({ items: catalog, totalMatched: 12, hasMore: false }); }
@@ -147,9 +148,22 @@ async function run() {
   await page.evaluate(() => { window.__s.adult = true; window.__s.extras = true; appStatus.parentalControl.showAdult = true; appStatus.parentalControl.showExtras = true; renderSidebar(); });
   await go(page, 'PROFILE');
   await page.evaluate(() => document.getElementById('btnToggleKidsMode').click()); await sleep(600);
+  tabs = await navTabs(page);
+  check('the Kids switch alone changes nothing until the profile is saved', tabs.includes('LIVE_TV'), tabs.join());
+  await page.evaluate(() => document.getElementById('btnSaveProfile').click()); await sleep(1200);
   st = await state(page); tabs = await navTabs(page);
-  check('turning Kids mode ON needs no PIN and closes 18+ and Extras at once', !st.adult && !st.extras && !tabs.includes('VAULT_18') && !tabs.includes('EXTRAS'), JSON.stringify(st) + tabs.join());
+  check('turning Kids mode ON needs no PIN and closes 18+ and Extras once saved', !st.adult && !st.extras && !tabs.includes('VAULT_18') && !tabs.includes('EXTRAS'), JSON.stringify(st) + tabs.join());
   check('Kids mode: no Live TV tab', !tabs.includes('LIVE_TV'), tabs.join());
+  // Kids mode off again (PIN) + save: the tabs that were open before come straight back
+  await go(page, 'PROFILE');
+  await page.evaluate(() => { document.getElementById('btnToggleKidsMode').click(); });
+  await sleep(300);
+  await page.evaluate(() => { parentalPinContext.onComplete && parentalPinContext.onComplete('1234'); });
+  await page.evaluate(() => document.getElementById('btnSaveProfile').click()); await sleep(1500);
+  tabs = await navTabs(page);
+  check('turning Kids mode OFF and saving brings 18+ and Extras back at once', tabs.includes('VAULT_18') && tabs.includes('EXTRAS') && tabs.includes('LIVE_TV'), tabs.join());
+  await page.evaluate(() => document.getElementById('btnToggleKidsMode').click()); await sleep(200);
+  await page.evaluate(() => document.getElementById('btnSaveProfile').click()); await sleep(1200);
   await go(page, 'LIVE_TV');
   check('opening Live TV directly in Kids mode lands on Home', (await page.evaluate(() => currentTab)) === 'HOME');
   await page.close();

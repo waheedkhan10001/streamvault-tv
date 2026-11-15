@@ -600,16 +600,13 @@ async function checkAuthAndRoute() {
   validateSessionInBackground(token);
   await syncSessionToNative(token);
 
+  // Asked together instead of one after the other (the app state, the profiles and the pack check are independent)
+  const stateReq = fetch('/api/state').then((r) => (r && r.ok ? r.json() : null)).catch(() => null);
+  const profilesReq = fetch('/api/profiles').then((r) => (r && r.ok ? r.json() : null)).catch(() => null);
   // The content pack (posters, plots, ratings) must be on the TV before the app opens
   await ensurePackReady();
-
-  // Load app state
-  try {
-    const res = await fetch('/api/state');
-    if (res.ok) {
-      appStatus = await res.json();
-    }
-  } catch (_) {}
+  const stateData = await stateReq;
+  if (stateData) appStatus = stateData;
 
   // Check if IPTV playlist configured (a playlist saved in the cloud is copied to this TV first)
   if (!hasActivePlaylist()) { try { await loadPlaylistsData(); } catch (_) {} }
@@ -625,14 +622,11 @@ async function checkAuthAndRoute() {
     return true;
   }
 
-  // Playlist is active -> load profiles
+  // Playlist is active -> profiles (already requested above)
   let profilesList = [];
   try {
-    const pRes = await fetch('/api/profiles');
-    if (pRes.ok) {
-      const pData = await pRes.json();
-      profilesList = pData.profiles || [];
-    }
+    const pData = await profilesReq;
+    profilesList = (pData && pData.profiles) || [];
   } catch (_) {}
 
   renderSidebar(false);
@@ -656,6 +650,9 @@ async function checkAuthAndRoute() {
 async function init() {
   applyProfileTheme(localStorage.getItem('streamvault_active_theme') || 'purple');
   renderSidebar();
+  // Something is on screen from the first moment while the app gets ready
+  const startVp = document.getElementById('mainViewport');
+  if (startVp && !startVp.innerHTML.trim()) startVp.innerHTML = '<div style="padding:60px 40px;color:var(--muted);font-size:16px;">Starting StreamVault…</div>';
 
   const isAuthedAndRouted = await checkAuthAndRoute();
   if (!isAuthedAndRouted) {
@@ -942,7 +939,7 @@ function renderSidebar(lockedToPlaylist = false) {
 // Sidebar Up/Down: the highlight moves at once (instant); the tab itself opens only after a short pause, so a fast
 // run through the tabs never queues up page loads. Enter / OK opens it immediately.
 let sidebarOpenTimer = null;
-const SIDEBAR_OPEN_DELAY_MS = 600;
+const SIDEBAR_OPEN_DELAY_MS = 250;
 function sidebarFocusThenOpen(btn) {
   btn.focus();
   playNavSound();

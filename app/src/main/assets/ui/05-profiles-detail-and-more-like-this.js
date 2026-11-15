@@ -1,5 +1,6 @@
 async function saveActiveProfileChanges() {
   playNavSound();
+  const wasKids = Boolean(currentActiveProfile.isKids);
   const nameInp = document.getElementById('profNameInput');
   if (nameInp) currentActiveProfile.name = nameInp.value.trim() || currentActiveProfile.name;
   
@@ -12,7 +13,7 @@ async function saveActiveProfileChanges() {
         name: currentActiveProfile.name,
         avatarColor: currentActiveProfile.avatarColor || '#8B5CF6',
         theme: currentActiveProfile.theme || 'purple',
-        isKids: Boolean(currentActiveProfile.isKids),
+        isKids: (window.pendingKids === true || window.pendingKids === false) ? window.pendingKids : Boolean(currentActiveProfile.isKids),
         pin: lastVerifiedPin
       })
     });
@@ -29,6 +30,7 @@ async function saveActiveProfileChanges() {
     return;
   }
   
+  const pinUsed = lastVerifiedPin;
   lastVerifiedPin = '';
   applyProfileTheme(currentActiveProfile.theme || 'purple');   // saved: the preview becomes the theme
 
@@ -40,6 +42,27 @@ async function saveActiveProfileChanges() {
 
   // Update profile header pill & sidebar
   updateUserProfileUI();
+  window.pendingKids = null;
+  if (!wasKids && currentActiveProfile.isKids) {
+    // Kids Mode just turned on: remember what was open, then close 18+ and Extras
+    const pc = (appStatus && appStatus.parentalControl) || {};
+    window.vaultBeforeKids = { adult: !!pc.showAdult, extras: !!pc.showExtras };
+    try { localStorage.setItem('sv_vault_before_kids', JSON.stringify(window.vaultBeforeKids)); } catch (e) {}
+    await lockVault('adult', true);
+    await lockVault('extras', true);
+    if (['VAULT_18', 'EXTRAS', 'LIVE_TV'].includes(currentTab)) navigateToTab('HOME');
+  } else if (wasKids && !currentActiveProfile.isKids && pinUsed) {
+    if (!window.vaultBeforeKids) { try { window.vaultBeforeKids = JSON.parse(localStorage.getItem('sv_vault_before_kids') || 'null'); } catch (e) {} }
+    if (window.vaultBeforeKids) {
+    // Kids Mode just turned off with the PIN: what was open before Kids Mode comes straight back
+    for (const target of ['adult', 'extras']) {
+      if (!window.vaultBeforeKids[target]) continue;
+      try { await fetch('/api/parental-pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unlock', pin: pinUsed, target }) }); } catch (e) {}
+    }
+    window.vaultBeforeKids = null;
+    try { localStorage.removeItem('sv_vault_before_kids'); } catch (e) {}
+    }
+  }
   try { await refreshAppStatus(); } catch (e) {}   // the Adult / Extras tabs depend on the saved Kids setting
   renderSidebar();
   showToast('✓ Profile updated');

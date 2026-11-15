@@ -1284,6 +1284,7 @@ class AppApiRouter(
         out += "=== SUMMARY ==="
         out += "StreamVault ${com.streamvault.tv.BuildConfig.VERSION_NAME} | ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE}"
         out += "Titles: $total | with details: $enriched | waiting for the cloud: ${db.countCloudPending()} | cloud paused: ${if (until > System.currentTimeMillis()) "yes" else "no"} | signed in: ${if (prefs.getAuthToken().isNullOrBlank()) "no" else "yes"}"
+        run { val ap = getActiveUserProfile(); out += "Active profile: ${ap.name} | Kids mode (saved): ${if (ap.isKids) "ON" else "off"} | 18+ visible: ${prefs.isAdultVaultUnlocked()} | Extras visible: ${prefs.isExtrasUnlocked()}" }
         out += if (prefs.lastCrash != null) "Last crash: ${String(prefs.lastCrash!!.toByteArray()).take(300)}" else "No crash recorded."
         runCatching {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
