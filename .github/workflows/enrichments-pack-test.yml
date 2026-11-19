@@ -12,6 +12,9 @@ on:
         description: 'Also download posters to measure real sizes (true/false)'
         default: 'true'
 
+permissions:
+  contents: read
+
 jobs:
   pack-test:
     runs-on: ubuntu-latest
@@ -20,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Run the pack test
         working-directory: tools/enrichments-test
         env:

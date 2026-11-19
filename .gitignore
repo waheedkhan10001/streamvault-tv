@@ -15,3 +15,7 @@ node_modules/
 streamvault_pc_db.json
 streamvault_sync_data.json
 scratch/
+.env
+.env.*
+*.svpack
+tools/enrichments-test/out/

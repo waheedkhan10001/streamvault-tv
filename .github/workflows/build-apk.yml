@@ -7,6 +7,9 @@ on:
     branches: [ "main", "master", "standalone-accounts" ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -50,25 +53,30 @@ jobs:
       - name: Generate CI Keystore (if not supplied)
         run: |
           if [ ! -f release.keystore ]; then
+            EPHEMERAL_PASS="$(openssl rand -hex 16)"
+            echo "::add-mask::$EPHEMERAL_PASS"
+            echo "CI_KEYSTORE_PASSWORD=$EPHEMERAL_PASS" >> "$GITHUB_ENV"
+            echo "CI_KEY_ALIAS=streamvault-ci" >> "$GITHUB_ENV"
+            echo "CI_KEY_PASSWORD=$EPHEMERAL_PASS" >> "$GITHUB_ENV"
             keytool -genkey -v -keystore release.keystore \
-              -alias streamvault \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass streamvault2026 -keypass streamvault2026 \
-              -dname "CN=StreamVault TV CI, OU=TV, O=StreamVault, L=Karachi, S=Sindh, C=PK"
+              -alias streamvault-ci \
+              -keyalg RSA -keysize 2048 -validity 365 \
+              -storepass "$EPHEMERAL_PASS" -keypass "$EPHEMERAL_PASS" \
+              -dname "CN=StreamVault TV CI, OU=CI, O=StreamVault, C=US"
           fi
 
       - name: Run the Kotlin unit tests (catalog import, More Like This scoring)
         run: |
-          chmod +x ./gradlew || true
+          chmod +x ./gradlew
           ./gradlew testDebugUnitTest --tests "com.streamvault.tv.*" --no-daemon
 
       - name: Build Debug & Release APK
         env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || env.CI_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || env.CI_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || env.CI_KEY_PASSWORD }}
         run: |
-          chmod +x ./gradlew || true
+          chmod +x ./gradlew
           ./gradlew assembleDebug assembleRelease --no-daemon
 
       - name: Upload Debug APK
