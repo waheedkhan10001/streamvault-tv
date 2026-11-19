@@ -17,6 +17,43 @@ class AppApiRouter(
     private val syncEngine: CatalogSyncEngine
 ) {
 
+    data class StreamTicket(val url: String, val isRestricted: Boolean, val expiresAt: Long)
+
+    private val streamTickets = java.util.concurrent.ConcurrentHashMap<String, StreamTicket>()
+    private val extAllowRegex = Regex("^[a-zA-Z0-9]{1,8}$")
+
+    fun resolveStreamTicket(urlOrTicket: String): Pair<String, Boolean>? {
+        if (!urlOrTicket.startsWith("sv-stream://")) return null
+        val id = urlOrTicket.removePrefix("sv-stream://").trim()
+        val entry = streamTickets.remove(id) ?: return null
+        if (System.currentTimeMillis() > entry.expiresAt) return null
+        return entry.url to entry.isRestricted
+    }
+
+    private fun checkMediaItemAccess(dedupKey: String, prof: UserProfile): String? {
+        if (dedupKey.isBlank()) return null
+        val (isAdult, isExtra) = db.getMediaAccessFlags(dedupKey)
+        if (prof.isKids && (isAdult || isExtra || !db.isKidsAllowed(dedupKey))) {
+            return "This title is not available in Kids mode."
+        }
+        if (isAdult && !prefs.isAdultVaultUnlocked()) {
+            return "18+ Vault is locked."
+        }
+        if (isExtra && !prefs.isExtrasUnlocked()) {
+            return "Extras vault is locked."
+        }
+        return null
+    }
+
+    private fun isValidServerUrl(raw: String): Boolean {
+        if (raw.isBlank() || raw.contains('#') || raw.any { it.isWhitespace() }) return false
+        return runCatching {
+            val u = java.net.URI(raw.trim())
+            val scheme = u.scheme?.lowercase(Locale.ROOT) ?: ""
+            (scheme == "http" || scheme == "https") && !u.host.isNullOrBlank()
+        }.getOrDefault(false)
+    }
+
     /** Times every request; anything slower than 400 ms is written to the problem report so lag can be traced to its cause. */
     fun handle(method: String, fullPath: String, bodyStr: String, authHeader: String? = null): String {
         val t0 = System.currentTimeMillis()
@@ -39,17 +76,21 @@ class AppApiRouter(
         if (path != "/api/state" && path != "/api/sync/status" && path != "/api/progress" && path != "/api/diag/js") prefs.noteUiActivity()
 
         val token = authHeader?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotBlank() }
-        val hasSession = !token.isNullOrBlank() || prefs.hasActiveSession()
+        val storedToken = prefs.getAuthToken()
+        val hasSession = !storedToken.isNullOrBlank() && (
+            token.isNullOrBlank() ||
+            java.security.MessageDigest.isEqual(
+                token.toByteArray(Charsets.UTF_8),
+                storedToken.toByteArray(Charsets.UTF_8)
+            )
+        )
 
-        // 6. Enforce in the native router too:
-        // /api/playlists*, /api/save-credentials, /api/sync-now, /api/profiles* return 401 when there is no session.
-        val isProtected = path.startsWith("/api/playlists") ||
-                path == "/api/save-credentials" ||
-                path == "/api/sync-now" ||
-                path == "/api/clear-playlist" ||
-                path.startsWith("/api/profiles")
+        // Deny-by-default: only bootstrap/session/diag status endpoints are reachable without a valid session.
+        val isPublicRoute =
+            (method == "GET" && (path == "/api/state" || path == "/api/status" || path == "/api/session" || path == "/api/diag" || path == "/api/pack/status")) ||
+            (method == "POST" && (path == "/api/session" || path == "/api/auth/session" || path == "/api/auth/signout" || path == "/api/diag/js"))
 
-        if (isProtected && !hasSession) {
+        if (!isPublicRoute && !hasSession) {
             return """{"error":"Unauthorized - No active session","status":401,"ok":false}"""
         }
 
@@ -478,8 +519,9 @@ class AppApiRouter(
         val activeProf = getActiveUserProfile()
         val dedupKey = queryParams["dedupKey"] ?: queryParams["id"] ?: ""
         val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
-        // Kids profiles cannot open a title that is not child-rated, even through a saved link or watchlist entry
-        if (activeProf.isKids && !db.isKidsAllowed(dedupKey)) return """{"ok":false,"error":"This title is not available in Kids mode."}"""
+        checkMediaItemAccess(dedupKey, activeProf)?.let { msg ->
+            return JSONObject().put("ok", false).put("status", 403).put("error", msg).toString()
+        }
         // fast=1: the screen draws at once; "More Like This" comes from /api/related a moment later
         val mlt = if (queryParams["fast"] == "1") emptyList() else db.getMoreLikeThis(
             item,
@@ -541,6 +583,9 @@ class AppApiRouter(
         val activeProf = getActiveUserProfile()
         val dedupKey = queryParams["dedupKey"] ?: ""
         val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
+        checkMediaItemAccess(dedupKey, activeProf)?.let { msg ->
+            return JSONObject().put("ok", false).put("status", 403).put("error", msg).toString()
+        }
         val offset = (queryParams["offset"]?.toIntOrNull() ?: 0).coerceAtLeast(0)
         val limit = (queryParams["limit"]?.toIntOrNull() ?: 24).coerceIn(1, 60)
         val rows = db.getMoreLikeThis(
@@ -567,6 +612,11 @@ class AppApiRouter(
 
         val activeProf = getActiveUserProfile()
         val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id)
+        if (item != null) {
+            checkMediaItemAccess(dedupKey, activeProf)?.let { msg ->
+                return JSONObject().put("ok", false).put("status", 403).put("error", msg).toString()
+            }
+        }
         if (item == null || item.versions.size <= 1) {
             val vArr = JSONArray()
             item?.versions?.forEach { v ->
@@ -649,7 +699,8 @@ class AppApiRouter(
             val safeBase = if (!base.startsWith("http://", ignoreCase = true) && !base.startsWith("https://", ignoreCase = true)) {
                 "http://$base"
             } else base
-            val safeExt = ext.ifBlank { "mp4" }
+            if (!isValidServerUrl(safeBase)) return 0L
+            val safeExt = ext.trim('.').takeIf { extAllowRegex.matches(it) } ?: "mp4"
             val urlStr = "$safeBase/movie/${android.net.Uri.encode(username)}/${android.net.Uri.encode(pass)}/${android.net.Uri.encode(streamId)}.$safeExt"
             val url = java.net.URL(urlStr)
             val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
@@ -658,7 +709,7 @@ class AppApiRouter(
                 setRequestProperty("User-Agent", "IPTVSmartersPlayer/1.0")
                 connectTimeout = 3000
                 readTimeout = 3000
-                instanceFollowRedirects = true
+                instanceFollowRedirects = false
             }
             try {
                 val code = conn.responseCode
@@ -991,7 +1042,7 @@ class AppApiRouter(
                 }
             }
             "reset_pin" -> {
-                if (newPin.trim().length != 4) {
+                if (!Regex("^\\d{4}$").matches(newPin.trim())) {
                     return """{"success":false,"error":"New PIN must be exactly 4 digits"}"""
                 }
                 val (verified, msg) = verifyResetPinWithWorker(accountPassword = password, code = code, newPin = newPin)
@@ -1010,11 +1061,17 @@ class AppApiRouter(
                 }
             }
             "restore" -> {
-                val pinHash = obj.optString("pinHash")
-                val pinSalt = obj.optString("pinSalt")
-                if (pinHash.isNotBlank()) {
-                    prefs.restorePinHash(pinHash, pinSalt)
+                if (prefs.isPinConfigured()) {
+                    return """{"success":false,"error":"Master PIN is already configured on this device"}"""
                 }
+                val pinHash = obj.optString("pinHash").trim().lowercase(Locale.ROOT)
+                val pinSalt = obj.optString("pinSalt").trim()
+                val validHash = Regex("^(?:[0-9a-f]{64}|pbkdf2_sha256\\x24(?:10000|[1-9]\\d{4,5})\\x24[0-9a-f]{64})$").matches(pinHash)
+                val validSalt = Regex("^[A-Za-z0-9-]{8,64}$").matches(pinSalt)
+                if (!validHash || !validSalt) {
+                    return """{"success":false,"error":"Invalid PIN restore payload"}"""
+                }
+                prefs.restorePinHash(pinHash, pinSalt)
                 """{"success":true}"""
             }
             "signout" -> {
@@ -1032,9 +1089,13 @@ class AppApiRouter(
         }
         return try {
             val baseUrl = prefs.getCloudSyncBaseUrl()
+            if (!baseUrl.startsWith("https://", ignoreCase = true)) {
+                return Pair(false, "Insecure cloud sync URL rejected")
+            }
             val url = java.net.URL("$baseUrl/api/account/reset-pin")
             val conn = url.openConnection() as java.net.HttpURLConnection
             conn.requestMethod = "POST"
+            conn.instanceFollowRedirects = false
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Authorization", "Bearer $token")
             conn.connectTimeout = 8000
@@ -1097,6 +1158,13 @@ class AppApiRouter(
         val avatarColor = json.optString("avatarColor", "#8B5CF6")
         val theme = json.optString("theme", "purple")
         val isKids = json.optBoolean("isKids", false)
+        val currentProf = getActiveUserProfile()
+        if (currentProf.isKids && !isKids && prefs.hasCustomParentalPin()) {
+            val pin = json.optString("pin", "")
+            if (!prefs.verifyParentalPin(pin)) {
+                return """{"ok":false,"status":403,"error":"Master PIN required to create an unrestricted profile from Kids mode"}"""
+            }
+        }
 
         if (name.isBlank()) {
             return """{"ok":false,"error":"Profile name required"}"""
@@ -1162,6 +1230,13 @@ class AppApiRouter(
         if (prof.isPrimary) {
             return """{"ok":false,"error":"Primary profile cannot be deleted"}"""
         }
+        val activeProf = getActiveUserProfile()
+        if ((activeProf.isKids || prof.isKids) && prefs.hasCustomParentalPin()) {
+            val pin = json.optString("pin", "")
+            if (!prefs.verifyParentalPin(pin)) {
+                return """{"ok":false,"status":403,"error":"Master PIN required to delete a Kids profile"}"""
+            }
+        }
 
         val ok = db.deleteProfile(id)
         if (ok) {
@@ -1179,6 +1254,13 @@ class AppApiRouter(
         val json = JSONObject(bodyStr.ifBlank { "{}" })
         val id = json.optString("id", json.optString("profileId", ""))
         val prof = db.getProfileById(id) ?: return """{"ok":false,"error":"Profile not found"}"""
+        val currentProf = getActiveUserProfile()
+        if (currentProf.id != prof.id && currentProf.isKids && !prof.isKids && prefs.hasCustomParentalPin()) {
+            val pin = json.optString("pin", "")
+            if (!prefs.verifyParentalPin(pin)) {
+                return """{"ok":false,"status":403,"requirePin":true,"error":"Master PIN required to leave Kids mode"}"""
+            }
+        }
 
         prefs.setActiveProfileId(prof.id)
         // Phase B Rule: Re-lock 18+ Vault in memory on profile switch!
@@ -1200,6 +1282,9 @@ class AppApiRouter(
         val playlistName = obj.optString("playlistName", obj.optString("name", "My IPTV"))
 
         val current = prefs.loadCredentials()
+        if (serverUrl.isNotBlank() && !isValidServerUrl(serverUrl)) {
+            return """{"ok":false,"error":"Invalid IPTV server URL (must be http:// or https://)"}"""
+        }
         val updated = current.copy(
             playlistName = playlistName.ifBlank { "My IPTV" },
             serverUrl = serverUrl.ifBlank { current.serverUrl },
@@ -1218,25 +1303,60 @@ class AppApiRouter(
     private fun handleStreamUrl(bodyStr: String): String {
         val obj = JSONObject(bodyStr.ifBlank { "{}" })
         val creds = prefs.loadCredentials()
-        if (!creds.isConfigured) {
+        if (!creds.isConfigured || !isValidServerUrl(creds.normalizedServerUrl)) {
             return JSONObject().apply {
                 put("ok", false)
                 put("error", "no_login")
                 put("message", "Your IPTV login is not on this TV yet. Open Settings, then IPTV Playlists.")
             }.toString()
         }
+        val activeProf = getActiveUserProfile()
         val kind = when (obj.optString("kind")) { "series" -> "series"; "live" -> "live"; else -> "movie" }
-        if (kind == "live" && getActiveUserProfile().isKids) {
-            return JSONObject().apply { put("ok", false); put("error", "kids"); put("message", "Live TV is not available in Kids mode.") }.toString()
-        }
         val id = obj.optString("id").trim()
+        val dedupKey = obj.optString("dedupKey").trim()
         if (id.isBlank()) {
             return JSONObject().apply { put("ok", false); put("error", "no_id"); put("message", "This title has no playable stream.") }.toString()
         }
-        val ext = if (kind == "live") "m3u8" else obj.optString("ext").ifBlank { "mp4" }.trim('.')
+        var isRestricted = false
+        if (kind == "live") {
+            if (activeProf.isKids) {
+                return JSONObject().apply { put("ok", false); put("status", 403); put("error", "kids"); put("message", "Live TV is not available in Kids mode.") }.toString()
+            }
+            val chGroup = db.getLiveChannelGroup(id)
+            if (chGroup == "adult") {
+                isRestricted = true
+                if (!prefs.isAdultVaultUnlocked()) {
+                    return JSONObject().apply { put("ok", false); put("status", 403); put("error", "locked"); put("message", "18+ Vault is locked.") }.toString()
+                }
+            } else if (chGroup == "extras") {
+                isRestricted = true
+                if (!prefs.isExtrasUnlocked()) {
+                    return JSONObject().apply { put("ok", false); put("status", 403); put("error", "locked"); put("message", "Extras vault is locked.") }.toString()
+                }
+            }
+        } else {
+            val resolved = if (dedupKey.isNotBlank()) dedupKey else db.findMediaAccessByStreamId(kind, id)?.first.orEmpty()
+            if (resolved.isNotBlank()) {
+                checkMediaItemAccess(resolved, activeProf)?.let { msg ->
+                    return JSONObject().apply { put("ok", false); put("status", 403); put("error", "locked"); put("message", msg) }.toString()
+                }
+                val flags = db.getMediaAccessFlags(resolved)
+                isRestricted = flags.first || flags.second
+            }
+        }
+        val rawExt = obj.optString("ext").trim('.')
+        val ext = if (kind == "live") "m3u8" else (rawExt.takeIf { extAllowRegex.matches(it) } ?: "mp4")
         fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
-        val url = "${creds.normalizedServerUrl}/$kind/${enc(creds.username)}/${enc(creds.password)}/${enc(id)}.$ext"
-        return JSONObject().apply { put("ok", true); put("url", url) }.toString()
+        val realUrl = "${creds.normalizedServerUrl}/$kind/${enc(creds.username)}/${enc(creds.password)}/${enc(id)}.$ext"
+        val now = System.currentTimeMillis()
+        streamTickets.entries.removeIf { it.value.expiresAt < now }
+        while (streamTickets.size >= 32) {
+            val firstKey = streamTickets.keys.firstOrNull() ?: break
+            streamTickets.remove(firstKey)
+        }
+        val ticket = java.util.UUID.randomUUID().toString()
+        streamTickets[ticket] = StreamTicket(realUrl, isRestricted || prefs.isAdultVaultUnlocked() || prefs.isExtrasUnlocked(), now + 120_000L)
+        return JSONObject().apply { put("ok", true); put("url", "sv-stream://$ticket") }.toString()
     }
 
     private fun handleSyncNow(): String {
@@ -1383,13 +1503,13 @@ class AppApiRouter(
             val token = json.optString("token", "").ifBlank { json.optString("authToken", "") }
             val email = json.optString("email", "")
             val displayName = json.optString("displayName", "")
-            if (token.isNotBlank()) {
+            if (token.length >= 32) {
                 prefs.setAuthToken(token)
                 if (email.isNotBlank()) prefs.setAccountEmail(email)
                 if (displayName.isNotBlank()) prefs.setAccountDisplayName(displayName)
                 """{"ok":true,"authenticated":true}"""
             } else {
-                """{"ok":false,"error":"Token missing"}"""
+                """{"ok":false,"error":"Valid session token required"}"""
             }
         } catch (e: Exception) {
             """{"ok":false,"error":"${e.message}"}"""

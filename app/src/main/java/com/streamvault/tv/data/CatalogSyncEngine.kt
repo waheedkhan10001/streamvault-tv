@@ -42,8 +42,19 @@ class CatalogSyncEngine(
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
-        .followSslRedirects(true)
+        .followSslRedirects(false)
         .build()
+
+    // Strict HTTPS-only client without redirect-token leaks for Cloud Sync & TMDB calls
+    private val cloudHttpClient = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
+
+    private fun httpsCloudBaseOrNull(): String? =
+        prefs.getCloudSyncBaseUrl().takeIf { it.startsWith("https://", ignoreCase = true) }
 
     private val _syncState = MutableStateFlow(SyncProgressState())
     val syncState: StateFlow<SyncProgressState> = _syncState
@@ -742,7 +753,7 @@ class CatalogSyncEngine(
     /** Sends enriched titles to the cloud. Returns true when every batch was accepted. Titles that were not accepted are remembered and sent later. */
     fun uploadCatalogSyncBatch(items: List<MediaItem>): Boolean {
         val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return false
-        val cloudBase = prefs.getCloudSyncBaseUrl()
+        val cloudBase = httpsCloudBaseOrNull() ?: return false
         var allOk = true
 
         for (chunk in items.chunked(25)) {
@@ -792,7 +803,7 @@ class CatalogSyncEngine(
                         .header("Content-Type", "application/json")
                         .post(payload.toRequestBody("application/json".toMediaTypeOrNull()))
                         .build()
-                    httpClient.newCall(req).execute().use { resp ->
+                    cloudHttpClient.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) {
                             success = true
                         } else if (resp.code == 401) {
@@ -834,7 +845,7 @@ class CatalogSyncEngine(
 
     fun markCatalogTitlesRemoved(dedupKeys: List<String>) {
         val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return
-        val cloudBase = prefs.getCloudSyncBaseUrl()
+        val cloudBase = httpsCloudBaseOrNull() ?: return
         if (dedupKeys.isEmpty()) return
         dedupKeys.chunked(50).forEach { chunk ->
             try {
@@ -847,7 +858,7 @@ class CatalogSyncEngine(
                     .header("Content-Type", "application/json")
                     .post(payload.toRequestBody("application/json".toMediaTypeOrNull()))
                     .build()
-                httpClient.newCall(req).execute().close()
+                cloudHttpClient.newCall(req).execute().close()
             } catch (_: Exception) {}
         }
     }
@@ -859,7 +870,7 @@ class CatalogSyncEngine(
      */
     fun pullTmdbIdsFromCloud(): Int? {
         val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return null
-        val cloudBase = prefs.getCloudSyncBaseUrl()
+        val cloudBase = httpsCloudBaseOrNull() ?: return null
         var afterUpdated = 0L
         var afterItem = ""
         var first = true
@@ -871,7 +882,7 @@ class CatalogSyncEngine(
                 (if (first) "" else "&after_updated=$afterUpdated&after_item=" + URLEncoder.encode(afterItem, "UTF-8"))
             val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
             try {
-                val more = httpClient.newCall(req).execute().use { resp ->
+                val more = cloudHttpClient.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return null
                     val json = JSONObject(resp.body?.string() ?: "{}")
                     val arr = json.optJSONArray("items") ?: JSONArray()
@@ -901,7 +912,7 @@ class CatalogSyncEngine(
 
     fun pullCatalogFromCloud(onProgress: (Int, Int) -> Unit = { _, _ -> }): Int {
         val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return 0
-        val cloudBase = prefs.getCloudSyncBaseUrl()
+        val cloudBase = httpsCloudBaseOrNull() ?: return 0
         // Pages continue from where the last one ended (not "skip N"), so the cloud never re-reads earlier pages
         var afterUpdated = 0L
         var afterItem = ""
@@ -920,7 +931,7 @@ class CatalogSyncEngine(
                 .build()
 
             try {
-                val (items, total, more) = httpClient.newCall(req).execute().use { resp ->
+                val (items, total, more) = cloudHttpClient.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return totalImported
                     val json = JSONObject(resp.body?.string() ?: "{}")
                     val itemsArr = json.optJSONArray("items") ?: JSONArray()
@@ -998,8 +1009,9 @@ class CatalogSyncEngine(
             val endpointType = if (item.mediaType == MediaType.SERIES) "tv" else "movie"
             var resolvedTmdbId = item.tmdbId
             val token = prefs.getAuthToken() ?: ""
-            val cloudBase = prefs.getCloudSyncBaseUrl()
+            val cloudBase = httpsCloudBaseOrNull() ?: ""
             val useWorkerProxy = apiKey.isBlank() || apiKey == XtreamCredentials.DEFAULT_TMDB_KEY
+            if (useWorkerProxy && (cloudBase.isBlank() || token.isBlank())) return false
 
             // Step 1: If no TMDB ID was supplied by IPTV vendor, search TMDB by cleanTitle + year
             if (resolvedTmdbId <= 0) {
@@ -1016,7 +1028,7 @@ class CatalogSyncEngine(
                 if (useWorkerProxy && token.isNotBlank()) {
                     reqBuilder.header("Authorization", "Bearer $token")
                 }
-                httpClient.newCall(reqBuilder.build()).execute().use { resp ->
+                cloudHttpClient.newCall(reqBuilder.build()).execute().use { resp ->
                     if (resp.code == 429) {
                         Thread.sleep(1200) // Respect rate limit backoff
                         return false
@@ -1066,7 +1078,7 @@ class CatalogSyncEngine(
             if (useWorkerProxy && token.isNotBlank()) {
                 reqBuilder.header("Authorization", "Bearer $token")
             }
-            httpClient.newCall(reqBuilder.build()).execute().use { resp ->
+            cloudHttpClient.newCall(reqBuilder.build()).execute().use { resp ->
                 if (resp.code == 429) {
                     Thread.sleep(1200)
                     return false
@@ -1083,7 +1095,7 @@ class CatalogSyncEngine(
     /** Asks the shared cloud cache for many titles at once. Returns the dedupKeys it filled in. */
     private fun prefillFromSharedCache(queue: List<MediaItem>): Set<String> {
         val token = prefs.getAuthToken()?.takeIf { it.isNotBlank() } ?: return emptySet()
-        val cloudBase = prefs.getCloudSyncBaseUrl()
+        val cloudBase = httpsCloudBaseOrNull() ?: return emptySet()
         val done = mutableSetOf<String>()
         // Adult titles are never sent anywhere
         val candidates = queue.filter { it.tmdbId > 0 && !it.isAdult }
@@ -1099,7 +1111,7 @@ class CatalogSyncEngine(
                     .header("Authorization", "Bearer $token")
                     .post(payload.toRequestBody("application/json".toMediaTypeOrNull()))
                     .build()
-                httpClient.newCall(req).execute().use { resp ->
+                cloudHttpClient.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return@use
                     val res = JSONObject(resp.body?.string() ?: "{}").optJSONObject("results") ?: return@use
                     for (entry in chunk) {

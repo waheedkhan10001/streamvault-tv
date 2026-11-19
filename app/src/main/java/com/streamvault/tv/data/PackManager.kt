@@ -49,6 +49,7 @@ class PackManager(private val context: Context, private val prefs: PreferencesMa
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
+        .followSslRedirects(false)
         .build()
 
     private val dir: File get() = File(context.filesDir, "pack").also { it.mkdirs() }
@@ -85,8 +86,9 @@ class PackManager(private val context: Context, private val prefs: PreferencesMa
     /** Returns the manifest of the newest pack in the cloud, or null if it cannot be read. */
     fun fetchLatestManifest(): JSONObject? {
         val token = prefs.getAuthToken() ?: return null
+        val base = prefs.getCloudSyncBaseUrl().takeIf { it.startsWith("https://", ignoreCase = true) } ?: return null
         return runCatching {
-            get("${prefs.getCloudSyncBaseUrl()}/api/pack/latest", token).use { r ->
+            get("$base/api/pack/latest", token).use { r ->
                 if (!r.isSuccessful) return null
                 JSONObject(r.body?.string() ?: return null).optJSONObject("pack")
             }
@@ -181,12 +183,36 @@ class PackManager(private val context: Context, private val prefs: PreferencesMa
             // ---- unpack the database next to the old one, then swap
             set(Phase.UNPACKING, size, size, version, "Preparing the content")
             val header = readHeader(part)
+            val dbOffset = header.optLong("dbOffset", -1L)
+            val dbGzLength = header.optLong("dbGzLength", -1L)
+            val dbRawLength = header.optLong("dbRawLength", -1L)
+            val maxDbRaw = 256L * 1024L * 1024L
+            if (dbOffset < 4096L || dbGzLength <= 0L || dbOffset + dbGzLength > part.length() || dbRawLength !in 1L..maxDbRaw) {
+                throw java.io.IOException("Invalid pack database bounds")
+            }
+            if (dir.usableSpace in 1L until (dbRawLength + 32L * 1024L * 1024L)) {
+                throw java.io.IOException("Not enough free space to unpack content database")
+            }
             val dbTmp = File(dir, "enrich.db.new")
             dbTmp.delete()
             RandomAccessFile(part, "r").use { raf ->
-                raf.seek(header.optLong("dbOffset"))
-                val limited = java.io.BufferedInputStream(LimitedStream(java.nio.channels.Channels.newInputStream(raf.channel), header.optLong("dbGzLength")))
-                GZIPInputStream(limited, 64 * 1024).use { gz -> FileOutputStream(dbTmp).use { out -> gz.copyTo(out, 256 * 1024) } }
+                raf.seek(dbOffset)
+                val limited = java.io.BufferedInputStream(LimitedStream(java.nio.channels.Channels.newInputStream(raf.channel), dbGzLength))
+                GZIPInputStream(limited, 64 * 1024).use { gz ->
+                    FileOutputStream(dbTmp).use { out ->
+                        val buf = ByteArray(256 * 1024)
+                        var written = 0L
+                        while (true) {
+                            val n = gz.read(buf)
+                            if (n < 0) break
+                            written += n
+                            if (written > dbRawLength) {
+                                throw java.io.IOException("Decompressed pack database exceeds declared size")
+                            }
+                            out.write(buf, 0, n)
+                        }
+                    }
+                }
             }
             if (dbTmp.length() != header.optLong("dbRawLength") || sha256(dbTmp) != header.optString("dbSha256")) {
                 dbTmp.delete()
@@ -213,22 +239,27 @@ class PackManager(private val context: Context, private val prefs: PreferencesMa
     /** Poster bytes for a title row (poster_off / poster_len from the database), read straight from the pack file. */
     @Volatile private var postersBase = -1L
     fun readPoster(posterOff: Long, posterLen: Int): ByteArray? {
-        if (posterLen <= 0 || !packFile.exists()) return null
+        if (posterOff < 0L || posterLen !in 1..(2 * 1024 * 1024) || !packFile.exists()) return null
         return runCatching {
-            if (postersBase < 0) postersBase = readHeader(packFile).optLong("postersOffset")   // read the header once, not for every poster
+            if (postersBase < 0L) postersBase = readHeader(packFile).optLong("postersOffset", -1L)
+            val base = postersBase
+            if (base < 4096L) return null
             RandomAccessFile(packFile, "r").use { raf ->
-                raf.seek(postersBase + posterOff)
+                val fileLen = raf.length()
+                if (posterOff > fileLen || base + posterOff + posterLen > fileLen) return null
+                raf.seek(base + posterOff)
                 ByteArray(posterLen).also { raf.readFully(it) }
             }
         }.getOrNull()
     }
 
-    private fun readHeader(f: File): JSONObject {
+    internal fun readHeader(f: File): JSONObject {
         RandomAccessFile(f, "r").use { raf ->
             val hb = ByteArray(4096)
             raf.readFully(hb)
             if (String(hb, 0, 8, Charsets.US_ASCII) != "SVPACK01") throw java.io.IOException("Not a StreamVault pack")
             val len = (hb[8].toInt() and 0xff) or ((hb[9].toInt() and 0xff) shl 8) or ((hb[10].toInt() and 0xff) shl 16) or ((hb[11].toInt() and 0xff) shl 24)
+            if (len !in 2..4084) throw java.io.IOException("Invalid pack header length: $len")
             return JSONObject(String(hb, 12, len, Charsets.UTF_8))
         }
     }

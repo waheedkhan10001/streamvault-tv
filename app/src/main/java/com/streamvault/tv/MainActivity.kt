@@ -92,6 +92,7 @@ class MainActivity : Activity() {
     private var subtitleColumnLayout: LinearLayout? = null
 
     private var isPlayingVideo = false
+    private var currentPlaybackIsRestricted: Boolean = false
     private var currentDedupKey: String = ""
     private var currentExpectedDurationMs: Long = 0L
     private val localAssetUrl = "file:///android_asset/tv-ui.html"
@@ -134,8 +135,9 @@ class MainActivity : Activity() {
                     autosaveTickCounter = 0
                     val pos = exoPlayer?.currentPosition ?: 0L
                     val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
-                    if (pos > 5000L && currentDedupKey.isNotEmpty()) {
-                        val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress('$currentDedupKey', $pos, $dur); }"
+                    if (pos > 5000L && currentDedupKey.isNotEmpty() && !currentPlaybackIsRestricted) {
+                        val qKey = org.json.JSONObject.quote(currentDedupKey)
+                        val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress($qKey, $pos, $dur); }"
                         webView.evaluateJavascript(js, null)
                     }
                 }
@@ -146,20 +148,14 @@ class MainActivity : Activity() {
 
     class WebAppInterface(private val activity: MainActivity) {
         @JavascriptInterface
-        fun playStream(streamUrl: String, title: String, startMs: Long, dedupKey: String, expectedDurationMs: Long, containerExt: String) {
+        fun playStream(streamUrl: String?, title: String?, startMs: Long, dedupKey: String?, expectedDurationMs: Long, containerExt: String?) {
+            val u = streamUrl ?: ""
+            val t = title ?: ""
+            val d = dedupKey ?: ""
+            val ext = containerExt ?: ""
             activity.runOnUiThread {
-                activity.startNativeExoPlayer(streamUrl, title, startMs, dedupKey, expectedDurationMs, containerExt)
+                activity.startNativeExoPlayer(u, t, startMs, d, expectedDurationMs, ext)
             }
-        }
-
-        @JavascriptInterface
-        fun playStream(streamUrl: String, title: String, startMs: Long, dedupKey: String, expectedDurationMs: Long) {
-            playStream(streamUrl, title, startMs, dedupKey, expectedDurationMs, "")
-        }
-
-        @JavascriptInterface
-        fun playStream(streamUrl: String, title: String, startMs: Long, dedupKey: String) {
-            playStream(streamUrl, title, startMs, dedupKey, 0L, "")
         }
 
         @JavascriptInterface
@@ -183,8 +179,8 @@ class MainActivity : Activity() {
         fun getAppVersion(): String = "2.6.0-standalone"
 
         @JavascriptInterface
-        fun handleApiRequest(method: String, path: String, body: String): String {
-            return activity.apiRouter.handle(method, path, body)
+        fun handleApiRequest(method: String?, path: String?, body: String?): String {
+            return activity.apiRouter.handle(method ?: "GET", path ?: "", body ?: "")
         }
 
         /**
@@ -192,24 +188,28 @@ class MainActivity : Activity() {
          * while the database works: the old call blocked every key press until the query finished.
          */
         @JavascriptInterface
-        fun handleApiRequestAsync(callId: String, method: String, path: String, body: String, authToken: String?) {
+        fun handleApiRequestAsync(callId: String?, method: String?, path: String?, body: String?, authToken: String?) {
+            val cid = callId ?: ""
+            val m = method ?: "GET"
+            val p = path ?: ""
+            val b = body ?: ""
             activity.apiPool.execute {
                 val res = try {
                     val authHeader = if (!authToken.isNullOrBlank()) "Bearer $authToken" else null
-                    activity.apiRouter.handle(method, path, body, authHeader)
+                    activity.apiRouter.handle(m, p, b, authHeader)
                 } catch (e: Throwable) {
                     """{"ok":false,"error":${org.json.JSONObject.quote(e.message ?: "error")}}"""
                 }
                 activity.runOnUiThread {
-                    activity.evalJs("window.__svApiDone && window.__svApiDone(${org.json.JSONObject.quote(callId)}, ${org.json.JSONObject.quote(res)})")
+                    activity.evalJs("window.__svApiDone && window.__svApiDone(${org.json.JSONObject.quote(cid)}, ${org.json.JSONObject.quote(res)})")
                 }
             }
         }
 
         @JavascriptInterface
-        fun handleApiRequestWithAuth(method: String, path: String, body: String, authToken: String?): String {
+        fun handleApiRequestWithAuth(method: String?, path: String?, body: String?, authToken: String?): String {
             val authHeader = if (!authToken.isNullOrBlank()) "Bearer $authToken" else null
-            return activity.apiRouter.handle(method, path, body, authHeader)
+            return activity.apiRouter.handle(method ?: "GET", path ?: "", body ?: "", authHeader)
         }
     }
 
@@ -248,8 +248,8 @@ class MainActivity : Activity() {
             val results = data.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
             val query = results?.firstOrNull() ?: ""
             if (query.isNotEmpty()) {
-                val safeQuery = query.replace("\\", "\\\\").replace("'", "\\'")
-                webView.evaluateJavascript("if(window.onVoiceSearchResult){ window.onVoiceSearchResult('$safeQuery'); }", null)
+                val quotedQuery = org.json.JSONObject.quote(query)
+                webView.evaluateJavascript("if(window.onVoiceSearchResult){ window.onVoiceSearchResult($quotedQuery); }", null)
             }
         }
     }
@@ -322,11 +322,11 @@ class MainActivity : Activity() {
                 databaseEnabled = true
                 mediaPlaybackRequiresUserGesture = false
                 allowFileAccess = true
-                allowContentAccess = true
+                allowContentAccess = false
                 allowFileAccessFromFileURLs = false
                 allowUniversalAccessFromFileURLs = false
                 loadsImagesAutomatically = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 useWideViewPort = true
                 loadWithOverviewMode = true
                 cacheMode = WebSettings.LOAD_DEFAULT
@@ -342,6 +342,12 @@ class MainActivity : Activity() {
             }
 
             webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val u = request?.url?.toString() ?: return true
+                    // Never allow external navigation inside this WebView (protects window.AndroidApp & localStorage)
+                    return !u.startsWith("file:///android_asset/")
+                }
+
                 override fun shouldInterceptRequest(
                     view: WebView?,
                     request: WebResourceRequest?
@@ -970,7 +976,16 @@ class MainActivity : Activity() {
     }
 
     private fun startNativeExoPlayer(url: String, title: String, startMs: Long, dedupKey: String, expectedDurationMs: Long = 0L, containerExt: String = "") {
+        val resolvedTicket = apiRouter.resolveStreamTicket(url)
+        if (resolvedTicket == null) {
+            runOnUiThread {
+                Toast.makeText(this, "Stream session expired. Please try again.", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        val actualUrl = resolvedTicket.first
         isPlayingVideo = true
+        currentPlaybackIsRestricted = resolvedTicket.second || (dedupKey.isNotBlank() && db.isAdultItem(dedupKey))
         currentDedupKey = dedupKey
         currentExpectedDurationMs = expectedDurationMs
 
@@ -991,13 +1006,13 @@ class MainActivity : Activity() {
 
         showOsd()
 
-        val isMkv = containerExt.equals("mkv", ignoreCase = true) || url.contains(".mkv")
-        val isMp4 = containerExt.equals("mp4", ignoreCase = true) || url.contains(".mp4")
-        val isHls = containerExt.equals("m3u8", ignoreCase = true) || url.contains(".m3u8")
+        val isMkv = containerExt.equals("mkv", ignoreCase = true) || actualUrl.contains(".mkv")
+        val isMp4 = containerExt.equals("mp4", ignoreCase = true) || actualUrl.contains(".mp4")
+        val isHls = containerExt.equals("m3u8", ignoreCase = true) || actualUrl.contains(".m3u8")
 
         // Resolve IPTV 302 redirect on background thread with VLC User-Agent to prevent 509 header loss
         thread {
-            var finalPlayUrl = url
+            var finalPlayUrl = actualUrl
             try {
                 val client = OkHttpClient.Builder()
                     .followRedirects(false)
@@ -1005,7 +1020,7 @@ class MainActivity : Activity() {
                     .readTimeout(8, TimeUnit.SECONDS)
                     .build()
                 val req = Request.Builder()
-                    .url(url)
+                    .url(actualUrl)
                     .header("User-Agent", "VLC/3.0.18 LibVLC/3.0.18")
                     .header("Accept", "*/*")
                     .build()
@@ -1013,8 +1028,8 @@ class MainActivity : Activity() {
                 if (resp.isRedirect) {
                     val loc = resp.header("Location")
                     if (!loc.isNullOrBlank()) {
-                        finalPlayUrl = loc
-                        Log.i("StreamVault", "Resolved 302 redirect directly to media server: $finalPlayUrl")
+                        finalPlayUrl = resp.request.url.resolve(loc)?.toString() ?: loc
+                        Log.i("StreamVault", "Resolved 302 redirect: ${com.streamvault.tv.data.DiagLog.clean(finalPlayUrl)}")
                     }
                 }
                 resp.close()
@@ -1242,9 +1257,14 @@ class MainActivity : Activity() {
         webView.requestFocus()
         isPlayingVideo = false
 
-        // Inform WebView of watch progress to update "Resume" button & save to server
-        val js = "if(window.onPlaybackExited){ window.onPlaybackExited('$currentDedupKey', $pos, $dur); }"
-        webView.evaluateJavascript(js, null)
+        val wasRestricted = currentPlaybackIsRestricted
+        currentPlaybackIsRestricted = false
+        // Inform WebView of watch progress to update "Resume" button & save to server (unless Adult/Extras)
+        if (!wasRestricted && currentDedupKey.isNotEmpty()) {
+            val qKey = org.json.JSONObject.quote(currentDedupKey)
+            val js = "if(window.onPlaybackExited){ window.onPlaybackExited($qKey, $pos, $dur); }"
+            webView.evaluateJavascript(js, null)
+        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -1493,16 +1513,21 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
-        if (isPlayingVideo && exoPlayer != null) {
-            // F4: Pause playback immediately on background / TV Home
-            exoPlayer?.pause()
-            val pos = exoPlayer?.currentPosition ?: 0L
-            val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
-            if (pos > 5000L && currentDedupKey.isNotEmpty()) {
-                val activeProfId = prefs.getActiveProfileId()
-                db.savePlaybackProgress(currentDedupKey, pos, dur, activeProfId)
-                val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress('$currentDedupKey', $pos, $dur); }"
-                webView.evaluateJavascript(js, null)
+        if (isPlayingVideo) {
+            if (currentPlaybackIsRestricted) {
+                exitNativePlayer()
+            } else if (exoPlayer != null) {
+                // F4: Pause playback immediately on background / TV Home
+                exoPlayer?.pause()
+                val pos = exoPlayer?.currentPosition ?: 0L
+                val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
+                if (pos > 5000L && currentDedupKey.isNotEmpty()) {
+                    val activeProfId = prefs.getActiveProfileId()
+                    db.savePlaybackProgress(currentDedupKey, pos, dur, activeProfId)
+                    val qKey = org.json.JSONObject.quote(currentDedupKey)
+                    val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress($qKey, $pos, $dur); }"
+                    webView.evaluateJavascript(js, null)
+                }
             }
         }
         // Auto-lock adult content on TV standby / background
@@ -1513,15 +1538,20 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
-        if (isPlayingVideo && exoPlayer != null) {
-            exoPlayer?.pause()
-            val pos = exoPlayer?.currentPosition ?: 0L
-            val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
-            if (pos > 5000L && currentDedupKey.isNotEmpty()) {
-                val activeProfId = prefs.getActiveProfileId()
-                db.savePlaybackProgress(currentDedupKey, pos, dur, activeProfId)
-                val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress('$currentDedupKey', $pos, $dur); }"
-                webView.evaluateJavascript(js, null)
+        if (isPlayingVideo) {
+            if (currentPlaybackIsRestricted) {
+                exitNativePlayer()
+            } else if (exoPlayer != null) {
+                exoPlayer?.pause()
+                val pos = exoPlayer?.currentPosition ?: 0L
+                val dur = if ((exoPlayer?.duration ?: 0L) > 0L) exoPlayer!!.duration else currentExpectedDurationMs
+                if (pos > 5000L && currentDedupKey.isNotEmpty()) {
+                    val activeProfId = prefs.getActiveProfileId()
+                    db.savePlaybackProgress(currentDedupKey, pos, dur, activeProfId)
+                    val qKey = org.json.JSONObject.quote(currentDedupKey)
+                    val js = "if(window.recordPlaybackProgress){ window.recordPlaybackProgress($qKey, $pos, $dur); }"
+                    webView.evaluateJavascript(js, null)
+                }
             }
         }
         prefs.lockAllVaults()
