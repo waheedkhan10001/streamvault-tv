@@ -2,6 +2,21 @@
 -- Prevents cross-account profile_data overwrite collisions while preserving existing data.
 -- Idempotent and safe on both minimal test databases and production D1 instances.
 
+CREATE TABLE IF NOT EXISTS profiles (
+  profile_id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  avatar_color TEXT DEFAULT '#8B5CF6',
+  theme TEXT DEFAULT 'StreamVault Purple',
+  is_kids INTEGER DEFAULT 0,
+  is_primary INTEGER DEFAULT 0,
+  pin_hash TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_acc ON profiles(account_id);
+
 CREATE TABLE IF NOT EXISTS profile_data (
   profile_id TEXT NOT NULL,
   account_id TEXT NOT NULL,
