@@ -20,7 +20,7 @@ enum class SubtitleFilterMode(val label: String) {
 enum class SortOption(val label: String) {
     NEWLY_ADDED("Recently Added to IPTV"),
     RELEASE_YEAR_DESC("Release Year (Newest First)"),
-    RATING_DESC("Highest Rated (IMDb / TMDB)"),
+    RATING_DESC("Highest Rated"),
     TITLE_ASC("Title (A → Z)"),
     RANDOM("Surprise Me (Random Pick)")
 }
@@ -55,12 +55,21 @@ data class XtreamCredentials(
 }
 
 object ContentCertifications {
-    val KIDS_CERTIFICATIONS: Set<String> = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
+    /** Kids = all-ages ratings ONLY (Saman, 2026-11-15: her children are 4 and 1). Not PG, not TV-Y7, not 6+. Same text the pack stores. */
+    val KIDS_CERTIFICATIONS: Set<String> = setOf("G", "TV-Y", "TV-G", "U", "UK U", "FSK 0", "AU G", "CA G", "IN U", "NL AL")
     val KIDS_CERTIFICATIONS_SQL_IN: String = KIDS_CERTIFICATIONS.joinToString(",") { "'$it'" }
 
+    /**
+     * Kids filter. The pack decides per title (kids_ok: US rating first, else UK or German rating), so every screen
+     * uses the same rule. [column] only tells which table alias to use (e.g. "m.certification" -> "m.kids_ok").
+     */
     fun kidsClause(column: String = "certification"): String {
-        return "$column IN ($KIDS_CERTIFICATIONS_SQL_IN) AND $column != ''"
+        val prefix = if (column.contains(".")) column.substringBefore(".") + "." else ""
+        return "(${prefix}kids_ok = 1 AND ${prefix}certification IN ($KIDS_CERTIFICATIONS_SQL_IN))"
     }
+
+    /** Titles that have not been through the pack yet fall back to their own age rating (US list above). */
+    fun kidsOkFromCertification(cert: String): Int = if (cert.trim().uppercase() in KIDS_CERTIFICATIONS) 1 else 0
 }
 
 data class UserProfile(
@@ -170,6 +179,7 @@ data class MediaItem(
     val durationMs: Long = 0L,
     val isAdult: Boolean = false,
     val certification: String = "",
+    val ratingSource: String = "",
     val userRating: Double = 0.0,
     val versions: List<StreamVersion> = emptyList()
 ) {

@@ -52,6 +52,9 @@ class MainActivity : Activity() {
 
     private lateinit var rootLayout: FrameLayout
     private lateinit var webView: WebView
+    /** Two workers answer the screen's requests, so a light request is not stuck behind a heavy one. */
+    val apiPool: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newFixedThreadPool(2) { r -> Thread(r, "sv-api") }
+    fun evalJs(js: String) { if (::webView.isInitialized) webView.evaluateJavascript(js, null) }
 
     // Track structure for multi-audio and subtitles
     data class StreamTrack(
@@ -184,6 +187,25 @@ class MainActivity : Activity() {
             return activity.apiRouter.handle(method, path, body)
         }
 
+        /**
+         * Same as handleApiRequestWithAuth, but the answer comes back later (window.__svApiDone) so the screen never freezes
+         * while the database works: the old call blocked every key press until the query finished.
+         */
+        @JavascriptInterface
+        fun handleApiRequestAsync(callId: String, method: String, path: String, body: String, authToken: String?) {
+            activity.apiPool.execute {
+                val res = try {
+                    val authHeader = if (!authToken.isNullOrBlank()) "Bearer $authToken" else null
+                    activity.apiRouter.handle(method, path, body, authHeader)
+                } catch (e: Throwable) {
+                    """{"ok":false,"error":${org.json.JSONObject.quote(e.message ?: "error")}}"""
+                }
+                activity.runOnUiThread {
+                    activity.evalJs("window.__svApiDone && window.__svApiDone(${org.json.JSONObject.quote(callId)}, ${org.json.JSONObject.quote(res)})")
+                }
+            }
+        }
+
         @JavascriptInterface
         fun handleApiRequestWithAuth(method: String, path: String, body: String, authToken: String?): String {
             val authHeader = if (!authToken.isNullOrBlank()) "Bearer $authToken" else null
@@ -253,14 +275,20 @@ class MainActivity : Activity() {
             prefs,
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
         )
+        syncEngine.cacheDir = cacheDir
         apiRouter = com.streamvault.tv.data.AppApiRouter(this, db, prefs, syncEngine)
-        runCatching {
-            if (prefs.loadCredentials().isConfigured && prefs.shouldRunAutoDeltaSync()) {
-                syncEngine.triggerSync(isManual = false)      // first load, a load that never finished, or older than 24 h
-            } else {
-                syncEngine.resumeEnrichmentIfNeeded()
+        syncEngine.packDbProvider = { apiRouter.packManager.takeIf { it.isReady() }?.dbFile }
+        // The screen comes first: the catalogue refresh / fill starts a few seconds later, on its own thread
+        Thread({
+            runCatching {
+                Thread.sleep(4000)
+                if (prefs.loadCredentials().isConfigured && prefs.shouldRunAutoDeltaSync()) {
+                    syncEngine.triggerSync(isManual = false)      // first load, a load that never finished, or older than 24 h
+                } else {
+                    syncEngine.resumeEnrichmentIfNeeded()
+                }
             }
-        }
+        }, "startup-sync").also { it.isDaemon = true }.start()
 
         try {
             toneGen = ToneGenerator(AudioManager.STREAM_MUSIC, 65)
@@ -325,6 +353,13 @@ class MainActivity : Activity() {
                     // otherwise sign-up, login and the pairing code never reach the server.
                     if (isLocalApiRequest(url.scheme, urlStr)) {
                         val path = url.path ?: ""
+                        // Posters come straight out of the content pack file: /api/pack/poster/<offset>_<length>
+                        if (path.startsWith("/api/pack/poster/")) {
+                            val parts = path.removePrefix("/api/pack/poster/").split("_")
+                            val bytes = if (parts.size == 2) apiRouter.packManager.readPoster(parts[0].toLongOrNull() ?: -1L, parts[1].toIntOrNull() ?: 0) else null
+                            return if (bytes != null) WebResourceResponse("image/jpeg", null, java.io.ByteArrayInputStream(bytes))
+                            else WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
+                        }
                         val query = url.query ?: ""
                         val fullPath = if (query.isNotEmpty()) "$path?$query" else path
                         val method = request.method ?: "GET"

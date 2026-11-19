@@ -17,13 +17,26 @@ class AppApiRouter(
     private val syncEngine: CatalogSyncEngine
 ) {
 
+    /** Times every request; anything slower than 400 ms is written to the problem report so lag can be traced to its cause. */
     fun handle(method: String, fullPath: String, bodyStr: String, authHeader: String? = null): String {
+        val t0 = System.currentTimeMillis()
+        try {
+            return handleInner(method, fullPath, bodyStr, authHeader)
+        } finally {
+            val ms = System.currentTimeMillis() - t0
+            val pathOnly = fullPath.substringBefore("?")
+            if (!pathOnly.startsWith("/api/pack/poster/")) DiagStats.request(method, pathOnly, ms)
+            if (ms >= 400 && pathOnly != "/api/diag/js") DiagLog.add("Slow request: $method ${pathOnly.take(60)} took $ms ms")
+        }
+    }
+
+    private fun handleInner(method: String, fullPath: String, bodyStr: String, authHeader: String? = null): String {
         val path = if (fullPath.contains("?")) fullPath.substringBefore("?") else fullPath
         val queryString = if (fullPath.contains("?")) fullPath.substringAfter("?") else ""
         val queryParams = parseQueryParams(queryString)
 
         // Anything the person causes counts as activity; the screen's own status polling does not.
-        if (path != "/api/state" && path != "/api/sync/status" && path != "/api/progress") prefs.noteUiActivity()
+        if (path != "/api/state" && path != "/api/sync/status" && path != "/api/progress" && path != "/api/diag/js") prefs.noteUiActivity()
 
         val token = authHeader?.removePrefix("Bearer ")?.trim()?.takeIf { it.isNotBlank() }
         val hasSession = !token.isNullOrBlank() || prefs.hasActiveSession()
@@ -48,6 +61,8 @@ class AppApiRouter(
                     (method == "POST" && path == "/api/auth/signout") -> handleSignOut()
 
                 // 1. App State Endpoint
+                method == "GET" && path == "/api/pack/status" -> packStatusJson()
+                method == "POST" && path == "/api/pack/start" -> startPackDownload()
                 method == "GET" && path == "/api/state" -> handleGetState()
 
                 // 2. Home Catalog Rows
@@ -76,6 +91,7 @@ class AppApiRouter(
 
                 // 9. Live TV
                 method == "GET" && path == "/api/live" -> handleGetLive(queryParams)
+                method == "POST" && path == "/api/diag/js" -> handleDiagFromScreen(bodyStr)
                 method == "GET" && path == "/api/latest" -> handleGetLatest()
                 method == "POST" && path == "/api/live/favorite" -> handleToggleLiveFavorite(bodyStr)
 
@@ -135,6 +151,31 @@ class AppApiRouter(
         return primary
     }
 
+    // ---- Enrichments pack: one big download before "Ready" (see PackManager)
+    val packManager: PackManager by lazy { PackManager(context, prefs) }
+    private val packRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun packStatusJson(): String {
+        val st = packManager.currentStatus()
+        val installed = packManager.installedVersion()
+        val o = st.toJson()
+        o.put("ready", installed != null)
+        o.put("installedVersion", installed ?: JSONObject.NULL)
+        o.put("running", packRunning.get())
+        return o.toString()
+    }
+
+    private fun startPackDownload(): String {
+        if (packRunning.compareAndSet(false, true)) {
+            Thread({
+                try {
+                    if (packManager.downloadAndInstall()) syncEngine.startBackgroundTmdbEnrichment()   // fills the catalog from the pack
+                } finally { packRunning.set(false) }
+            }, "pack-download").also { it.isDaemon = true }.start()
+        }
+        return packStatusJson()
+    }
+
     private fun handleGetState(): String {
         val creds = prefs.loadCredentials()
         val (enriched, total) = db.getEnrichmentCountsCached()
@@ -158,23 +199,7 @@ class AppApiRouter(
             put("hasCustomPin", prefs.hasCustomParentalPin())
         }
 
-        val syncObj = JSONObject().apply {
-            put("isSyncing", syncState.isSyncing)
-            put("phase", syncState.phase)
-            put("newlyAddedCount", syncState.newlyAddedCount)
-            put("totalMovies", total)
-            put("totalSeries", 0)
-            put("enrichedCount", enriched)
-            put("totalToEnrich", total)
-            put("percentComplete", if (total > 0) (enriched * 100) / total else 100)
-            put("stage", syncState.stage)
-            put("processedItems", syncState.processedItems)
-            put("estimatedTotal", syncState.estimatedTotal)
-            put("removedCount", syncState.removedCount)
-            put("note", syncState.note ?: JSONObject.NULL)
-            put("error", syncState.errorMessage ?: JSONObject.NULL)
-            put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
-        }
+        val syncObj = buildSyncObj()
 
         val smartRowsArr = JSONArray()
         for (sr in db.getPinnedSmartRows()) {
@@ -204,73 +229,48 @@ class AppApiRouter(
         }.toString()
     }
 
+    private class HomeLists(
+        val allMovies: List<MediaItem>, val trending: List<MediaItem>, val hollywood: List<MediaItem>,
+        val regional: List<MediaItem>, val action: List<MediaItem>, val acclaimed: List<MediaItem>
+    )
+    @Volatile private var homeCache: Triple<String, Long, HomeLists>? = null
+
+    /** The Home rows are remembered for a few minutes (they take seconds to work out on the TV); "Continue Watching" stays live. */
+    private fun homeLists(prof: UserProfile): HomeLists {
+        val (enr, _) = db.getEnrichmentCountsCached()
+        val key = "${prof.id}|${prof.isKids}|${enr / 2000}|${prefs.lastFullSyncTimestamp}"
+        val c = homeCache
+        if (c != null && c.first == key && System.currentTimeMillis() - c.second < 3 * 60 * 1000L) return c.third
+        fun q(name: String, f: SuperFilterState, limit: Int): List<MediaItem> {
+            val t = System.currentTimeMillis()
+            val r = db.queryMedia(filter = f, limit = limit, profileId = prof.id, isKids = prof.isKids, isAdultVaultUnlocked = false, isVaultTab = false)
+            DiagStats.homeRow(name, System.currentTimeMillis() - t)
+            return r
+        }
+        val out = HomeLists(
+            q("row all-movies 60", SuperFilterState(minRating = 6.0, sortBy = SortOption.RELEASE_YEAR_DESC), 60),
+            q("row trending 10", SuperFilterState(minRating = 6.8, sortBy = SortOption.RATING_DESC), 10),
+            q("row hollywood 28", SuperFilterState(selectedLanguages = setOf("English", "Multi-Audio"), minRating = 6.0, sortBy = SortOption.RELEASE_YEAR_DESC), 28),
+            q("row regional 28", SuperFilterState(selectedLanguages = setOf("Hindi", "Urdu", "Punjabi", "Tamil", "Telugu", "Multi-Audio"), sortBy = SortOption.RELEASE_YEAR_DESC), 28),
+            q("row action 24", SuperFilterState(includedGenres = setOf("Action", "Thriller"), minRating = 6.5, sortBy = SortOption.RATING_DESC), 24),
+            q("row acclaimed 24", SuperFilterState(minRating = 8.0, sortBy = SortOption.RATING_DESC), 24)
+        )
+        homeCache = Triple(key, System.currentTimeMillis(), out)
+        return out
+    }
+
     private fun handleGetHome(): String {
         val activeProf = getActiveUserProfile()
+        val tc = System.currentTimeMillis()
         val continueWatching = db.getContinueWatchingList(profileId = activeProf.id, isKids = activeProf.isKids, limit = 30)
-        val allMovies = db.queryMedia(
-            filter = SuperFilterState(minRating = 6.0, sortBy = SortOption.RELEASE_YEAR_DESC),
-            limit = 60,
-            profileId = activeProf.id,
-            isKids = activeProf.isKids,
-            isAdultVaultUnlocked = false,
-            isVaultTab = false
-        )
-
-        val trending = db.queryMedia(
-            filter = SuperFilterState(minRating = 6.8, sortBy = SortOption.RATING_DESC),
-            limit = 10,
-            profileId = activeProf.id,
-            isKids = activeProf.isKids,
-            isAdultVaultUnlocked = false,
-            isVaultTab = false
-        )
-
-        val hollywood = db.queryMedia(
-            filter = SuperFilterState(
-                selectedLanguages = setOf("English", "Multi-Audio"),
-                minRating = 6.0,
-                sortBy = SortOption.RELEASE_YEAR_DESC
-            ),
-            limit = 28,
-            profileId = activeProf.id,
-            isKids = activeProf.isKids,
-            isAdultVaultUnlocked = false,
-            isVaultTab = false
-        )
-
-        val regional = db.queryMedia(
-            filter = SuperFilterState(
-                selectedLanguages = setOf("Hindi", "Urdu", "Punjabi", "Tamil", "Telugu", "Multi-Audio"),
-                sortBy = SortOption.RELEASE_YEAR_DESC
-            ),
-            limit = 28,
-            profileId = activeProf.id,
-            isKids = activeProf.isKids,
-            isAdultVaultUnlocked = false,
-            isVaultTab = false
-        )
-
-        val actionThrillers = db.queryMedia(
-            filter = SuperFilterState(
-                includedGenres = setOf("Action", "Thriller"),
-                minRating = 6.5,
-                sortBy = SortOption.RATING_DESC
-            ),
-            limit = 24,
-            profileId = activeProf.id,
-            isKids = activeProf.isKids,
-            isAdultVaultUnlocked = false,
-            isVaultTab = false
-        )
-
-        val criticallyAcclaimed = db.queryMedia(
-            filter = SuperFilterState(minRating = 8.0, sortBy = SortOption.RATING_DESC),
-            limit = 24,
-            profileId = activeProf.id,
-            isKids = activeProf.isKids,
-            isAdultVaultUnlocked = false,
-            isVaultTab = false
-        )
+        DiagStats.homeRow("row continue-watching", System.currentTimeMillis() - tc)
+        val lists = homeLists(activeProf)
+        val allMovies = lists.allMovies
+        val trending = lists.trending
+        val hollywood = lists.hollywood
+        val regional = lists.regional
+        val actionThrillers = lists.action
+        val criticallyAcclaimed = lists.acclaimed
 
         val heroItem = hollywood.firstOrNull { it.backdropUrl.isNotBlank() && it.plot.isNotBlank() }
             ?: trending.firstOrNull { it.backdropUrl.isNotBlank() }
@@ -480,7 +480,8 @@ class AppApiRouter(
         val item = db.getItemByDedupKey(dedupKey, profileId = activeProf.id) ?: return """{"ok":false,"error":"Item not found"}"""
         // Kids profiles cannot open a title that is not child-rated, even through a saved link or watchlist entry
         if (activeProf.isKids && !db.isKidsAllowed(dedupKey)) return """{"ok":false,"error":"This title is not available in Kids mode."}"""
-        val mlt = db.getMoreLikeThis(
+        // fast=1: the screen draws at once; "More Like This" comes from /api/related a moment later
+        val mlt = if (queryParams["fast"] == "1") emptyList() else db.getMoreLikeThis(
             item,
             isKids = activeProf.isKids,
             limit = 8,          // only the best few on the detail screen; "Show more" pages through the rest
@@ -489,17 +490,23 @@ class AppApiRouter(
             profileId = activeProf.id
         )
         // A series is checked against the provider every time it is opened, so new seasons/episodes always show.
-        // First time (nothing saved yet): wait for the list. Otherwise show what is saved now and refresh in the background.
+        // Providers often list one season per entry (several entries merge into one card), so every listing's episodes are gathered.
         val episodes = if (item.mediaType == MediaType.SERIES) {
-            val saved = db.getSeriesEpisodes(item.primaryStreamId)
-            if (saved.isEmpty()) {
-                runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(item) } }.getOrDefault(saved)
-            } else {
-                kotlin.concurrent.thread(isDaemon = true) {
-                    runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(item) } }
+            val ids = (listOf(item.primaryStreamId) + item.versions.map { it.streamId }).filter { it.isNotBlank() }.distinct().take(8)
+            val all = mutableListOf<SeriesEpisode>()
+            for (id in ids) {
+                val saved = db.getSeriesEpisodes(id)
+                val asItem = item.copy(primaryStreamId = id)
+                if (saved.isEmpty()) {
+                    all.addAll(runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(asItem) } }.getOrDefault(saved))
+                } else {
+                    all.addAll(saved)
+                    kotlin.concurrent.thread(isDaemon = true) {
+                        runCatching { kotlinx.coroutines.runBlocking { syncEngine.fetchSeriesEpisodesOnDemand(asItem) } }
+                    }
                 }
-                saved
             }
+            all.distinctBy { it.seasonNumber to it.episodeNumber }.sortedWith(compareBy({ it.seasonNumber }, { it.episodeNumber }))
         } else emptyList()
 
         val epArr = JSONArray()
@@ -1266,12 +1273,87 @@ class AppApiRouter(
             put("signedIn", !prefs.getAuthToken().isNullOrBlank())
             put("lastCrash", prefs.lastCrash ?: JSONObject.NULL)
             put("lines", JSONArray(DiagLog.recent(40)))
+            put("report", JSONArray(buildFullReport(enriched, total)))
         }.toString()
+    }
+
+    /** Everything needed to find a problem without guessing. Also saved as a text file on the TV (see the last line of the report). */
+    private fun buildFullReport(enriched: Int, total: Int): List<String> {
+        val out = mutableListOf<String>()
+        val until = syncEngine.cloudPausedUntilMs()
+        out += "=== SUMMARY ==="
+        out += "StreamVault ${com.streamvault.tv.BuildConfig.VERSION_NAME} | ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE}"
+        out += "Titles: $total | with details: $enriched | waiting for the cloud: ${db.countCloudPending()} | cloud paused: ${if (until > System.currentTimeMillis()) "yes" else "no"} | signed in: ${if (prefs.getAuthToken().isNullOrBlank()) "no" else "yes"}"
+        run { val ap = getActiveUserProfile(); out += "Active profile: ${ap.name} | Kids mode (saved): ${if (ap.isKids) "ON" else "off"} | 18+ visible: ${prefs.isAdultVaultUnlocked()} | Extras visible: ${prefs.isExtrasUnlocked()}" }
+        out += if (prefs.lastCrash != null) "Last crash: ${String(prefs.lastCrash!!.toByteArray()).take(300)}" else "No crash recorded."
+        runCatching {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val mi = android.app.ActivityManager.MemoryInfo(); am.getMemoryInfo(mi)
+            val rt = Runtime.getRuntime()
+            out += "Memory: TV free ${mi.availMem / 1048576} of ${mi.totalMem / 1048576} MB (low-memory: ${mi.lowMemory}) | app heap ${(rt.totalMemory() - rt.freeMemory()) / 1048576} of ${rt.maxMemory() / 1048576} MB | threads ${Thread.activeCount()}"
+        }
+        runCatching { out += "CPU load (1/5/15 min): " + java.io.File("/proc/loadavg").readText().trim().split(" ").take(3).joinToString(" / ") }
+        out += "Last full catalogue refresh: ${if (prefs.lastFullSyncTimestamp > 0) java.util.Date(prefs.lastFullSyncTimestamp).toString() else "never"} | last started: ${if (prefs.lastSyncAttemptTimestamp > 0) java.util.Date(prefs.lastSyncAttemptTimestamp).toString() else "never"}"
+        out += "Sync state now: ${syncEngine.syncState.value.phase}"
+        out += "=== FILL AND IMPORT ==="
+        out += DiagStats.fillLine()
+        out += "=== SLOWEST REQUEST TYPES (since the app started) ==="
+        out += DiagStats.endpointLines().ifEmpty { listOf("(none yet)") }
+        out += "=== HOME ROWS (ms each time they were worked out) ==="
+        out += DiagStats.homeRowLines().ifEmpty { listOf("(not opened yet)") }
+        out += "=== DETAILS COVERAGE (normal titles only; Adult and Extras not counted) ==="
+        out += runCatching { db.coverageLines() }.getOrElse { listOf("coverage failed: ${it.message}") }
+        out += "Recently merged listings: " + (db.mergedTitleLines(8).ifEmpty { listOf("none") }).joinToString("  ||  ")
+        out += "=== DATABASE ==="
+        out += runCatching { db.diagFacts() }.getOrElse { listOf("database facts failed: ${it.message}") }
+        out += "=== SCREEN (freezes over 200 ms, errors, tab opening times) ==="
+        out += DiagStats.jsRecent(30).ifEmpty { listOf("(nothing reported yet)") }
+        out += "=== LATEST EVENTS ==="
+        out += DiagLog.recent(45)
+        runCatching {
+            val dir = context.getExternalFilesDir(null)
+            if (dir != null) {
+                java.io.File(dir, "streamvault-report.txt").writeText(out.joinToString("\n"))
+                out += "(Full text copy saved on the TV: Android/data/com.streamvault.tv/files/streamvault-report.txt)"
+            }
+        }
+        return out
+    }
+
+    private fun handleDiagFromScreen(bodyStr: String): String {
+        runCatching {
+            val arr = JSONObject(bodyStr.ifBlank { "{}" }).optJSONArray("events") ?: return@runCatching
+            DiagStats.js((0 until minOf(arr.length(), 40)).map { arr.optString(it, "") })
+        }
+        return """{"ok":true}"""
+    }
+
+    private fun buildSyncObj(): JSONObject {
+        val (enriched, total) = db.getEnrichmentCountsCached()
+        val syncState = syncEngine.syncState.value
+        return JSONObject().apply {
+            put("isSyncing", syncState.isSyncing)
+            put("phase", syncState.phase)
+            put("newlyAddedCount", syncState.newlyAddedCount)
+            put("totalMovies", total)
+            put("totalSeries", 0)
+            put("enrichedCount", enriched)
+            put("totalToEnrich", total)
+            put("percentComplete", if (total > 0) (enriched * 100) / total else 100)
+            put("stage", syncState.stage)
+            put("processedItems", syncState.processedItems)
+            put("estimatedTotal", syncState.estimatedTotal)
+            put("removedCount", syncState.removedCount)
+            put("note", syncState.note ?: JSONObject.NULL)
+            put("error", syncState.errorMessage ?: JSONObject.NULL)
+            put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
+                }
     }
 
     private fun handleGetSyncStatus(): String {
         return JSONObject().apply {
             put("ok", true)
+            put("syncStatus", buildSyncObj())
             put("lastSyncTimestamp", prefs.lastFullSyncTimestamp)
             put("syncState", syncEngine.syncState.value.phase)
         }.toString()
@@ -1316,7 +1398,7 @@ class AppApiRouter(
 
     private fun handleGetPlaylists(): String {
         val creds = prefs.loadCredentials()
-        val (enriched, total) = db.getEnrichmentCounts()
+        val (enriched, total) = db.getEnrichmentCountsCached()
         val syncState = syncEngine.syncState.value
         val playlistsArr = JSONArray()
 
@@ -1409,6 +1491,7 @@ class AppApiRouter(
             put("durationMs", item.durationMs)
             put("isAdult", item.isAdult)
             put("certification", item.certification)
+            put("ratingSource", item.ratingSource)
             put("userRating", item.userRating)
             put("versions", JSONArray(item.versions.map { v ->
                 JSONObject().apply {

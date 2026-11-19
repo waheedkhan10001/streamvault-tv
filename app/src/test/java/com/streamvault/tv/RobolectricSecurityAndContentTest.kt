@@ -57,15 +57,16 @@ class RobolectricSecurityAndContentTest {
 
     @Test
     fun testKidsCertificationConstant_ContainsExactYoungChildCertifications() {
-        val expected = setOf("G", "PG", "TV-Y", "TV-Y7", "TV-G", "TV-PG", "U")
+        val expected = setOf("G", "TV-Y", "TV-G", "U", "UK U", "FSK 0", "AU G", "CA G", "IN U", "NL AL")
         assertEquals(expected, ContentCertifications.KIDS_CERTIFICATIONS)
 
-        val clause = ContentCertifications.kidsClause("certification")
-        assertTrue("Kids clause must check certification IN list", clause.contains("certification IN ("))
-        for (cert in expected) {
-            assertTrue("Kids clause must contain cert '$cert'", clause.contains("'$cert'"))
-        }
-        assertTrue("Kids clause must exclude empty certification", clause.contains("certification != ''"))
+        // Kids decisions now come from the content pack (kids_ok); titles the pack has not seen use their own US rating
+        // Kids shows all-ages ratings only (not PG, not TV-Y7)
+        val inList = ContentCertifications.KIDS_CERTIFICATIONS_SQL_IN
+        assertEquals("(kids_ok = 1 AND certification IN ($inList))", ContentCertifications.kidsClause("certification"))
+        assertEquals("(m.kids_ok = 1 AND m.certification IN ($inList))", ContentCertifications.kidsClause("m.certification"))
+        for (cert in expected) assertEquals(1, ContentCertifications.kidsOkFromCertification(cert))
+        for (cert in listOf("PG", "TV-PG", "TV-Y7", "R", "TV-MA", "NC-17", "")) assertEquals(0, ContentCertifications.kidsOkFromCertification(cert))
     }
 
     @Test
@@ -113,14 +114,14 @@ class RobolectricSecurityAndContentTest {
         )
         val kidsKeys = kidsResults.map { it.dedupKey }.toSet()
 
-        // Must ONLY contain the 7 approved kids certifications (G, PG, TV-Y, TV-G, TV-Y7, TV-PG, U)
-        assertEquals("Kids catalog must contain only the 7 approved kids titles", 7, kidsResults.size)
+        // Must ONLY contain all-ages ratings (G, TV-Y, TV-G, U): not PG, TV-PG or TV-Y7
+        assertEquals("Kids catalog must contain only the 4 all-ages titles", 4, kidsResults.size)
         assertTrue(kidsKeys.contains("nemo"))
-        assertTrue(kidsKeys.contains("shrek"))
+        assertFalse("Kids mode must reject shrek (not all-ages)", kidsKeys.contains("shrek"))
         assertTrue(kidsKeys.contains("bluey"))
         assertTrue(kidsKeys.contains("peppa"))
-        assertTrue(kidsKeys.contains("sponge"))
-        assertTrue(kidsKeys.contains("incredibles"))
+        assertFalse("Kids mode must reject sponge (not all-ages)", kidsKeys.contains("sponge"))
+        assertFalse("Kids mode must reject incredibles (not all-ages)", kidsKeys.contains("incredibles"))
         assertTrue(kidsKeys.contains("paddington"))
 
         // Must strictly exclude R, TV-MA, NC-17, uncertified, and adult

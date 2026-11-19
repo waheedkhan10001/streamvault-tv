@@ -1,6 +1,9 @@
 // Smart Universal Network Routing for Cloud and Native Standalone TV
 const CLOUD_SYNC_BASE = 'https://streamvault-sync.streamvault-app.workers.dev';
 
+window.__svApiSeq = 0;
+window.__svApiPending = {};
+window.__svApiDone = function (id, res) { const f = window.__svApiPending[id]; if (f) { delete window.__svApiPending[id]; f(res); } };
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function(input, init) {
   const token = localStorage.getItem('sv_auth_token') || '';
@@ -61,6 +64,32 @@ window.fetch = function(input, init) {
     }
 
     // 2. Native Standalone TV Engine (Direct In-Memory / SQLite via Kotlin bridge)
+    // The answer arrives later, so the screen keeps responding to the remote while the database works.
+    if (window.AndroidApp && typeof window.AndroidApp.handleApiRequestAsync === 'function') {
+      const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
+      const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
+      return new Promise((resolve) => {
+        const id = 'c' + (++window.__svApiSeq);
+        const timer = setTimeout(() => {
+          if (window.__svApiPending[id]) { delete window.__svApiPending[id]; resolve(new Response(JSON.stringify({ error: 'timeout', ok: false }), { status: 504 })); }
+        }, 180000);
+        window.__svApiPending[id] = (resStr) => {
+          clearTimeout(timer);
+          let status = 200;
+          try {
+            const parsed = JSON.parse(resStr);
+            if (parsed && (parsed.status === 401 || (parsed.error && String(parsed.error).includes('Unauthorized')))) status = 401;
+          } catch (_) {}
+          resolve(new Response(resStr, { status: status, headers: { 'Content-Type': 'application/json; charset=utf-8' } }));
+        };
+        try {
+          window.AndroidApp.handleApiRequestAsync(id, method, input, body, token || '');
+        } catch (err) {
+          clearTimeout(timer); delete window.__svApiPending[id];
+          resolve(new Response(JSON.stringify({ error: err.message, ok: false }), { status: 500 }));
+        }
+      });
+    }
     if (window.AndroidApp && typeof window.AndroidApp.handleApiRequest === 'function') {
       const method = (newInit && newInit.method) ? newInit.method.toUpperCase() : 'GET';
       const body = (newInit && newInit.body) ? (typeof newInit.body === 'string' ? newInit.body : JSON.stringify(newInit.body)) : '';
@@ -571,13 +600,13 @@ async function checkAuthAndRoute() {
   validateSessionInBackground(token);
   await syncSessionToNative(token);
 
-  // Load app state
-  try {
-    const res = await fetch('/api/state');
-    if (res.ok) {
-      appStatus = await res.json();
-    }
-  } catch (_) {}
+  // Asked together instead of one after the other (the app state, the profiles and the pack check are independent)
+  const stateReq = fetch('/api/state').then((r) => (r && r.ok ? r.json() : null)).catch(() => null);
+  const profilesReq = fetch('/api/profiles').then((r) => (r && r.ok ? r.json() : null)).catch(() => null);
+  // The content pack (posters, plots, ratings) must be on the TV before the app opens
+  await ensurePackReady();
+  const stateData = await stateReq;
+  if (stateData) appStatus = stateData;
 
   // Check if IPTV playlist configured (a playlist saved in the cloud is copied to this TV first)
   if (!hasActivePlaylist()) { try { await loadPlaylistsData(); } catch (_) {} }
@@ -593,14 +622,11 @@ async function checkAuthAndRoute() {
     return true;
   }
 
-  // Playlist is active -> load profiles
+  // Playlist is active -> profiles (already requested above)
   let profilesList = [];
   try {
-    const pRes = await fetch('/api/profiles');
-    if (pRes.ok) {
-      const pData = await pRes.json();
-      profilesList = pData.profiles || [];
-    }
+    const pData = await profilesReq;
+    profilesList = (pData && pData.profiles) || [];
   } catch (_) {}
 
   renderSidebar(false);
@@ -624,6 +650,9 @@ async function checkAuthAndRoute() {
 async function init() {
   applyProfileTheme(localStorage.getItem('streamvault_active_theme') || 'purple');
   renderSidebar();
+  // Something is on screen from the first moment while the app gets ready
+  const startVp = document.getElementById('mainViewport');
+  if (startVp && !startVp.innerHTML.trim()) startVp.innerHTML = '<div style="padding:60px 40px;color:var(--muted);font-size:16px;">Starting StreamVault…</div>';
 
   const isAuthedAndRouted = await checkAuthAndRoute();
   if (!isAuthedAndRouted) {
@@ -910,7 +939,7 @@ function renderSidebar(lockedToPlaylist = false) {
 // Sidebar Up/Down: the highlight moves at once (instant); the tab itself opens only after a short pause, so a fast
 // run through the tabs never queues up page loads. Enter / OK opens it immediately.
 let sidebarOpenTimer = null;
-const SIDEBAR_OPEN_DELAY_MS = 320;
+const SIDEBAR_OPEN_DELAY_MS = 250;
 function sidebarFocusThenOpen(btn) {
   btn.focus();
   playNavSound();
@@ -923,3 +952,53 @@ function sidebarFocusThenOpen(btn) {
   }, SIDEBAR_OPEN_DELAY_MS);
 }
 
+
+
+// ===== CONTENT PACK DOWNLOAD SCREEN: one big download (resumes if interrupted), then "Ready" =====
+function packMb(n) { return (n / 1048576).toFixed(n > 1073741824 ? 0 : 1); }
+
+async function ensurePackReady() {
+  let st = null;
+  try { const r = await fetch('/api/pack/status'); if (r.ok) st = await r.json(); } catch (_) {}
+  if (!st || typeof st.ready !== 'boolean' || st.ready) return;   // already installed, or status unavailable (older app / test server)
+  let box = document.getElementById('packOverlay');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'packOverlay';
+    box.style.cssText = 'position:fixed;inset:0;z-index:999999;background:#0B0B14;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#fff;font-family:inherit;text-align:center;padding:40px;';
+    document.body.appendChild(box);
+  }
+  const render = (s, extra) => {
+    const total = s.bytesTotal || 0, done = s.bytesDone || 0;
+    const pct = total > 0 ? Math.min(100, Math.floor(done * 100 / total)) : 0;
+    const title = s.phase === 'READY' ? 'Ready' : s.phase === 'ERROR' ? 'Download paused' : 'Setting up StreamVault';
+    const line = s.phase === 'DOWNLOADING' ? `Downloading content: ${packMb(done)} of ${packMb(total)} MB (${pct}%)`
+      : s.phase === 'VERIFYING' ? 'Checking the download...'
+      : s.phase === 'UNPACKING' ? 'Preparing the content...'
+      : s.phase === 'READY' ? 'Everything is ready'
+      : (s.message || 'Starting...');
+    box.innerHTML = `<div style="font-size:34px;font-weight:800;margin-bottom:14px;">${title}</div>
+      <div style="font-size:18px;color:#9CA3AF;margin-bottom:22px;max-width:760px;">${escapeHtml(line)}</div>
+      <div style="width:560px;max-width:80%;height:14px;border-radius:7px;background:#23233A;overflow:hidden;"><div style="height:100%;width:${s.phase === 'READY' ? 100 : pct}%;background:var(--theme-accent,#8B5CF6);transition:width .4s;"></div></div>
+      <div style="font-size:14px;color:#6B7280;margin-top:18px;">This one-time download keeps going if the connection drops. Keep the TV on and connected.</div>
+      ${extra || ''}`;
+  };
+  const start = async () => { try { await fetch('/api/pack/start', { method: 'POST', body: '{}' }); } catch (_) {} };
+  render(st);
+  await start();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 700));
+    try { const r = await fetch('/api/pack/status'); if (r.ok) st = await r.json(); } catch (_) { continue; }
+    if (st.ready) { render({ phase: 'READY' }); await new Promise((r) => setTimeout(r, 900)); break; }
+    if (st.phase === 'ERROR' && !st.running) {
+      // Stopped: offer Try again (OK) - never leave the person stuck on a blank screen
+      render(st, '<button id="packRetry" tabindex="0" class="btn btn-primary tv-focusable" style="margin-top:26px;padding:12px 28px;font-size:16px;">Try again</button>');
+      const btn = document.getElementById('packRetry');
+      if (btn) { btn.focus(); await new Promise((res) => { btn.onclick = res; btn.onkeydown = (e) => { if (e.key === 'Enter') res(); }; }); }
+      await start();
+      continue;
+    }
+    render(st);
+  }
+  box.remove();
+}

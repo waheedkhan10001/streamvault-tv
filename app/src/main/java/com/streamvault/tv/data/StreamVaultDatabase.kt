@@ -75,12 +75,42 @@ class StreamVaultDatabase(context: Context) :
         ensureSchemaUpdated(db)
     }
 
+    /** Called after a big import or the fill: refreshes SQLite's table statistics so plans stay good. */
+    fun refreshStatistics() { try { writableDatabase.execSQL("ANALYZE") } catch (_: Exception) {} }
+
     fun ensureSchemaUpdated(db: SQLiteDatabase) {
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_adult INTEGER DEFAULT 0") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN is_extra INTEGER DEFAULT 0") } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE live_channels ADD COLUMN added_timestamp INTEGER DEFAULT 0") } catch (_: Exception) {}
-        try { db.execSQL("UPDATE media_items SET is_extra = 1 WHERE is_extra = 0 AND is_adult = 0 AND (" + EXTRA_CATEGORY_TOKENS.joinToString(" OR ") { "lower(category_name) LIKE '%${it.replace("'", "''")}%'" } + ")") } catch (_: Exception) {}
+        // Scanning every title for Extras categories used to run on EVERY start (seconds on the TV, before anything showed);
+        // imports already classify new titles, so the scan is done once.
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS app_flags (k TEXT PRIMARY KEY, v TEXT)")
+            val done = db.rawQuery("SELECT 1 FROM app_flags WHERE k = 'extra_scan_v1'", null).use { it.moveToFirst() }
+            if (!done) {
+                db.execSQL("UPDATE media_items SET is_extra = 1 WHERE is_extra = 0 AND is_adult = 0 AND (" + EXTRA_CATEGORY_TOKENS.joinToString(" OR ") { "lower(category_name) LIKE '%${it.replace("'", "''")}%'" } + ")")
+                db.execSQL("INSERT OR REPLACE INTO app_flags (k, v) VALUES ('extra_scan_v1', '1')")
+            }
+        } catch (_: Exception) {}
         try { db.execSQL("ALTER TABLE media_items ADD COLUMN certification TEXT DEFAULT ''") } catch (_: Exception) {}
+        // From the enrichments pack: which rating is shown (I = IMDb, T = TMDB), the score used for sorting, Kids decision
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN rating_source TEXT DEFAULT ''") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN sort_score REAL DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN kids_ok INTEGER DEFAULT 0") } catch (_: Exception) {}
+        try { db.execSQL("ALTER TABLE media_items ADD COLUMN pack_applied INTEGER DEFAULT 0") } catch (_: Exception) {}
+        // Listings that were folded into another title (same TMDB id): a later provider refresh sends them again and must land on the same card
+        try { db.execSQL("CREATE TABLE IF NOT EXISTS dedup_alias (alias_key TEXT PRIMARY KEY, target_key TEXT NOT NULL, note TEXT, merged_at INTEGER)") } catch (_: Exception) {}
+        // Indexes that made every search pick the wrong plan (they only say "extra or not" etc.) or slowed every write are removed
+        // on every start (harmless when already gone). With them gone, SQLite walks the sort/year/added index and stops at the limit.
+        for (idx in listOf("idx_media_rating", "idx_media_cert", "idx_media_enriched", "idx_media_extra", "idx_media_adult")) {
+            try { db.execSQL("DROP INDEX IF EXISTS $idx") } catch (_: Exception) {}
+        }
+        try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_enriched2 ON media_items(is_enriched)") } catch (_: Exception) {}
+        // Teach SQLite how big each index group is (once; refreshed after big imports) so it chooses the cheapest plan
+        try {
+            val hasStats = db.rawQuery("SELECT 1 FROM sqlite_master WHERE name='sqlite_stat1'", null).use { it.moveToFirst() }
+            if (!hasStats) db.execSQL("ANALYZE")
+        } catch (_: Exception) {}
 
         db.execSQL(
             """
@@ -180,20 +210,26 @@ class StreamVaultDatabase(context: Context) :
                 search_blob TEXT DEFAULT '',
                 is_adult INTEGER DEFAULT 0,
                 is_extra INTEGER DEFAULT 0,
-                certification TEXT DEFAULT ''
+                certification TEXT DEFAULT '',
+                rating_source TEXT DEFAULT '',
+                sort_score REAL DEFAULT 0,
+                kids_ok INTEGER DEFAULT 0,
+                pack_applied INTEGER DEFAULT 0
             )
             """.trimIndent()
         )
 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_type ON media_items(media_type)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_year ON media_items(year DESC)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_rating ON media_items(rating DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_added ON media_items(added_timestamp DESC)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_enriched ON media_items(is_enriched, rating DESC)")
+        // Indexes that no query needs are gone: each one made every details update slower (rating, certification changed on every fill)
+        db.execSQL("DROP INDEX IF EXISTS idx_media_rating")
+        db.execSQL("DROP INDEX IF EXISTS idx_media_cert")
+        db.execSQL("DROP INDEX IF EXISTS idx_media_enriched")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_enriched2 ON media_items(is_enriched)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_lang ON media_items(language)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_adult ON media_items(is_adult)")
-        try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_extra ON media_items(is_extra)") } catch (_: Exception) {}
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_cert ON media_items(certification)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_kids ON media_items(kids_ok)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_media_sort ON media_items(sort_score DESC)")
 
         db.execSQL(
             """
@@ -310,16 +346,19 @@ class StreamVaultDatabase(context: Context) :
         if (items.isEmpty()) return 0
         val db = writableDatabase
         var newlyAdded = 0
+        val aliases = loadAliasMap(db)
         db.beginTransactionNonExclusive()
         try {
-            for (item in items) {
+            for (rawItem in items) {
+                val item = aliases[rawItem.dedupKey]?.let { rawItem.copy(dedupKey = it) } ?: rawItem
                 val existingCursor = db.rawQuery(
                     """
                     SELECT is_enriched, genres_text, plot, cast_text, director, runtime_mins,
                            backdrop_url, imdb_id, in_watchlist, is_watched, resume_position_ms,
                            duration_ms, has_embedded_subtitles, embedded_sub_langs, embedded_audio_langs,
                            certification, tmdb_id, vote_count, rating, year, poster_url,
-                           versions_json, category_name, quality_badges, added_timestamp
+                           versions_json, category_name, quality_badges, added_timestamp,
+                           rating_source, sort_score, kids_ok, pack_applied
                     FROM media_items WHERE dedup_key = ?
                     """.trimIndent(),
                     arrayOf(item.dedupKey)
@@ -355,6 +394,10 @@ class StreamVaultDatabase(context: Context) :
                 val existingCategory = if (exists) existingCursor.getString(22) ?: "" else ""
                 val existingBadges = if (exists) existingCursor.getString(23) ?: "" else ""
                 val existingAdded = if (exists) existingCursor.getLong(24) else 0L
+                val existingRatingSource = if (exists) existingCursor.getString(25) ?: "" else ""
+                val existingSortScore = if (exists) existingCursor.getDouble(26) else 0.0
+                val existingKidsOk = if (exists) existingCursor.getInt(27) else 0
+                val existingPackApplied = if (exists) existingCursor.getInt(28) else 0
                 existingCursor.close()
 
                 // Chunked import: the same title can arrive in several chunks, so copies are merged with what is saved.
@@ -400,15 +443,7 @@ class StreamVaultDatabase(context: Context) :
 
                 val isAdult = item.isAdult || checkIsAdult(item.cleanTitle, item.rawTitle, item.categoryName, finalGenres)
 
-                val searchBlob = buildString {
-                    append(item.cleanTitle.lowercase(Locale.ROOT)).append(' ')
-                    append(item.rawTitle.lowercase(Locale.ROOT)).append(' ')
-                    append(finalPlot.lowercase(Locale.ROOT)).append(' ')
-                    append(finalCast.lowercase(Locale.ROOT)).append(' ')
-                    append(finalDirector.lowercase(Locale.ROOT)).append(' ')
-                    append(finalGenres.lowercase(Locale.ROOT)).append(' ')
-                    append(item.categoryName.lowercase(Locale.ROOT))
-                }
+                val searchBlob = buildSearchBlob(item.cleanTitle, item.rawTitle, finalCast, finalDirector, finalGenres)
 
                 val cv = ContentValues().apply {
                     put("dedup_key", item.dedupKey)
@@ -448,6 +483,11 @@ class StreamVaultDatabase(context: Context) :
                     put("is_adult", if (isAdult) 1 else 0)
                     put("is_extra", if (!isAdult && checkIsExtra(item.categoryName)) 1 else 0)
                     put("certification", finalCert)
+                    // Pack decisions survive a re-sync; titles the pack has not seen use their own age rating
+                    put("rating_source", existingRatingSource)
+                    put("sort_score", existingSortScore)
+                    put("pack_applied", existingPackApplied)
+                    put("kids_ok", if (existingPackApplied == 1) existingKidsOk else ContentCertifications.kidsOkFromCertification(finalCert))
                 }
 
                 db.insertWithOnConflict("media_items", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -621,6 +661,108 @@ class StreamVaultDatabase(context: Context) :
         return folded
     }
 
+    private fun loadAliasMap(db: SQLiteDatabase): Map<String, String> {
+        val m = HashMap<String, String>()
+        try { db.rawQuery("SELECT alias_key, target_key FROM dedup_alias", null).use { while (it.moveToNext()) m[it.getString(0)] = it.getString(1) } } catch (_: Exception) {}
+        return m
+    }
+
+    /**
+     * One title often arrives as several listings with different names (language prints, spelling, year in the name). After the pack has
+     * matched them, listings that share the SAME TMDB id and the same type (and Adult/Extras group) are the same film: they become one card
+     * with all their versions, and a note is kept so the next provider refresh lands on the same card.
+     * Safety: the years must agree (within 1) when both are known; if a year is missing, the titles must share a real word.
+     * Watch progress, watched mark and watch-list of every folded listing are kept.
+     */
+    private val langPrefix = Regex("^[A-Za-z]{2,3}:\\s")
+
+    /** Cards merged by an earlier version that ended up with a "DE: ..." name get the plain name of the listing that was merged into them. */
+    fun repairMergedNames() {
+        try {
+            val db = writableDatabase
+            val fixes = ArrayList<Triple<String, String, String>>()
+            db.rawQuery("SELECT target_key, note FROM dedup_alias", null).use { c ->
+                while (c.moveToNext()) {
+                    val note = c.getString(1) ?: continue
+                    val a = note.substringBefore(" -> ", "").trim()
+                    val b = note.substringAfter(" -> ", "").substringBefore(" (tmdb").trim()
+                    if (a.isNotEmpty() && b.isNotEmpty() && langPrefix.containsMatchIn(b) && !langPrefix.containsMatchIn(a)) fixes.add(Triple(c.getString(0), b, a))
+                }
+            }
+            for ((key, old, plain) in fixes) db.execSQL("UPDATE media_items SET clean_title = ? WHERE dedup_key = ? AND clean_title = ?", arrayOf(plain, key, old))
+        } catch (_: Exception) {}
+    }
+
+    fun foldSameTmdbTitles(): Int {
+        val db = writableDatabase
+        class Row(val key: String, val type: String, val tmdb: Int, val year: Int, val title: String, val versions: String,
+                  val pack: Int, val resume: Long, val watched: Int, val wl: Int, val adult: Int, val extra: Int)
+        val rows = ArrayList<Row>()
+        try {
+            db.rawQuery(
+                """SELECT dedup_key, media_type, tmdb_id, year, clean_title, versions_json, pack_applied, resume_position_ms, is_watched, in_watchlist, is_adult, is_extra
+                   FROM media_items WHERE tmdb_id > 0 AND pack_applied = 1 AND tmdb_id IN
+                   (SELECT tmdb_id FROM media_items WHERE tmdb_id > 0 AND pack_applied = 1 GROUP BY media_type, tmdb_id, is_adult, is_extra HAVING COUNT(*) > 1)""", null
+            ).use { c ->
+                while (c.moveToNext()) rows.add(Row(c.getString(0), c.getString(1) ?: "", c.getInt(2), c.getInt(3), c.getString(4) ?: "",
+                    c.getString(5) ?: "[]", c.getInt(6), c.getLong(7), c.getInt(8), c.getInt(9), c.getInt(10), c.getInt(11)))
+            }
+        } catch (_: Exception) { return 0 }
+        if (rows.isEmpty()) return 0
+        val stop = setOf("the", "and", "der", "die", "das", "los", "las", "les", "part", "movie", "film", "hindi", "dubbed", "english")
+        fun words(t: String) = t.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length >= 3 && it !in stop }.toSet()
+        var folded = 0
+        db.beginTransactionNonExclusive()
+        try {
+            val now = System.currentTimeMillis()
+            for (group in rows.groupBy { listOf(it.type, it.tmdb, it.adult, it.extra) }.values) {
+                // The card keeps the plain (English) name: a listing named "DE: Title" never becomes the winner over a plain one
+                val ordered = group.sortedWith(compareBy<Row> { if (langPrefix.containsMatchIn(it.title)) 1 else 0 }
+                    .thenByDescending { runCatching { JSONArray(it.versions).length() }.getOrDefault(0) }
+                    .thenByDescending { it.pack }.thenBy { it.key })
+                val target = ordered.first()
+                var targetVersions = target.versions
+                var resume = target.resume; var watched = target.watched; var wl = target.wl
+                var mergedAny = false
+                for (o in ordered.drop(1)) {
+                    val yearsKnown = target.year > 0 && o.year > 0
+                    val sameFilm = if (yearsKnown) Math.abs(target.year - o.year) <= 1 else words(target.title).intersect(words(o.title)).isNotEmpty()
+                    if (!sameFilm) continue
+                    val incoming = ArrayList<StreamVersion>()
+                    runCatching {
+                        val arr = JSONArray(o.versions)
+                        for (i in 0 until arr.length()) incoming.add(StreamVersion.fromJson(arr.getJSONObject(i)))
+                    }
+                    targetVersions = mergeVersionsJson(targetVersions, incoming)
+                    resume = maxOf(resume, o.resume); watched = maxOf(watched, o.watched); wl = maxOf(wl, o.wl)
+                    val cv = ContentValues().apply {
+                        put("alias_key", o.key); put("target_key", target.key)
+                        put("note", "${o.title} -> ${target.title} (tmdb ${target.tmdb})".take(160)); put("merged_at", now)
+                    }
+                    db.insertWithOnConflict("dedup_alias", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+                    db.delete("media_items", "dedup_key = ?", arrayOf(o.key))
+                    folded++; mergedAny = true
+                }
+                if (mergedAny) {
+                    val cv = ContentValues().apply {
+                        put("versions_json", targetVersions); put("resume_position_ms", resume); put("is_watched", watched); put("in_watchlist", wl)
+                    }
+                    db.update("media_items", cv, "dedup_key = ?", arrayOf(target.key))
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return folded
+    }
+
+    fun mergedTitleLines(n: Int): List<String> = try {
+        val out = ArrayList<String>()
+        readableDatabase.rawQuery("SELECT note FROM dedup_alias ORDER BY merged_at DESC LIMIT $n", null).use { while (it.moveToNext()) out += it.getString(0) ?: "" }
+        out
+    } catch (_: Exception) { emptyList() }
+
+    fun countMergedTitles(): Int = try { readableDatabase.rawQuery("SELECT COUNT(*) FROM dedup_alias", null).use { if (it.moveToFirst()) it.getInt(0) else 0 } } catch (_: Exception) { 0 }
+
     /**
      * Updates a single MediaItem after background TMDB / Xtream VOD Info enrichment.
      */
@@ -671,15 +813,7 @@ class StreamVaultDatabase(context: Context) :
         val finalLang = if (language.isNotBlank() && oldLang == "English") language else oldLang
         val finalIsAdult = isAdult || checkIsAdult(cleanTitle, rawTitle, catName, mergedGenres.joinToString("|"))
 
-        val searchBlob = buildString {
-            append(cleanTitle.lowercase(Locale.ROOT)).append(' ')
-            append(rawTitle.lowercase(Locale.ROOT)).append(' ')
-            append(plot.lowercase(Locale.ROOT)).append(' ')
-            append(cast.joinToString(" ").lowercase(Locale.ROOT)).append(' ')
-            append(director.lowercase(Locale.ROOT)).append(' ')
-            append(mergedGenres.joinToString(" ").lowercase(Locale.ROOT)).append(' ')
-            append(catName.lowercase(Locale.ROOT))
-        }
+        val searchBlob = buildSearchBlob(cleanTitle, rawTitle, cast.joinToString(" "), director, mergedGenres.joinToString(" "))
 
         val cv = ContentValues().apply {
             if (tmdbId > 0) put("tmdb_id", tmdbId)
@@ -712,13 +846,19 @@ class StreamVaultDatabase(context: Context) :
      * 1. Preferred languages first
      * 2. Newest release year & highest server rating first
      */
-    fun getUnenrichedMediaQueue(preferredLanguages: Set<String>, limit: Int = 500): List<MediaItem> {
+    /** Sends every mainstream title through the content pack once (used the first time a pack is applied). */
+    fun requeueAllForPack() {
+        // every title goes through the pack once more (also rebuilds the search text)
+        writableDatabase.execSQL("UPDATE media_items SET is_enriched = 0 WHERE is_adult = 0 AND is_extra = 0")
+    }
+
+    fun getUnenrichedMediaQueue(preferredLanguages: Set<String>, limit: Int = 500, ordered: Boolean = true): List<MediaItem> {
         val db = readableDatabase
         val cursor = db.rawQuery(
             """
             SELECT * FROM media_items
             WHERE is_enriched = 0 AND is_adult = 0 AND is_extra = 0
-            ORDER BY year DESC, rating DESC, added_timestamp DESC
+            ${if (ordered) "ORDER BY year DESC, rating DESC, added_timestamp DESC" else ""}
             LIMIT ?
             """.trimIndent(),
             arrayOf(limit.toString())
@@ -790,7 +930,69 @@ class StreamVaultDatabase(context: Context) :
 
     @Volatile private var enrichCountCache: Triple<Int, Int, Long>? = null
     /** Same numbers, but counted at most once every few seconds: the screen asks for them all the time and counting 70k rows is not free. */
-    fun getEnrichmentCountsCached(maxAgeMs: Long = 6000L): Pair<Int, Int> {
+    /** How many of the normal (not Adult, not Extras) titles are missing each kind of detail: a table for the report. */
+    fun coverageLines(): List<String> {
+        val d = readableDatabase
+        val out = mutableListOf<String>()
+        fun row(label: String, where: String) {
+            val v = runCatching {
+                d.rawQuery(
+                    "SELECT COUNT(*), SUM(genres_text=''), SUM(rating<=0), SUM(plot=''), SUM(poster_url=''), SUM(certification=''), SUM(pack_applied=0), " +
+                    "SUM(year<=0), SUM(runtime_mins<=0), SUM(cast_text=''), SUM(director=''), SUM(imdb_id=''), SUM(rating_source='T'), " +
+                    "SUM(${ContentCertifications.kidsClause("certification")}) FROM media_items WHERE is_adult=0 AND is_extra=0 $where", null
+                ).use { c -> if (c.moveToFirst()) (0 until c.columnCount).map { c.getInt(it) } else emptyList() }
+            }.getOrDefault(emptyList())
+            if (v.size < 14) { out += "$label: could not be counted"; return }
+            out += "$label: total ${v[0]} | NO genre ${v[1]} | NO rating ${v[2]} (TMDB-only rating ${v[12]}) | NO plot ${v[3]} | NO poster ${v[4]} | NO age rating ${v[5]}"
+            out += "   not from pack ${v[6]} | NO year ${v[7]} | NO runtime ${v[8]} | NO cast ${v[9]} | NO director ${v[10]} | NO IMDb id ${v[11]} | shown in Kids (G only) ${v[13]}"
+        }
+        row("Movies", "AND media_type='MOVIE'")
+        row("Series", "AND media_type='SERIES'")
+        out += "Listings merged into another card (same TMDB id): ${countMergedTitles()}"
+        return out
+    }
+
+    /** Facts for the problem report: row counts, the indexes that exist, and how SQLite plans the main screens' searches. */
+    fun diagFacts(): List<String> {
+        val out = mutableListOf<String>()
+        val d = readableDatabase
+        fun one(sql: String): String = runCatching {
+            d.rawQuery(sql, null).use { c -> if (c.moveToFirst()) (0 until c.columnCount).joinToString(" / ") { c.getString(it) ?: "-" } else "-" }
+        }.getOrElse { "error: ${it.message}" }
+        out += "Rows (all / with details / adult / extras / from pack / with poster): " +
+            one("SELECT COUNT(*), SUM(is_enriched=1), SUM(is_adult=1), SUM(is_extra=1), SUM(pack_applied=1), SUM(poster_url<>'') FROM media_items")
+        out += "Movies / series / live channels / episodes: " +
+            one("SELECT (SELECT COUNT(*) FROM media_items WHERE media_type='MOVIE'), (SELECT COUNT(*) FROM media_items WHERE media_type='SERIES'), (SELECT COUNT(*) FROM live_channels), (SELECT COUNT(*) FROM series_episodes)")
+        val f = java.io.File(d.path)
+        out += "Database file: ${f.length() / 1048576} MB, write-log ${java.io.File(d.path + "-wal").length() / 1048576} MB"
+        val idx = mutableListOf<String>()
+        runCatching { d.rawQuery("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='media_items' AND name NOT LIKE 'sqlite_%'", null).use { while (it.moveToNext()) idx += it.getString(0) } }
+        out += "Indexes on titles (${idx.size}): " + idx.joinToString(", ")
+        val plans = listOf(
+            "Movies tab (newest added)" to "SELECT dedup_key FROM media_items WHERE is_adult=0 AND is_extra=0 AND media_type='MOVIE' ORDER BY added_timestamp DESC LIMIT 120",
+            "Highest rated" to "SELECT dedup_key FROM media_items WHERE is_adult=0 AND is_extra=0 AND rating>=6.8 ORDER BY sort_score DESC, vote_count DESC LIMIT 10",
+            "Genre row" to "SELECT dedup_key FROM media_items WHERE is_adult=0 AND is_extra=0 AND ('|' || genres_text || '|' LIKE '%|Action|%') ORDER BY sort_score DESC LIMIT 24",
+            "Fill queue" to "SELECT dedup_key FROM media_items WHERE is_enriched=0 AND is_adult=0 AND is_extra=0 LIMIT 50"
+        )
+        for ((name, sql) in plans) {
+            val t = System.currentTimeMillis()
+            val plan = runCatching {
+                val sb = StringBuilder()
+                d.rawQuery("EXPLAIN QUERY PLAN $sql", null).use { while (it.moveToNext()) sb.append(it.getString(3)).append("; ") }
+                sb.toString().take(150)
+            }.getOrElse { "error" }
+            val ms = System.currentTimeMillis() - t
+            val run = System.currentTimeMillis()
+            runCatching { d.rawQuery(sql, null).use { c -> while (c.moveToNext()) { } } }
+            out += "Plan $name: $plan | runs in ${System.currentTimeMillis() - run} ms"
+        }
+        return out
+    }
+
+    /** The fill reports its own progress here, so screens never need to count rows while it runs. */
+    fun setEnrichmentCountsCache(enriched: Int, total: Int) { enrichCountCache = Triple(enriched, total, System.currentTimeMillis()) }
+
+    fun getEnrichmentCountsCached(maxAgeMs: Long = 60000L): Pair<Int, Int> {
         val c = enrichCountCache
         if (c != null && System.currentTimeMillis() - c.third < maxAgeMs) return Pair(c.first, c.second)
         val fresh = getEnrichmentCounts()
@@ -888,10 +1090,10 @@ class StreamVaultDatabase(context: Context) :
 
         // Search query across Title, Plot, Cast, Director
         if (filter.searchQuery.isNotBlank()) {
-            val tokens = filter.searchQuery.trim().lowercase(Locale.ROOT).split(Regex("""\s+"""))
-            for (token in tokens) {
+            // Word-start matching: every typed word must START a word in the title, cast, director or genre
+            for (token in searchTokens(filter.searchQuery)) {
                 whereClauses.add("m.search_blob LIKE ?")
-                args.add("%$token%")
+                args.add("% $token%")
             }
         }
 
@@ -990,13 +1192,18 @@ class StreamVaultDatabase(context: Context) :
         }
 
         val whereSql = if (whereClauses.isEmpty()) "" else "WHERE " + whereClauses.joinToString(" AND ")
-        val orderSql = when (filter.sortBy) {
+        // Titles that match the typed words come before matches found only in cast / director / genre
+        val titleFirst = searchTokens(filter.searchQuery).takeIf { it.isNotEmpty() }
+            ?.joinToString(" AND ") { "(' ' || lower(m.clean_title)) LIKE '% $it%'" }
+            ?.let { "CASE WHEN $it THEN 0 ELSE 1 END" }
+        val orderSql0 = when (filter.sortBy) {
             SortOption.NEWLY_ADDED -> "ORDER BY m.added_timestamp DESC, m.year DESC"
             SortOption.RELEASE_YEAR_DESC -> "ORDER BY m.year DESC, m.rating DESC"
-            SortOption.RATING_DESC -> "ORDER BY m.rating DESC, m.vote_count DESC"
+            SortOption.RATING_DESC -> "ORDER BY m.sort_score DESC, m.vote_count DESC"
             SortOption.TITLE_ASC -> "ORDER BY m.clean_title COLLATE NOCASE ASC"
             SortOption.RANDOM -> "ORDER BY RANDOM()"
         }
+        val orderSql = if (titleFirst != null && filter.sortBy != SortOption.RANDOM) orderSql0.replaceFirst("ORDER BY ", "ORDER BY $titleFirst, ") else orderSql0
 
         val selectSql = if (profileId.isNotBlank()) {
             """
@@ -2165,6 +2372,7 @@ class StreamVaultDatabase(context: Context) :
 
                 val isAdult = c.getColumnIndex("is_adult").let { if (it >= 0) c.getInt(it) == 1 else false }
                 val cert = c.getColumnIndex("certification").let { if (it >= 0) c.getString(it) ?: "" else "" }
+                val ratingSource = c.getColumnIndex("rating_source").let { if (it >= 0) c.getString(it) ?: "" else "" }
 
                 val inWatchlist = c.getColumnIndex("p_in_watchlist").let { if (it >= 0) c.getInt(it) == 1 else c.getInt(c.getColumnIndexOrThrow("in_watchlist")) == 1 }
                 val isWatched = c.getColumnIndex("p_is_watched").let { if (it >= 0) c.getInt(it) == 1 else c.getInt(c.getColumnIndexOrThrow("is_watched")) == 1 }
@@ -2218,6 +2426,7 @@ class StreamVaultDatabase(context: Context) :
                         durationMs = durationMs,
                         isAdult = isAdult,
                         certification = cert,
+                        ratingSource = ratingSource,
                         userRating = userRating,
                         versions = versions
                     )
@@ -2227,3 +2436,23 @@ class StreamVaultDatabase(context: Context) :
         return list
     }
 }
+
+
+/** Lower-case words made only of letters and digits, separated by single spaces (same rule for stored text and typed text). */
+internal fun searchWords(s: String): List<String> {
+    val sb = StringBuilder(s.length)
+    var i = 0
+    val n = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFC).lowercase(Locale.ROOT)
+    while (i < n.length) {
+        val cp = n.codePointAt(i)
+        sb.appendCodePoint(if (Character.isLetterOrDigit(cp)) cp else ' '.code)
+        i += Character.charCount(cp)
+    }
+    return sb.toString().split(' ').filter { it.isNotEmpty() }
+}
+
+internal fun searchTokens(query: String): List<String> = searchWords(query)
+
+/** Text searched by the search box: title, cast, director and genres (no plot, no category), each word starting after a space. */
+internal fun buildSearchBlob(cleanTitle: String, rawTitle: String, cast: String, director: String, genres: String): String =
+    " " + searchWords("$cleanTitle $rawTitle $cast $director $genres").distinct().joinToString(" ")

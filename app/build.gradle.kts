@@ -11,8 +11,8 @@ android {
         applicationId = "com.streamvault.tv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "2.8.0"
+        versionCode = 6
+        versionName = "2.9.1"
     }
 
     signingConfigs {

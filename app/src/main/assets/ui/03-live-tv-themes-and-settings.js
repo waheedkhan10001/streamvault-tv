@@ -7,7 +7,7 @@ async function loadLiveTv(vp) {
                onclick="this.removeAttribute('readonly');this.focus();"
                onblur="this.setAttribute('readonly','true');"
                value="${escapeHtml(currentLiveSearch)}"
-               placeholder="Search 3,000 live channels by name or sport..."
+               placeholder="Search channels by name or sport"
                oninput="onLiveSearchInput(this.value)" />
       </div>
       <div class="live-tab-bar" id="liveTabBar">Loading tabs...</div>
@@ -221,6 +221,7 @@ async function loadProfile(vp) {
   const activeProf = profiles.find(p => p.id === profilesData.activeProfileId) || profiles[0];
   if (!activeProf.theme) activeProf.theme = savedTheme;
   currentActiveProfile = { ...activeProf };
+  window.pendingKids = null;   // a toggle that was never saved is forgotten
   applyProfileTheme(currentActiveProfile.theme);
 
   vp.innerHTML = `
@@ -306,7 +307,7 @@ async function loadProfile(vp) {
             <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Kids Mode Restriction</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Hides adult channels and shows family ratings only.</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Family-friendly titles only.</div>
               </div>
               <button tabindex="0" id="btnToggleKidsMode" class="btn tv-focusable" style="padding:3px 10px;font-size:10px;${activeProf.isKids ? 'background:#059669;border-color:#10B981;color:#fff;' : 'background:#262A38;border-color:#374151;color:#9CA3AF;'}" onclick="toggleProfileKidsMode()">${activeProf.isKids ? 'Enabled' : 'Disabled'}</button>
             </div>
@@ -361,14 +362,14 @@ async function loadProfile(vp) {
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">18+ Adult</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Needs your Master PIN. Locks again when you leave, after 30 minutes, or when the TV sleeps.</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Needs Master PIN. Re-locks by itself.</div>
               </div>
               <button tabindex="0" id="btnToggleParentalLock" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="toggleParentalLockSession()">Unlock</button>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Extras</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Naats, dance, clips, cartoon packs, WWE. Same rules as 18+</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Naats, dance, clips, WWE. Same rules.</div>
               </div>
               <button tabindex="0" id="btnToggleExtrasLock" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="toggleExtrasLockSession()">Unlock</button>
             </div>`}
@@ -376,7 +377,7 @@ async function loadProfile(vp) {
             <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Clear Search History</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Wipe remote suggestions (Watched list safe)</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Watched list stays safe.</div>
               </div>
               <button tabindex="0" id="btnClearHistory" class="btn tv-focusable" style="padding:3px 12px;font-size:10.5px;" onclick="openClearAllHistoryModal()">Clear</button>
             </div>
@@ -497,10 +498,10 @@ async function loadSettings(vp, skipFetch = false) {
               <div style="background:rgba(16,185,129,0.08);border:1.5px solid #059669;border-radius:10px;padding:10px 12px;margin-bottom:6px;">
                 <div style="font-size:9.5px;font-weight:800;color:#34D399;text-transform:uppercase;letter-spacing:0.6px;">Signed in</div>
                 <div style="font-size:13px;font-weight:900;color:#FFFFFF;margin-top:2px;">${escapeHtml(accountEmail)}</div>
-                <div style="font-size:9.5px;color:#9CA3AF;margin-top:3px;">Watch history and lists sync across your TVs.</div>
+                <div style="font-size:9.5px;color:#9CA3AF;margin-top:3px;">Synced across your TVs.</div>
               </div>
             ` : `
-              <div style="background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:10px 12px;margin-bottom:6px;font-size:11px;color:#D1D5DB;">Not signed in. Sign in to keep your lists and history on all your TVs.</div>
+              <div style="background:#0A0814;border:1px solid #1E1736;border-radius:10px;padding:10px 12px;margin-bottom:6px;font-size:11px;color:#D1D5DB;">Not signed in. Sign in to sync your TVs.</div>
             `}
           </div>
 
@@ -544,21 +545,21 @@ async function loadSettings(vp, skipFetch = false) {
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Details &amp; ratings</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Loaded once, then only new titles.</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Loaded once.</div>
               </div>
               <span id="settingsEnrichStatus" style="font-size:10px;font-weight:800;text-align:right;max-width:55%;">…</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Catalog</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Checks by itself every day. Tap to check now.</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Checked daily.</div>
               </div>
               <button tabindex="0" id="btnEnrichNow" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="triggerFullEnrichmentSync()">Check for new titles</button>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <div>
                 <div style="font-size:11px;font-weight:700;color:#F3F4F6;">Something wrong?</div>
-                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Shows what the app did lately. Photograph the screen to send it.</div>
+                <div style="font-size:9px;color:#9CA3AF;margin-top:1px;">Recent app activity.</div>
               </div>
               <button tabindex="0" id="btnReportProblem" class="btn tv-focusable" style="padding:2px 8px;font-size:10px;" onclick="openDiagModal()">Report a problem</button>
             </div>
@@ -646,6 +647,14 @@ async function refreshAppStatus() {
   try {
     const r = await fetch('/api/state');
     if (r && r.ok) appStatus = await r.json();
+  } catch (_) {}
+}
+
+// Light refresh: only the sync/enrichment numbers (the full /api/state also runs the home-row queries)
+async function refreshSyncStatusOnly() {
+  try {
+    const r = await fetch('/api/sync/status');
+    if (r && r.ok) { const j = await r.json(); if (j && j.syncStatus) appStatus = Object.assign({}, appStatus || {}, { syncStatus: j.syncStatus }); }
   } catch (_) {}
 }
 

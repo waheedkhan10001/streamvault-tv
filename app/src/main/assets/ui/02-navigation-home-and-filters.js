@@ -1,4 +1,6 @@
+let navLoadSeq = 0;   // newest tab open wins: an older, slower load never draws over it
 async function navigateToTab(tabId, customFilter = null, focusFirstCard = false) {
+  const myNavSeq = ++navLoadSeq;
   if (sidebarOpenTimer) { clearTimeout(sidebarOpenTimer); sidebarOpenTimer = null; }
   if (tabId !== 'PROFILE') revertThemePreview();
   if (!getStoredAuthToken()) {
@@ -14,6 +16,8 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     previousTab = currentTab;
   }
   const leavingTab = currentTab;
+  // Coming into a tab from somewhere else always starts at the top; only a redraw of the same tab keeps the place
+  if (currentTab !== tabId) delete tabFocusMemory[tabId];
   const memAtOpen = tabFocusMemory[tabId];   // the screen's own first-title focus must not overwrite this before we use it
   currentTab = tabId;
   renderCatalogStrip();
@@ -86,7 +90,7 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
   vp.innerHTML = '<div style="padding:40px;color:var(--muted);">Loading...</div>';
 
   if (tabId === 'HOME') {
-    await loadHome(vp);
+    await loadHome(vp, myNavSeq);
   } else if (tabId === 'SEARCH') {
     loadSuperFilter(vp, 'Search');
     if (focusFirstCard) {
@@ -151,7 +155,7 @@ async function navigateToTab(tabId, customFilter = null, focusFirstCard = false)
     loadSettings(vp);
     const paintEnrich = () => updateEnrichStatusRow((appStatus && appStatus.syncStatus) || {});
     setTimeout(paintEnrich, 120);
-    setTimeout(async () => { try { await refreshAppStatus(); } catch (_) {} paintEnrich(); }, 700);
+    setTimeout(async () => { try { await refreshSyncStatusOnly(); } catch (_) {} paintEnrich(); }, 700);
   }
 }
 
@@ -171,10 +175,12 @@ async function catalogNoticeHtml() {
   return '';
 }
 
-async function loadHome(vp) {
+async function loadHome(vp, navSeq) {
   try {
     const res = await fetch('/api/home');
-    homeData = await res.json();
+    const data = await res.json();
+    if (navSeq !== undefined && navSeq !== navLoadSeq) return;   // the person already moved to another tab
+    homeData = data;
   } catch (err) {
     vp.innerHTML = `<div style="padding:40px;color:#EF4444;">Failed to load Home: ${escapeHtml(err.message)}</div>`;
     return;
@@ -195,7 +201,7 @@ async function loadHome(vp) {
   let htmlStr = '';
   if (hero) {
     const backdrop = hero.backdropUrl || hero.posterUrl || '';
-    const ratingDisplay = hero.rating > 0 ? `★ ${hero.rating}` : '';
+    const ratingDisplay = hero.rating > 0 ? `${ratingStar(hero)} ${ratingText(hero)}` : '';
     htmlStr += `
       <div class="hero" style="background-image:url('${backdrop}');">
         <div class="hero-content">
@@ -262,7 +268,7 @@ function getSeriesSeasonTag(m) {
 function renderPosterCard(m) {
   const isSeries = m.mediaType === 'SERIES';
   const seriesTag = isSeries ? getSeriesSeasonTag(m) : null;
-  const ratingStr = m.rating > 0 ? `★ ${m.rating}` : '';
+  const ratingStr = m.rating > 0 ? `${ratingStar(m)} ${ratingText(m)}` : '';
   const yearStr = m.year ? String(m.year) : '';
   const quality = (m.qualityBadges || [])[0] || 'HD';
   const lang = m.language || 'English';
@@ -321,7 +327,7 @@ function loadSuperFilter(vp, titleOverride = 'Search') {
                  onfocus="onSearchFilterFocus()"
                  onblur="onSearchFilterBlur(this)"
                  value="${escapeHtml(filterState.searchQuery)}"
-                 placeholder="${isVault ? 'Search 2,600+ 18+ Vault titles & studios...' : 'Search 60,000+ movies, series, actors, directors...'}"
+                 placeholder="${isVault ? 'Search 18+ titles & studios' : (currentTab === 'SERIES' ? 'Search series by title, actor or genre' : currentTab === 'MOVIES' ? 'Search movies by title, actor or genre' : 'Search movies and series by title, actor or genre')}"
                  oninput="onSearchFilterInput(this.value)"
                  onkeydown="onSearchInputKeyDown(this, event)" />
           <div id="searchSuggestionsContainer" class="search-suggestions-container" style="display:none;"></div>
@@ -799,6 +805,7 @@ async function executeFilterQuery(append = false) {
     grid.innerHTML = '<div style="grid-column:1/-1;padding:40px;color:var(--muted);text-align:center;">Filtering catalog...</div>';
   }
 
+  const tabAtQuery = currentTab;
   try {
     const res = await fetch('/api/query', {
       method: 'POST',
@@ -806,6 +813,7 @@ async function executeFilterQuery(append = false) {
       body: JSON.stringify({ ...filterState, adultOnly: currentTab === 'VAULT_18', extrasOnly: currentTab === 'EXTRAS', limit: 120, offset: currentFilterOffset })
     });
     const data = await res.json();
+    if (currentTab !== tabAtQuery) return;   // the person already moved to another tab
     const items = data.items || [];
     const matchCount = data.totalMatched !== undefined ? data.totalMatched : items.length;
     currentTotalFilterMatched = matchCount;

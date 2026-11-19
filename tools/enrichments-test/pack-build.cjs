@@ -69,8 +69,27 @@ function sim(a, b) {
 }
 const LANGS = 'hindi|tamil|telugu|malayalam|kannada|marathi|punjabi|pashto|bengali|bangla|urdu|english|gujarati|bhojpuri|dubbed|subbed|sub|subtitles|english-subbed|full|length|movie|film|hd|4k|uhd|latest|new|superhit|classic|old|awesome|comedy|thriller|romantic|action|telefilm|converted|scam|tv|netflix|voot|zee5|hotstar|amazon|prime';
 const umlaut = (s) => s.replace(/ae/g, 'ä').replace(/oe/g, 'ö').replace(/ue/g, 'ü').replace(/Ae/g, 'Ä').replace(/Oe/g, 'Ö').replace(/Ue/g, 'Ü');
+// The app's parser already turns "_" into spaces, so long YouTube-style names must be split from the RAW provider name.
+const CUT = /\b(full\s+(?:[a-z]+\s+){0,2}movie|hindi\s+dubbed|tamil\s+dubbed|new\s+released?|super\s?hit|latest|(?:hd|hq)\s+movie|movie|film|telefilm|dubbed)\b/i;
+function rawVariants(raw) {
+  let r = String(raw || '').split(/#EXT|https?:|tvg-/i)[0].replace(/^\s*[A-Za-z]{2,3}\s*:\s*/, '');
+  r = r.replace(/\[[^\]]*\]|\{[^}]*\}/g, ' ').replace(/-converted/gi, ' ').replace(/\(\s*(?:19|20)\d\d\s*\)/g, ' ').replace(/#\w+/g, ' ');
+  const segs = r.split(/\s*_+\s+|\s+_+\s*|\s+\|\s+|\s+-\s+/).map((x) => x.trim()).filter(Boolean);
+  const cut = (x) => (x || '').split(CUT)[0].replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+  const out = [];
+  const bare = (x) => cut(x).replace(new RegExp('\\b(' + LANGS + ')\\b', 'gi'), ' ').replace(/\s+/g, ' ').trim();
+  // the title is the first part that is more than just "Malayalam Full Movie" / "Hindi Movie" style words
+  const idx = segs.findIndex((x) => bare(x).length >= 2);
+  if (idx >= 0) {
+    out.push(cut(segs[idx])); out.push(bare(segs[idx]));
+    if (segs[idx + 1] && segs[idx].length < 14) out.push(cut(segs[idx] + ' ' + segs[idx + 1])); // "STATUS_ IT'S COMPLICATED_ actors"
+  }
+  return out.filter((v) => v.length >= 3 && !/^(?:new\s+|latest\s+)?(?:\w+\s+)?movies?$/i.test(v)); // never search for just "Movies" / "New Punjabi Movies"
+}
 function variants(raw, clean, german) {
   const out = []; const add = (x) => { x = String(x || '').replace(/\s+/g, ' ').trim(); if (x.length > 1 && !out.includes(x)) out.push(x); };
+  const junk = /_|full\s+(?:[a-z]+\s+){0,2}movie|dubbed|super\s?hit|new\s+released?/i.test(raw || '');
+  if (junk) for (const v of rawVariants(raw)) add(v);
   let c = String(clean || '').replace(/\*/g, ' ').replace(/^\s*[A-Z]{2,3}\s*:\s*/, '');
   c = c.split(/#EXT|https?:|tvg-/i)[0]; // leaked playlist text in a few provider names
   c = c.replace(/\((tv movie|netflix|voot|zee5|hotstar|amazon|prime|hd|scam|[^)]*movie[^)]*)\)/gi, ' ').replace(/-converted/gi, ' ').replace(/\s+S\d{1,2}$/i, ' ');
@@ -85,12 +104,12 @@ function variants(raw, clean, german) {
     const u = umlaut(c); if (u !== c) add(u);
     const u2 = umlaut(parts[0]); if (u2 !== parts[0]) add(u2);
   }
-  return out.slice(0, 6);
+  return out.slice(0, 8);
 }
 const isGerman = (g) => /(^|[\s|\[\-_:])(DE|GER|GERMAN|DEUTSCH)([\s|\]\-_:]|$)/i.test(g.cat || '') || /^\s*DE\s*:/i.test(g.raw || '') || g.lang === 'German';
 
 // ---------------------------------------------------------------- TMDB record
-const CERT_COUNTRIES = ['US', 'GB', 'DE'];
+const CERT_COUNTRIES = ['US', 'GB', 'DE', 'IN', 'AU', 'CA', 'NL'];
 const ALT_COUNTRIES = ['US', 'GB', 'DE', 'AT', 'CH', 'IN', 'PK'];
 function certs(d, isTv) {
   const out = {};
@@ -250,6 +269,12 @@ function resolveCert(c) {
   if (gb && !NO_CERT.has(gb.toUpperCase())) return { cert: 'UK ' + gb, country: 'GB', kids: ['U', 'PG'].includes(gb) };
   const de = (c.DE || '').trim().replace(/^FSK[- ]?/i, '');
   if (de && !NO_CERT.has(de.toUpperCase())) return { cert: 'FSK ' + de, country: 'DE', kids: ['0', '6'].includes(de) };
+  // other countries, only used when US, UK and DE have nothing; Kids accepts the all-ages / "PG-like" classes only
+  const KIDS_OTHER = { IN: ['U'], AU: ['G', 'PG'], CA: ['G', 'PG'], NL: ['AL', '6'] };
+  for (const cc of ['IN', 'AU', 'CA', 'NL']) {
+    const v = (c[cc] || '').trim();
+    if (v && !NO_CERT.has(v.toUpperCase())) return { cert: cc + ' ' + v, country: cc, kids: KIDS_OTHER[cc].includes(v) };
+  }
   return { cert: '', country: '', kids: false };
 }
 // IMDb rating when it has at least 10 votes, else TMDB when it has at least 5 votes, else none
@@ -270,7 +295,7 @@ CREATE TABLE titles (
   cast_text TEXT, director TEXT, rating REAL, rating_votes INTEGER, rating_source TEXT, sort_score REAL,
   imdb_rating REAL, imdb_votes INTEGER, tmdb_rating REAL, tmdb_votes INTEGER,
   certification TEXT, cert_country TEXT, kids_ok INTEGER, cert_us TEXT, cert_gb TEXT, cert_de TEXT,
-  collection TEXT, countries TEXT, spoken_languages TEXT, keywords TEXT, seasons INTEGER, episodes INTEGER, status TEXT,
+  cert_other TEXT, collection TEXT, countries TEXT, spoken_languages TEXT, keywords TEXT, seasons INTEGER, episodes INTEGER, status TEXT,
   poster_path TEXT, backdrop_path TEXT, poster_off INTEGER, poster_len INTEGER
 );
 CREATE UNIQUE INDEX idx_titles_tmdb ON titles(type, tmdb_id) WHERE tmdb_id > 0;
@@ -283,7 +308,7 @@ async function fetchPoster(url) {
   for (let a = 0; a < 4; a++) {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      if (r.status === 200) return Buffer.from(await r.arrayBuffer());
+      if (r.status === 200) { const b = Buffer.from(await r.arrayBuffer()); if (b.length > 200 && b[0] === 0xff && b[1] === 0xd8) return b; await sleep(800 * (a + 1)); continue; } // must really be a JPEG
       if (r.status === 404) return null;
       await sleep(800 * (a + 1));
     } catch (e) { await sleep(800 * (a + 1)); }
@@ -390,7 +415,7 @@ function selftestItems() { // fake data so the file format and the database can 
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;');
   db.exec(SCHEMA);
-  const insT = db.prepare(`INSERT INTO titles VALUES (${Array(41).fill('?').join(',')})`);
+  const insT = db.prepare(`INSERT INTO titles VALUES (${Array(42).fill('?').join(',')})`);
   const insA = db.prepare('INSERT INTO aliases VALUES (?,?,?)');
   const st = { src: { tmdb: 0, tvmaze: 0, provider: 0 }, conf: { good: 0, doubtful: 0, notfound: 0 }, rate: { I: 0, T: 0, none: 0 }, certUS: 0, certAny: 0, certNone: 0, kids: 0, kidsUS: 0, aliasRows: 0, provRating: 0, provPlot: 0 };
   db.exec('BEGIN');
@@ -415,7 +440,7 @@ function selftestItems() { // fake data so the file format and the database can 
       rec ? rec.cast.join(', ') : (prov.cast || ''), rec ? rec.dir : (prov.director || ''), rt.r, rt.v, rt.s, sortScore(rt.r, rt.v),
       im ? im.r : 0, im ? im.v : 0, rec ? Math.round(rec.r * 10) / 10 : 0, rec ? rec.v : 0,
       c.cert, c.country, c.kids ? 1 : 0, rec ? (rec.certs.US || '') : '', rec ? (rec.certs.GB || '') : '', rec ? (rec.certs.DE || '') : '',
-      rec ? rec.coll : '', rec ? rec.countries.join(', ') : '', rec ? rec.spoken.join(', ') : '', rec ? rec.kw.join(', ') : '', rec ? rec.seasons : 0, rec ? rec.episodes : 0, rec ? rec.status : '',
+      rec ? ['IN', 'AU', 'CA', 'NL'].filter((k) => rec.certs[k]).map((k) => k + ':' + rec.certs[k]).join(';') : '', rec ? rec.coll : '', rec ? rec.countries.join(', ') : '', rec ? rec.spoken.join(', ') : '', rec ? rec.kw.join(', ') : '', rec ? rec.seasons : 0, rec ? rec.episodes : 0, rec ? rec.status : '',
       rec ? rec.p : '', rec ? rec.b : '', r.pOff === undefined ? null : r.pOff, r.pLen === undefined ? null : r.pLen);
     // name index: what the provider calls it (every member), what TMDB calls it, alternative names
     const seen = new Set();
@@ -472,7 +497,7 @@ function selftestItems() { // fake data so the file format and the database can 
   add('Shows I: ' + fmt(st.rate.I) + ' (' + pct(st.rate.I, n) + ')   shows T: ' + fmt(st.rate.T) + ' (' + pct(st.rate.T, n) + ')   Not rated: ' + fmt(st.rate.none) + ' (' + pct(st.rate.none, n) + ')');
   add('');
   add('== AGE RATINGS / KIDS ==');
-  add('Titles with a US age rating: ' + fmt(st.certUS) + ' (' + pct(st.certUS, n) + ')   with ANY age rating (US, else UK, else DE): ' + fmt(st.certAny) + ' (' + pct(st.certAny, n) + ')   gained from UK/DE: ' + fmt(st.certAny - st.certUS));
+  add('Titles with a US age rating: ' + fmt(st.certUS) + ' (' + pct(st.certUS, n) + ')   with ANY age rating (US, else UK, DE, IN, AU, CA, NL): ' + fmt(st.certAny) + ' (' + pct(st.certAny, n) + ')   gained from other countries: ' + fmt(st.certAny - st.certUS));
   add('NO age rating at all (hidden from Kids): ' + fmt(st.certNone) + ' (' + pct(st.certNone, n) + ')');
   add('Visible in Kids: ' + fmt(st.kids) + ' (' + pct(st.kids, n) + ')   of those from the US rating alone: ' + fmt(st.kidsUS));
   add('');

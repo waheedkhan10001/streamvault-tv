@@ -518,6 +518,10 @@ export default {
         const codeId = crypto.randomUUID();
         const expiresAt = now + 10 * 60 * 1000; // 10 minutes
 
+        // A new code replaces any earlier one: older unused codes stop working
+        await env.DB.prepare(
+          `UPDATE email_codes SET is_used = 1 WHERE email = ? AND purpose = 'verify_email' AND is_used = 0`
+        ).bind(cleanEmail).run();
         await env.DB.prepare(
           `INSERT INTO email_codes (code_id, email, code, purpose, attempts, is_used, expires_at, created_at)
            VALUES (?, ?, ?, 'verify_email', 0, 0, ?, ?)`
@@ -645,6 +649,10 @@ export default {
         const codeId = crypto.randomUUID();
         const expiresAt = now + 10 * 60 * 1000; // 10 minutes
 
+        // A new code replaces any earlier one: older unused codes stop working
+        await env.DB.prepare(
+          `UPDATE email_codes SET is_used = 1 WHERE email = ? AND purpose = 'verify_email' AND is_used = 0`
+        ).bind(cleanEmail).run();
         await env.DB.prepare(
           `INSERT INTO email_codes (code_id, email, code, purpose, attempts, is_used, expires_at, created_at)
            VALUES (?, ?, ?, 'verify_email', 0, 0, ?, ?)`
@@ -1404,6 +1412,61 @@ export default {
       }
 
       // ----------------------------------------------------------------
+      // ENRICHMENTS PACK (R2): signed-in users only. Small manifest + big file with Range (resume) support.
+      // ----------------------------------------------------------------
+
+      if (method === 'GET' && (pathname === '/api/pack/latest' || pathname === '/api/pack/file')) {
+        const auth = await authenticate(request, env);
+        if (!auth) return errorResponse('Unauthorized', 401, corsHeaders);
+        if (!env.PACKS) return errorResponse('Pack storage is not configured', 503, corsHeaders);
+
+        const latestObj = await env.PACKS.get('packs/latest.json');
+        if (!latestObj) return errorResponse('No pack published yet', 404, corsHeaders);
+        let manifest;
+        try { manifest = JSON.parse(await latestObj.text()); } catch (_) { return errorResponse('Pack manifest is unreadable', 500, corsHeaders); }
+        if (!manifest || typeof manifest.key !== 'string' || !manifest.key.startsWith('packs/')) {
+          return errorResponse('Pack manifest is invalid', 500, corsHeaders);
+        }
+
+        if (pathname === '/api/pack/latest') {
+          return jsonResponse({ success: true, pack: manifest }, 200, corsHeaders);
+        }
+
+        // /api/pack/file : stream the pack named in the manifest; "Range: bytes=START-" resumes a download.
+        const head = await env.PACKS.head(manifest.key);
+        if (!head) return errorResponse('Pack file not found', 404, corsHeaders);
+        const total = head.size;
+        const baseHeaders = {
+          ...corsHeaders,
+          'Content-Type': 'application/octet-stream',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'no-store',
+          'ETag': head.httpEtag,
+          'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, ETag'
+        };
+        const rangeHeader = request.headers.get('Range');
+        if (rangeHeader) {
+          const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+          let start = m && m[1] !== '' ? Number(m[1]) : NaN;
+          let end = m && m[2] !== '' ? Number(m[2]) : total - 1;
+          if (m && m[1] === '' && m[2] !== '') { start = Math.max(0, total - Number(m[2])); end = total - 1; } // suffix range
+          if (!m || !Number.isFinite(start) || start >= total || end < start) {
+            return new Response(null, { status: 416, headers: { ...baseHeaders, 'Content-Range': `bytes */${total}` } });
+          }
+          end = Math.min(end, total - 1);
+          const part = await env.PACKS.get(manifest.key, { range: { offset: start, length: end - start + 1 } });
+          if (!part) return errorResponse('Pack file not found', 404, corsHeaders);
+          return new Response(part.body, {
+            status: 206,
+            headers: { ...baseHeaders, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': String(end - start + 1) }
+          });
+        }
+        const whole = await env.PACKS.get(manifest.key);
+        if (!whole) return errorResponse('Pack file not found', 404, corsHeaders);
+        return new Response(whole.body, { status: 200, headers: { ...baseHeaders, 'Content-Length': String(total) } });
+      }
+
+      // ----------------------------------------------------------------
       // SHARED TMDB PROXY & CACHE (Proxy TMDB so key is not in APK)
       // ----------------------------------------------------------------
 
@@ -1624,6 +1687,16 @@ export default {
           return errorResponse('profileId, dataType, and items array required', 400, corsHeaders);
         }
         const now = Date.now();
+        // The TV makes its own profile ids; the cloud only knows the ones it was told about. A push for an unknown profile
+        // used to fail on the profile link (HTTP 500) and stay "pending" forever, so the profile is registered first.
+        const known = await env.DB.prepare(`SELECT profile_id FROM profiles WHERE profile_id = ? AND account_id = ?`).bind(profileId, auth.accountId).first();
+        if (!known) {
+          const owned = await env.DB.prepare(`SELECT 1 AS x FROM profiles WHERE profile_id = ?`).bind(profileId).first();
+          if (owned) return errorResponse('Profile belongs to another account', 403, corsHeaders);
+          await env.DB.prepare(
+            `INSERT OR IGNORE INTO profiles (profile_id, account_id, display_name, is_kids, is_primary, created_at, updated_at) VALUES (?, ?, 'TV profile', 0, 0, ?, ?)`
+          ).bind(profileId, auth.accountId, now, now).run();
+        }
         const stmts = items.map(it =>
           env.DB.prepare(
             `INSERT INTO profile_data (profile_id, account_id, data_type, item_key, data_json, updated_at)

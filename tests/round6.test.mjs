@@ -26,6 +26,7 @@ async function newApp(browser) {
         const p = path.split('?')[0]; const J = o => JSON.stringify(o);
         window.__calls.push(p);
         if (p === '/api/state') return J({ ok: true, totalCatalogCount: 30, syncStatus: window.__sync || {}, credentials: { serverUrl: 'http://x', username: 'u', hasPassword: true }, parentalControl: { isLocked: true, showAdult: false, showExtras: false, hasCustomPin: true } });
+        if (p === '/api/sync/status') return J({ ok: true, syncStatus: window.__sync || {} });
         if (p === '/api/session') return J({ ok: true, authenticated: true, token: TOKEN });
         if (p === '/api/auth/me') return J({ ok: true, account, token: TOKEN });
         if (p === '/api/profiles') return J({ ok: true, profiles, activeProfileId: 'p1' });
@@ -74,7 +75,9 @@ async function run() {
   check('Left from the first card goes to the Movies tab', (await focusInfo(page)) === 'tab:MOVIES', await focusInfo(page));
   await press(page, 'ArrowRight', 1, 200);
   await press(page, 'Escape');
-  check('Back from the content goes to the Movies tab', (await focusInfo(page)) === 'tab:MOVIES', await focusInfo(page));
+  check('Back from the first row goes to the search box first', (await focusInfo(page)) === 'filterSearchInput' || await page.evaluate(() => document.activeElement && document.activeElement.id === 'filterSearchInput'), await focusInfo(page));
+  await press(page, 'Escape');
+  check('Back from the search box goes to the Movies tab', (await focusInfo(page)) === 'tab:MOVIES', await focusInfo(page));
   await page.evaluate(() => { const c = document.querySelector('#filterResultsGrid .poster-card'); c && c.focus(); document.body.focus && 0; });
   await page.evaluate(() => { document.activeElement.blur(); });
   await press(page, 'Escape');

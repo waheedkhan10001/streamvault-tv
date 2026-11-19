@@ -177,6 +177,21 @@ window.handleAppBackKey = function() {
   const sidebarEl = document.querySelector('.sidebar');
   const focusOnSidebar = !!(document.activeElement && sidebarEl && sidebarEl.contains(document.activeElement));
   if (mainVp && !focusOnSidebar) {
+    // Back from far down the posters: first to the top row, then to the search box, then to the sidebar tab
+    const ae = document.activeElement;
+    const grid = document.getElementById('filterResultsGrid');
+    const searchBox = document.getElementById('filterSearchInput');
+    if (grid && ae && grid.contains(ae) && ae.classList && ae.classList.contains('poster-card')) {
+      const first = grid.querySelector('.poster-card');
+      if (first && first !== ae && Math.abs(ae.offsetTop - first.offsetTop) > 20) {
+        first.focus(); tvScrollIntoView(first, { block: 'center' }); playNavSound();
+        return true;
+      }
+    }
+    if (searchBox && ae !== searchBox && searchBox.offsetParent !== null && mainVp.contains(ae || mainVp)) {
+      searchBox.focus(); tvScrollIntoView(searchBox, { block: 'center' }); playNavSound();
+      return true;
+    }
     const activeSidebar = getActiveSidebarElement();
     if (activeSidebar) {
       activeSidebar.focus();
@@ -358,6 +373,41 @@ function cloudAuthNavigate(current, key) {
   return true;
 }
 
+// Profile screen grid. Left box = Profile Customization, right box = Parental Controls & PIN.
+function profileScreenNavigate(current, key) {
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) return false;
+  const byId = (ids) => ids.map(id => document.getElementById(id)).filter(e => e && e.offsetParent !== null);
+  const chips = Array.from(document.querySelectorAll('.profile-theme-chip')).filter(e => e.offsetParent !== null);
+  const left = [byId(['profNameInput']), chips, byId(['btnToggleKidsMode']), byId(['btnDeleteProfile', 'btnSaveProfile'])].filter(r => r.length);
+  const right = [byId(['setCurPin', 'setNewPin', 'setConfirmPin', 'btnUpdatePin']), byId(['btnToggleParentalLock']), byId(['btnToggleExtrasLock']), byId(['btnClearHistory'])].filter(r => r.length);
+  const cols = [left, right];
+  let ci = -1, ri = -1, ki = -1;
+  cols.forEach((rows, c) => rows.forEach((row, r) => { const k = row.indexOf(current); if (k !== -1) { ci = c; ri = r; ki = k; } }));
+  if (ci === -1) return false;   // profile cards row, sidebar, etc.: normal navigation
+  const editing = current.tagName === 'INPUT' && !current.hasAttribute('readonly');
+  if (editing && (key === 'ArrowLeft' || key === 'ArrowRight')) return false;   // caret movement while typing
+  const go = (el) => { if (el) { el.focus(); tvScrollIntoView(el, { block: 'nearest' }); playNavSound(); } return true; };
+  const rows = cols[ci];
+  const row = rows[ri];
+  if (key === 'ArrowDown') {
+    if (ri + 1 < rows.length) return go(rows[ri + 1][0]);   // always the first item of the next row
+    return true;   // last row: stay in the box
+  }
+  if (key === 'ArrowUp') {
+    if (ri > 0) return go(rows[ri - 1][0]);
+    return false;  // first row: up to the profile cards
+  }
+  if (key === 'ArrowRight') {
+    if (ki + 1 < row.length) return go(row[ki + 1]);
+    if (ci === 0 && right.length) return go(right[Math.min(ri, right.length - 1)][0]);
+    return true;
+  }
+  // ArrowLeft
+  if (ki > 0) return go(row[ki - 1]);
+  if (ci === 1 && left.length) { const lr = left[Math.min(ri, left.length - 1)]; return go(lr[lr.length - 1]); }
+  return false;    // left box, first item: on to the sidebar
+}
+
 function fastNavigate(current, key) {
   if (!current) return false;
   if (current.closest && current.closest('#mainViewport')) {
@@ -369,26 +419,19 @@ function fastNavigate(current, key) {
   if (cloudAuthNavigate(current, key)) return true;
   if (playlistModalNavigate(current, key)) return true;
 
+  // Settings: Left from Sign Out / Sign In (account box) goes to the IPTV playlist box
+  if (key === 'ArrowLeft' && currentTab === 'SETTINGS' && (current.id === 'btnSignOutAccount' || current.id === 'btnOpenCloudSignIn') && !getTopPopup()) {
+    const t = document.getElementById('btnAddPlaylistBtn') || document.getElementById('btnFirstRunAddPlaylist');
+    if (t) { t.focus(); playNavSound(); return true; }
+  }
+
   // Any other popup on top: it owns the remote. If focus slipped outside it, navigateSpatial pulls it back in,
   // and the overlays underneath (welcome, profile picker, detail "focus trap") must not grab focus back.
   const topPopup = getTopPopup();
   if (topPopup && topPopup.id !== 'playlistModal' && !topPopup.contains(current)) return false;
 
-  // Profile page: the theme chips, the Kids-mode switch and Save sit in a fixed order, so Up/Down follows it on every screen size.
-  if (!topPopup && (key === 'ArrowDown' || key === 'ArrowUp')) {
-    const kids = document.getElementById('btnToggleKidsMode');
-    const save = document.getElementById('btnSaveProfile');
-    if (kids && save && kids.offsetParent && save.offsetParent) {
-      if (current.classList && current.classList.contains('profile-theme-chip') && key === 'ArrowDown') { kids.focus(); playNavSound(); return true; }
-      if (current === kids && key === 'ArrowDown') { save.focus(); playNavSound(); return true; }
-      if (current === kids && key === 'ArrowUp') {
-        const chips = Array.from(document.querySelectorAll('.profile-theme-chip'));
-        const t = chips.find(c => c.classList.contains('selected') || c.classList.contains('active')) || chips[0];
-        if (t) { t.focus(); playNavSound(); return true; }
-      }
-      if (current === save && key === 'ArrowUp') { kids.focus(); playNavSound(); return true; }
-    }
-  }
+  // Profile page: both boxes follow a fixed grid, so every arrow goes where the screen shows it on any TV size.
+  if (!topPopup && currentTab === 'PROFILE' && profileScreenNavigate(current, key)) return true;
 
   // 0.1. Welcome Screen Overlay Navigation Flow
   const welcomeOverlay = document.getElementById('welcomeScreenOverlay');

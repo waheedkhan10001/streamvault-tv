@@ -1,5 +1,6 @@
 async function saveActiveProfileChanges() {
   playNavSound();
+  const wasKids = Boolean(currentActiveProfile.isKids);
   const nameInp = document.getElementById('profNameInput');
   if (nameInp) currentActiveProfile.name = nameInp.value.trim() || currentActiveProfile.name;
   
@@ -12,7 +13,7 @@ async function saveActiveProfileChanges() {
         name: currentActiveProfile.name,
         avatarColor: currentActiveProfile.avatarColor || '#8B5CF6',
         theme: currentActiveProfile.theme || 'purple',
-        isKids: Boolean(currentActiveProfile.isKids),
+        isKids: (window.pendingKids === true || window.pendingKids === false) ? window.pendingKids : Boolean(currentActiveProfile.isKids),
         pin: lastVerifiedPin
       })
     });
@@ -29,6 +30,7 @@ async function saveActiveProfileChanges() {
     return;
   }
   
+  const pinUsed = lastVerifiedPin;
   lastVerifiedPin = '';
   applyProfileTheme(currentActiveProfile.theme || 'purple');   // saved: the preview becomes the theme
 
@@ -40,6 +42,28 @@ async function saveActiveProfileChanges() {
 
   // Update profile header pill & sidebar
   updateUserProfileUI();
+  window.pendingKids = null;
+  if (!wasKids && currentActiveProfile.isKids) {
+    // Kids Mode just turned on: remember what was open, then close 18+ and Extras
+    const pc = (appStatus && appStatus.parentalControl) || {};
+    window.vaultBeforeKids = { adult: !!pc.showAdult, extras: !!pc.showExtras };
+    try { localStorage.setItem('sv_vault_before_kids', JSON.stringify(window.vaultBeforeKids)); } catch (e) {}
+    await lockVault('adult', true);
+    await lockVault('extras', true);
+    if (['VAULT_18', 'EXTRAS', 'LIVE_TV'].includes(currentTab)) navigateToTab('HOME');
+  } else if (wasKids && !currentActiveProfile.isKids && pinUsed) {
+    if (!window.vaultBeforeKids) { try { window.vaultBeforeKids = JSON.parse(localStorage.getItem('sv_vault_before_kids') || 'null'); } catch (e) {} }
+    if (window.vaultBeforeKids) {
+    // Kids Mode just turned off with the PIN: what was open before Kids Mode comes straight back
+    for (const target of ['adult', 'extras']) {
+      if (!window.vaultBeforeKids[target]) continue;
+      try { await fetch('/api/parental-pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unlock', pin: pinUsed, target }) }); } catch (e) {}
+    }
+    window.vaultBeforeKids = null;
+    try { localStorage.removeItem('sv_vault_before_kids'); } catch (e) {}
+    }
+  }
+  try { await refreshAppStatus(); } catch (e) {}   // the Adult / Extras tabs depend on the saved Kids setting
   renderSidebar();
   showToast('✓ Profile updated');
   
@@ -446,6 +470,14 @@ function renderRelatedStripHtml(related, item) {
   `;
 }
 
+// Age rating as printed on the badge: "FSK 12" -> "12+", "TV-14" stays, "PG-13" stays
+function ageRatingLabel(c) {
+  const t = String(c || '').trim();
+  const m = t.match(/^(?:FSK|DE|NL|AU|CA|IN|UK)?\s*(\d{1,2})$/i);
+  if (m) return m[1] + '+';
+  return t;
+}
+
 async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
   playNavSound();
   if (document.activeElement && !document.getElementById('detailOverlay')?.contains(document.activeElement)) {
@@ -491,7 +523,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
   `;
 
   try {
-    const res = await fetch(`/api/detail?dedupKey=${encodeURIComponent(dedupKey)}&matchMode=${currentMltMode}&hideWatched=${currentMltHideWatched}`);
+    const res = await fetch(`/api/detail?dedupKey=${encodeURIComponent(dedupKey)}&matchMode=${currentMltMode}&hideWatched=${currentMltHideWatched}&fast=1`);
     const data = await res.json();
     if (!data || !data.item) {      // for example a Kids profile opening a title that is not child-rated
       ov.style.display = 'none'; ov.innerHTML = '';
@@ -545,7 +577,8 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
               </div>
 
               <div style="display:flex;gap:7px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px;flex-wrap:wrap;">
-                <span class="badge-rating" style="padding:2px 7px;font-size:11px;">${item.rating > 0 ? '★ ' + item.rating : 'Not rated'}</span>
+                ${item.certification ? `<span class="badge-age" title="Age rating" style="border:1.5px solid #E5E7EB;color:#F9FAFB;padding:1px 7px;border-radius:4px;font-size:11px;font-weight:900;letter-spacing:0.3px;">${escapeHtml(ageRatingLabel(item.certification))}</span>` : ''}
+                <span class="badge-rating" style="padding:2px 7px;font-size:11px;">${item.rating > 0 ? ratingStar(item) + ' ' + ratingText(item, true) : 'Not rated'}</span>
                 ${(item.qualityBadges || []).slice(0, 1).map((q) => `<span class="badge-quality" style="padding:2px 7px;font-size:11px;">${q}</span>`).join('')}
                 <span class="badge-language" style="padding:2px 7px;font-size:11px;">${item.language || 'English'}</span>
                 <span class="badge-audio" style="background:#2E1065;color:var(--theme-pale);border:1px solid var(--theme-deep);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;">Multi-Audio</span>
@@ -621,6 +654,20 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
         </div>
       </div>
     `;
+
+    // "More Like This" is looked up after the screen is already showing
+    fetch(`/api/related?dedupKey=${encodeURIComponent(item.dedupKey)}&matchMode=${currentMltMode}&hideWatched=${currentMltHideWatched}&limit=8`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d || !Array.isArray(d.items) || !selectedDetailItem || selectedDetailItem.dedupKey !== item.dedupKey) return;
+        const strip = document.getElementById('mltPosterStrip');
+        if (!strip) return;
+        const keep = strip.contains(document.activeElement);
+        strip.innerHTML = renderRelatedStripHtml(d.items, item);
+        const tb = document.getElementById('tabBtnRelated');
+        if (tb) tb.innerText = `More Like This (${d.items.length})`;
+        if (keep) { const f = strip.querySelector('.tv-focusable'); if (f) f.focus(); }
+      }).catch(() => {});
 
     // Auto-focus primary action button
     setTimeout(() => {

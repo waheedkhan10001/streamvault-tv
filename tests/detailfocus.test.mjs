@@ -40,6 +40,7 @@ async function newApp(browser) {
         if (p === '/api/related') {
           const q = new URLSearchParams(path.split('?')[1] || ''); const off = +q.get('offset') || 0, lim = +q.get('limit') || 24; window.__relCalls = (window.__relCalls || []); window.__relCalls.push(path);
           const all = Array.from({ length: 30 }, (_, i) => ({ ...rel[0], dedupKey: 'x' + i, id: 'x' + i, cleanTitle: 'Match ' + i }));
+          if (window.__noRelated && !off) return J({ ok: true, items: [], hasMore: false, offset: 0 });
           return J({ ok: true, items: all.slice(off, off + lim), hasMore: off + lim < all.length, offset: off });
         }
         if (p === '/api/probe-versions') return J({ ok: true, versions: vers.map(v => ({ ...v, fileSizeStr: '2.1 GB' })) });

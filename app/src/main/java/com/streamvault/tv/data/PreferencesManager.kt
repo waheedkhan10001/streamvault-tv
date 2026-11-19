@@ -158,10 +158,22 @@ class PreferencesManager(context: Context) {
         get() = prefs.getString("last_crash", null)
         set(value) { if (value == null) prefs.edit().remove("last_crash").apply() else prefs.edit().putString("last_crash", value).apply() }
 
+    /** When the last provider refresh STARTED (finished or not): an interrupted refresh must not restart on every launch. */
+    fun getString(key: String): String = prefs.getString(key, "") ?: ""
+    fun putString(key: String, value: String) { prefs.edit().putString(key, value).apply() }
+
+    var lastSyncAttemptTimestamp: Long
+        get() = prefs.getLong("last_sync_attempt_ts", 0L)
+        set(value) = prefs.edit().putLong("last_sync_attempt_ts", value).apply()
+
     fun shouldRunAutoDeltaSync(): Boolean {
+        val now = System.currentTimeMillis()
         val last = lastFullSyncTimestamp
+        val attemptHours = (now - lastSyncAttemptTimestamp) / (1000L * 60 * 60)
+        // A refresh that was started recently is not started again (it was probably cut short; saved titles are kept)
+        if (lastSyncAttemptTimestamp != 0L && attemptHours < 3) return false
         if (last == 0L) return true
-        val elapsedHours = (System.currentTimeMillis() - last) / (1000L * 60 * 60)
+        val elapsedHours = (now - last) / (1000L * 60 * 60)
         // Enforce 24-hour interval so we never bother the IPTV server unnecessarily
         return elapsedHours >= 24
     }
