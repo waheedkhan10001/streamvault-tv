@@ -48,7 +48,7 @@ async function newApp(browser, { empty = false } = {}) {
   return page;
 }
 const press = async (page, key, n = 1, gap = 90) => { for (let i = 0; i < n; i++) { await page.keyboard.press(key); await sleep(gap); } };
-const activeKey = page => page.evaluate(() => { const a = document.activeElement; return a ? (a.id || (a.getAttribute('onclick') || '').slice(0, 40) || a.className.split(' ')[0]) : 'none'; });
+const activeKey = page => page.evaluate(() => { const a = document.activeElement; return a ? (a.id || a.getAttribute('data-dedup-key') || (a.getAttribute('onclick') || '').slice(0, 40) || a.className.split(' ')[0]) : 'none'; });
 
 async function run() {
   console.log('=== StreamVault TV — round 7 ===\n');

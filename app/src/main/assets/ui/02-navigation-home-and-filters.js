@@ -200,25 +200,26 @@ async function loadHome(vp, navSeq) {
 
   let htmlStr = '';
   if (hero) {
-    const backdrop = hero.backdropUrl || hero.posterUrl || '';
+    const backdrop = safeUrl(hero.backdropUrl || hero.posterUrl || '');
     const ratingDisplay = hero.rating > 0 ? `${ratingStar(hero)} ${ratingText(hero)}` : '';
+    const bgStyle = backdrop ? `background-image:url('${backdrop}');` : '';
     htmlStr += `
-      <div class="hero" style="background-image:url('${backdrop}');">
+      <div class="hero" style="${bgStyle}">
         <div class="hero-content">
           <div class="hero-title">${escapeHtml(hero.cleanTitle)}</div>
           <div class="hero-meta">
             ${ratingDisplay ? `<span class="badge-rating">${ratingDisplay}</span>` : ''}
-            <span class="badge-quality">${(hero.qualityBadges || ['HD'])[0]}</span>
-            <span class="badge-language">${hero.language || 'English'}</span>
-            <span style="color:#9CA3AF;font-weight:700;">${hero.year || ''}</span>
+            <span class="badge-quality">${escapeHtml((hero.qualityBadges || ['HD'])[0])}</span>
+            <span class="badge-language">${escapeHtml(hero.language || 'English')}</span>
+            <span style="color:#9CA3AF;font-weight:700;">${escapeHtml(hero.year || '')}</span>
             <div style="display:flex;gap:4px;">
               ${(hero.genres || []).filter(g => g && g.replace(/[\.\s…\-–—\|]/g, '').length > 0 && g !== '…' && g !== '...').slice(0, 3).map((g) => `<span class="badge-genre">${escapeHtml(g)}</span>`).join('')}
             </div>
           </div>
           <div class="hero-plot">${escapeHtml(hero.plot || 'No synopsis available.')}</div>
           <div class="hero-actions">
-            <button tabindex="0" class="btn btn-primary tv-focusable" onclick="playHeroMovie('${hero.dedupKey}')">Play Movie</button>
-            <button tabindex="0" class="btn tv-focusable" onclick="openDetailModal('${hero.dedupKey}')">More Info</button>
+            <button tabindex="0" class="btn btn-primary tv-focusable js-hero-play" data-dedup-key="${escapeHtml(hero.dedupKey)}">Play Movie</button>
+            <button tabindex="0" class="btn tv-focusable js-open-detail" data-dedup-key="${escapeHtml(hero.dedupKey)}">More Info</button>
           </div>
         </div>
       </div>
@@ -232,11 +233,11 @@ async function loadHome(vp, navSeq) {
           <div class="row-title">${escapeHtml(row.title)}</div>
         </div>
         <div class="row-strip-wrapper">
-          <button class="chevron-btn chevron-left" onclick="scrollRow('rowStrip_${rIdx}', -700)">‹</button>
+          <button class="chevron-btn chevron-left js-scroll-row" data-scroll-target="rowStrip_${rIdx}" data-scroll-delta="-700">‹</button>
           <div class="poster-strip" id="rowStrip_${rIdx}">
             ${(row.items || []).map((m) => renderPosterCard(m)).join('')}
           </div>
-          <button class="chevron-btn chevron-right" onclick="scrollRow('rowStrip_${rIdx}', 700)">›</button>
+          <button class="chevron-btn chevron-right js-scroll-row" data-scroll-target="rowStrip_${rIdx}" data-scroll-delta="700">›</button>
         </div>
       </div>
     `;
@@ -276,18 +277,19 @@ function renderPosterCard(m) {
   const hasProgress = (!isWatched && m.resumePositionMs > 30000 && m.durationMs > 0);
   const progressPct = hasProgress ? Math.min(100, Math.max(5, Math.round((m.resumePositionMs / m.durationMs) * 100))) : 0;
 
+  const posterHref = safeUrl(m.posterUrl);
   return `
-    <div tabindex="0" class="poster-card tv-focusable ${isSeries ? 'is-series' : ''}" onfocus="playNavSound()" onclick="openDetailModal('${m.dedupKey}')">
+    <div tabindex="0" class="poster-card tv-focusable ${isSeries ? 'is-series' : ''}" data-dedup-key="${escapeHtml(m.dedupKey)}" onfocus="playNavSound()">
       <div class="poster-img-wrap">
-        ${m.posterUrl
-          ? `<img src="${m.posterUrl}" loading="lazy" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+        ${posterHref
+          ? `<img src="${posterHref}" loading="lazy" decoding="async" data-fallback-next="1" />
              <div class="poster-placeholder" style="display:none;">${escapeHtml(m.cleanTitle)}</div>`
           : `<div class="poster-placeholder">${escapeHtml(m.cleanTitle)}</div>`}
         ${ratingStr ? `<div class="card-top-left">${ratingStr}</div>` : ''}
         <div class="card-top-right">
           ${isWatched ? `<span class="badge-watched">Watched</span>` : ''}
           ${m.isAdult ? `<span class="badge-adult" style="background:#DC2626;color:#fff;font-size:10px;font-weight:900;padding:2px 6px;border-radius:4px;letter-spacing:0.5px;">18+</span>` : ''}
-          <span class="badge-quality">${quality}</span>
+          <span class="badge-quality">${escapeHtml(quality)}</span>
         </div>
         ${m.matchReason ? `<div class="card-match-banner">${escapeHtml(m.matchReason)}</div>` : ''}
         ${hasProgress ? `
@@ -296,11 +298,11 @@ function renderPosterCard(m) {
           </div>
         ` : ''}
         <div class="card-bottom-strip">
-          ${yearStr ? `<span class="card-year-tag">${yearStr}</span>` : '<span></span>'}
+          ${yearStr ? `<span class="card-year-tag">${escapeHtml(yearStr)}</span>` : '<span></span>'}
           ${m.isAdult ? `
             <span class="badge-adult-pill" style="background:rgba(220,38,38,0.3);color:#FCA5A5;border:1px solid rgba(220,38,38,0.5);font-size:8.5px;font-weight:900;padding:1px 5px;border-radius:3px;">18+ VAULT</span>
           ` : isSeries ? `
-            <span class="badge-series" style="font-size:8.5px;padding:1px 5px;font-weight:900;">${seriesTag || 'SERIES'}</span>
+            <span class="badge-series" style="font-size:8.5px;padding:1px 5px;font-weight:900;">${escapeHtml(seriesTag || 'SERIES')}</span>
           ` : `
             <span class="badge-movie" style="font-size:8.5px;padding:1px 5px;font-weight:900;">MOVIE</span>
           `}
@@ -308,7 +310,7 @@ function renderPosterCard(m) {
       </div>
       <div class="card-title">${escapeHtml(m.cleanTitle)}</div>
       <div class="card-meta">
-        ${(m.genres || []).slice(0, 2).map((g) => `<span class="badge-genre">${g}</span>`).join(' ')}
+        ${(m.genres || []).slice(0, 2).map((g) => `<span class="badge-genre">${escapeHtml(g)}</span>`).join(' ')}
       </div>
     </div>
   `;
@@ -355,8 +357,8 @@ function loadSuperFilter(vp, titleOverride = 'Search') {
             <div class="filter-floating-dropdown" id="dropAdultCat">
               <div tabindex="0" class="dropdown-option tv-focusable ${!filterState.categoryFilter ? 'selected' : ''}" onclick="selectFilterAdultCategory('')" onfocus="playNavSound()">All Studios / Categories</div>
               ${ADULT_CATEGORIES.map((c) => `
-                <div tabindex="0" class="dropdown-option tv-focusable ${filterState.categoryFilter === c ? 'selected' : ''}" onclick="selectFilterAdultCategory('${c}')" onfocus="playNavSound()">
-                  <span>${c}</span>
+                <div tabindex="0" class="dropdown-option tv-focusable js-filter-opt ${filterState.categoryFilter === c ? 'selected' : ''}" data-filter-kind="adultCat" data-filter-val="${escapeHtml(c)}" onfocus="playNavSound()">
+                  <span>${escapeHtml(c)}</span>
                   ${filterState.categoryFilter === c ? '<span>✓</span>' : ''}
                 </div>
               `).join('')}
@@ -422,8 +424,8 @@ function loadSuperFilter(vp, titleOverride = 'Search') {
             <div class="filter-floating-dropdown" id="dropGenre">
               <div tabindex="0" class="dropdown-option tv-focusable ${filterState.includedGenres.length === 0 ? 'selected' : ''}" onclick="selectFilterGenre('')" onfocus="playNavSound()">All Genres</div>
               ${ALL_GENRES.map((g) => `
-                <div tabindex="0" class="dropdown-option tv-focusable ${filterState.includedGenres.includes(g) ? 'selected' : ''}" onclick="selectFilterGenre('${g}')" onfocus="playNavSound()">
-                  <span>${g}</span>
+                <div tabindex="0" class="dropdown-option tv-focusable js-filter-opt ${filterState.includedGenres.includes(g) ? 'selected' : ''}" data-filter-kind="genre" data-filter-val="${escapeHtml(g)}" onfocus="playNavSound()">
+                  <span>${escapeHtml(g)}</span>
                   ${filterState.includedGenres.includes(g) ? '<span>✓</span>' : ''}
                 </div>
               `).join('')}
@@ -454,8 +456,8 @@ function loadSuperFilter(vp, titleOverride = 'Search') {
             <div class="filter-floating-dropdown" id="dropLang">
               <div tabindex="0" class="dropdown-option tv-focusable ${filterState.selectedLanguages.length === 0 ? 'selected' : ''}" onclick="selectFilterLang('')" onfocus="playNavSound()">All Languages</div>
               ${ALL_LANGS.map((l) => `
-                <div tabindex="0" class="dropdown-option tv-focusable ${filterState.selectedLanguages.includes(l) ? 'selected' : ''}" onclick="selectFilterLang('${l}')" onfocus="playNavSound()">
-                  <span>${l}</span>
+                <div tabindex="0" class="dropdown-option tv-focusable js-filter-opt ${filterState.selectedLanguages.includes(l) ? 'selected' : ''}" data-filter-kind="lang" data-filter-val="${escapeHtml(l)}" onfocus="playNavSound()">
+                  <span>${escapeHtml(l)}</span>
                   ${filterState.selectedLanguages.includes(l) ? '<span>✓</span>' : ''}
                 </div>
               `).join('')}

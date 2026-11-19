@@ -152,8 +152,10 @@ async function run() {
     assert.equal(evilCors.headers.get('Access-Control-Allow-Origin'), null, 'SEC-14: untrusted origin never reflected');
     assert.equal(evilCors.headers.get('Cache-Control'), 'no-store');
 
-    const badTmdb = await call(env, 'GET', '/api/tmdb/../account/secrets', { token: user.token });
-    assert.equal(badTmdb.status, 400, 'SEC-14: TMDB path traversal rejected');
+    const badTmdb = await call(env, 'GET', '/api/tmdb/%2e%2e/account/secrets', { token: user.token });
+    assert.equal(badTmdb.status, 400, 'SEC-14: encoded TMDB path traversal rejected');
+    const badTmdbRoute = await call(env, 'GET', '/api/tmdb/account/secrets', { token: user.token });
+    assert.equal(badTmdbRoute.status, 400, 'SEC-14: non-allowlisted TMDB subpath rejected');
 
     const badJsonType = await call(env, 'POST', '/api/auth/signup', { body: { email: 123, password: 'Password1!' } });
     assert.equal(badJsonType.status, 400, 'SEC-15: non-string JSON returns 400 not 500');

@@ -1,14 +1,29 @@
 // Smart Universal Network Routing for Cloud and Native Standalone TV
 const CLOUD_SYNC_BASE = 'https://streamvault-sync.streamvault-app.workers.dev';
 
+window.safeUrl = function(u) {
+  const s = String(u == null ? '' : u).trim();
+  if (!s || /["'<>\s\u0000-\u001F]/.test(s)) return '';
+  if (/^https?:\/\//i.test(s) || s.startsWith('/api/')) return s;
+  return '';
+};
+window.safeColor = function(c, fallback) {
+  const s = String(c == null ? '' : c).trim();
+  if (/^#[0-9a-fA-F]{3,8}$/.test(s) || s === 'var(--theme-accent)') return s;
+  return fallback || '#7C3AED';
+};
+
 window.__svApiSeq = 0;
 window.__svApiPending = {};
 window.__svApiDone = function (id, res) { const f = window.__svApiPending[id]; if (f) { delete window.__svApiPending[id]; f(res); } };
 const _rawFetch = window.fetch.bind(window);
 window.fetch = function(input, init) {
   const token = localStorage.getItem('sv_auth_token') || '';
-  const headers = Object.assign({}, (init && init.headers) || {});
-  if (token && !headers['Authorization'] && !headers['authorization']) {
+  const headers = (init && typeof Headers !== 'undefined' && init.headers instanceof Headers)
+    ? Object.fromEntries(init.headers.entries())
+    : Object.assign({}, (init && init.headers) || {});
+  const isTrustedApi = typeof input === 'string' && (input.startsWith('/api/') || input.startsWith(CLOUD_SYNC_BASE + '/'));
+  if (isTrustedApi && token && !headers['Authorization'] && !headers['authorization']) {
     headers['Authorization'] = 'Bearer ' + token;
   }
   const newInit = Object.assign({}, init, { headers });
@@ -354,7 +369,7 @@ async function validateSessionInBackground(token) {
     });
     if (res.status === 401) {
       console.warn('[Auth] Session invalidated by server (401)');
-      await confirmSignOutAccount();
+      await confirmSignOutAccount(true);
     } else if (res.ok) {
       const data = await res.json();
       if (data && data.account) {
@@ -508,6 +523,8 @@ async function handleSuccessfulAuth(data) {
   };
   localStorage.setItem('streamvault_account', JSON.stringify(accountObj));
 
+  await syncSessionToNative(data.token);
+
   if (data.pinHash) {
     try {
       await fetch('/api/parental-pin', {
@@ -517,8 +534,6 @@ async function handleSuccessfulAuth(data) {
       }).catch(() => {});
     } catch (_) {}
   }
-
-  await syncSessionToNative(data.token);
   closeCloudAuthModal();
   hideWelcomeScreen();
   showToast('✓ Welcome back! Cloud sync active.');
@@ -541,7 +556,7 @@ function showProfilePicker(profiles, onSelect) {
     const color = p.avatarColor || '#7C3AED';
     return `
       <div tabindex="0" class="profile-picker-card tv-focusable" data-profile-id="${escapeHtml(p.id)}" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 20px;border-radius:14px;background:#151028;border:2px solid ${isSelected ? 'var(--theme-border)' : '#281F48'};cursor:pointer;min-width:130px;transition:transform 0.2s, border-color 0.2s;">
-        <div style="width:72px;height:72px;border-radius:50%;background:${escapeHtml(color)};display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:32px;font-weight:900;box-shadow:0 6px 18px rgba(0,0,0,0.6);">
+        <div style="width:72px;height:72px;border-radius:50%;background:${safeColor(color, '#7C3AED')};display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:32px;font-weight:900;box-shadow:0 6px 18px rgba(0,0,0,0.6);">
           ${escapeHtml(initial)}
         </div>
         <div style="font-size:15px;font-weight:800;color:#FFFFFF;text-align:center;">
@@ -702,7 +717,7 @@ function latestLiveCards(items) {
             </div>
           </div>
         </div>
-        <button tabindex="0" class="btn btn-primary tv-focusable" style="padding:7px 14px;font-size:12px;" onclick="startLivePlayback('${ch.streamId}', '${escapeHtml(ch.name)}')">Watch</button>
+        <button tabindex="0" class="btn btn-primary tv-focusable js-live-play" style="padding:7px 14px;font-size:12px;" data-stream-id="${escapeHtml(ch.streamId)}" data-ch-name="${escapeHtml(ch.name)}">Watch</button>
       </div>`).join('')}</div>`;
 }
 
@@ -907,11 +922,10 @@ function renderSidebar(lockedToPlaylist = false) {
       const disabledAttr = isLocked ? 'style="opacity:0.35;pointer-events:none;"' : '';
       return `
       <div tabindex="${isLocked ? '-1' : '0'}" class="nav-btn tv-focusable ${currentTab === item.id ? 'active' : ''}"
-           data-tab="${item.id}"
+           data-tab="${escapeHtml(item.id)}"
            ${disabledAttr}
-           onclick="navigateToTab('${item.id}')"
            onfocus="playNavSound()"
-           title="${item.label}">
+           title="${escapeHtml(item.label)}">
         <div class="nav-icon">${item.svg}</div>
         <span class="nav-label">${item.label}</span>
       </div>
@@ -1008,4 +1022,112 @@ async function ensurePackReady() {
     render(st);
   }
   box.remove();
+}
+
+
+// Centralized delegated event handlers (eliminates interpolated inline JS strings on dynamic UI cards/buttons)
+if (typeof document !== 'undefined' && !window.__svDelegatedUiBound) {
+  window.__svDelegatedUiBound = true;
+  document.addEventListener('error', function(e) {
+    const t = e.target;
+    if (!t || t.tagName !== 'IMG') return;
+    if (t.dataset.fallbackNext === '1') {
+      t.style.display = 'none';
+      if (t.nextElementSibling) t.nextElementSibling.style.display = 'flex';
+    } else if (t.dataset.fallbackHide === '1') {
+      t.style.display = 'none';
+    }
+  }, true);
+
+  document.addEventListener('click', function(e) {
+    const target = e.target && e.target.closest ? e.target : null;
+    if (!target) return;
+
+    const navBtn = target.closest('.nav-btn[data-tab]');
+    if (navBtn) { navigateToTab(navBtn.getAttribute('data-tab')); return; }
+
+    const scrollBtn = target.closest('.js-scroll-row');
+    if (scrollBtn) { scrollRow(scrollBtn.dataset.scrollTarget, Number(scrollBtn.dataset.scrollDelta || 0)); return; }
+
+    const heroPlay = target.closest('.js-hero-play');
+    if (heroPlay) { playHeroMovie(heroPlay.dataset.dedupKey); return; }
+
+    const openDetailBtn = target.closest('.js-open-detail');
+    if (openDetailBtn) { openDetailModal(openDetailBtn.dataset.dedupKey); return; }
+
+    const posterCard = target.closest('.poster-card[data-dedup-key]');
+    if (posterCard) {
+      const dk = posterCard.dataset.dedupKey;
+      if (posterCard.classList.contains('show-more-card')) openFullMltCatalog(dk);
+      else openDetailModal(dk);
+      return;
+    }
+
+    const filterOpt = target.closest('.js-filter-opt');
+    if (filterOpt) {
+      const kind = filterOpt.dataset.filterKind;
+      const val = filterOpt.dataset.filterVal || '';
+      if (kind === 'adultCat') selectFilterAdultCategory(val);
+      else if (kind === 'genre') selectFilterGenre(val);
+      else if (kind === 'lang') selectFilterLang(val);
+      return;
+    }
+
+    const liveTab = target.closest('.js-live-tab');
+    if (liveTab) { selectLiveTab(liveTab.dataset.tabId); return; }
+
+    const livePlay = target.closest('.js-live-play');
+    if (livePlay) { startLivePlayback(livePlay.dataset.streamId, livePlay.dataset.chName || ''); return; }
+
+    const profSwitch = target.closest('.js-profile-switch');
+    if (profSwitch) { switchUserProfile(profSwitch.dataset.profileId); return; }
+
+    const plEdit = target.closest('.js-playlist-edit');
+    if (plEdit) { openEditPlaylistModal(plEdit.dataset.playlistId); return; }
+
+    const plDel = target.closest('.js-playlist-del');
+    if (plDel) { deletePlaylist(plDel.dataset.playlistId); return; }
+
+    const detPlay = target.closest('.js-detail-play');
+    if (detPlay) {
+      startMoviePlayback(
+        detPlay.dataset.dedupKey,
+        Number(detPlay.dataset.verIdx || 0),
+        Number(detPlay.dataset.startMs || 0),
+        detPlay.dataset.epId || null
+      );
+      return;
+    }
+
+    const epCard = target.closest('.episode-card[data-ep-id]');
+    if (epCard) { startMoviePlayback(epCard.dataset.dedupKey, 0, 0, epCard.dataset.epId); return; }
+
+    const wlBtn = target.closest('.js-detail-watchlist');
+    if (wlBtn) { toggleWatchlist(wlBtn.dataset.dedupKey); return; }
+
+    const watchedBtn = target.closest('.js-detail-watched');
+    if (watchedBtn) { toggleWatchedCoupled(watchedBtn.dataset.dedupKey); return; }
+
+    const starBtn = target.closest('.js-detail-star');
+    if (starBtn) { toggleUserRating(starBtn.dataset.dedupKey, Number(starBtn.dataset.star || 1)); return; }
+
+    const detTab = target.closest('.js-detail-tab');
+    if (detTab) { switchDetailLowerTab(detTab.dataset.detailTab); return; }
+
+    const sPill = target.closest('.season-pill[data-season]');
+    if (sPill) { selectSeriesSeason(Number(sPill.dataset.season || 1)); return; }
+
+    const mltChip = target.closest('.js-mlt-chip');
+    if (mltChip) { changeMltMode(mltChip.dataset.dedupKey, mltChip.dataset.mode); return; }
+
+    const mltHide = target.closest('.js-mlt-hide-watched');
+    if (mltHide) { toggleMltHideWatched(mltHide.dataset.dedupKey); return; }
+
+    const sugg = target.closest('.search-suggestion-item');
+    if (sugg) {
+      if (sugg.classList.contains('is-history') && typeof historyLongPressTriggered !== 'undefined' && historyLongPressTriggered) return;
+      applySearchSuggestion(sugg.dataset.query || '');
+      return;
+    }
+  });
 }

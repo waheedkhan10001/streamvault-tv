@@ -48,13 +48,13 @@ async function playHeroMovie(dedupKey) {
 
 // The TV engine builds the playable address (the IPTV password never reaches this screen).
 // Returns the address, or '' after showing a clear message when it cannot be built.
-async function resolveStreamUrl(kind, id, ext, announce) {
+async function resolveStreamUrl(kind, id, ext, announce, dedupKey = '') {
   let reply = null;
   try {
     const res = await fetch('/api/stream-url', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: kind, id: String(id == null ? '' : id), ext: ext || '' })
+      body: JSON.stringify({ kind: kind, id: String(id == null ? '' : id), ext: ext || '', dedupKey: dedupKey || '' })
     });
     reply = await res.json();
   } catch (_) {}
@@ -108,7 +108,7 @@ async function startMoviePlayback(dedupKey, verIdx = 0, startOffsetMs = 0, episo
     }
   }
 
-  const directUrl = await resolveStreamUrl(typePart, streamId, ext, true);
+  const directUrl = await resolveStreamUrl(typePart, streamId, ext, true, item.dedupKey);
   if (!directUrl) return;
   const movieDurationMs = (item.runtimeMins && item.runtimeMins > 0) ? (item.runtimeMins * 60 * 1000) : (item.durationMs > 0 ? item.durationMs : 0);
 
@@ -458,7 +458,7 @@ async function renderSearchSuggestions(query = '', autoChips = []) {
       </div>
       <div class="search-suggestions-list" id="searchSuggestionsList">
         ${recentItems.map(item => `
-          <div tabindex="0" class="search-suggestion-item is-history tv-focusable" data-query="${escapeHtml(item)}" onclick="if(!historyLongPressTriggered) applySearchSuggestion('${escapeHtml(item)}')" onfocus="playNavSound()">
+          <div tabindex="0" class="search-suggestion-item is-history tv-focusable" data-query="${escapeHtml(item)}" onfocus="playNavSound()">
             <div class="suggestion-left">
               <span class="suggestion-icon" style="color:var(--theme-border);">🕒</span>
               <span>${escapeHtml(item)}</span>
@@ -492,7 +492,7 @@ async function renderSearchSuggestions(query = '', autoChips = []) {
 
   matchingHistory.forEach(item => {
     html += `
-      <div tabindex="0" class="search-suggestion-item is-history tv-focusable" data-query="${escapeHtml(item)}" onclick="if(!historyLongPressTriggered) applySearchSuggestion('${escapeHtml(item)}')" onfocus="playNavSound()">
+      <div tabindex="0" class="search-suggestion-item is-history tv-focusable" data-query="${escapeHtml(item)}" onfocus="playNavSound()">
         <div class="suggestion-left">
           <span class="suggestion-icon" style="color:var(--theme-border);">🕒</span>
           <span>${escapeHtml(item)}</span>
@@ -504,7 +504,7 @@ async function renderSearchSuggestions(query = '', autoChips = []) {
 
   cleanChips.forEach(chip => {
     html += `
-      <div tabindex="0" class="search-suggestion-item tv-focusable" data-query="${escapeHtml(chip)}" onclick="applySearchSuggestion('${escapeHtml(chip)}')" onfocus="playNavSound()">
+      <div tabindex="0" class="search-suggestion-item tv-focusable" data-query="${escapeHtml(chip)}" onfocus="playNavSound()">
         <div class="suggestion-left">
           <span class="suggestion-icon" style="color:#9CA3AF;">🔍</span>
           <span>${escapeHtml(chip)}</span>
@@ -783,7 +783,12 @@ function updatePinDots() {
 
 async function verifyParentalPin() {
   try {
-    const isDisableKids = parentalPinContext && parentalPinContext.action === 'disable_kids';
+    if (!/^\d{4}$/.test(enteredPin)) {
+      document.getElementById('pinErrorMessage').innerText = 'PIN must be 4 numeric digits';
+      setTimeout(clearPin, 500);
+      return;
+    }
+    const isCallbackAction = parentalPinContext && (parentalPinContext.action === 'disable_kids' || parentalPinContext.action === 'verify_only');
 
     if (isCreatingPinMode) {
       const res = await fetch('/api/parental-pin', {
@@ -798,7 +803,7 @@ async function verifyParentalPin() {
         isCreatingPinMode = false;
         const pinUsed = enteredPin;
         closeParentalPinModal();
-        if (isDisableKids) {
+        if (isCallbackAction) {
           if (typeof parentalPinContext.onComplete === 'function') {
             parentalPinContext.onComplete(pinUsed);
           }
@@ -827,7 +832,7 @@ async function verifyParentalPin() {
       }
     }
 
-    const actionParam = isDisableKids ? 'verify' : 'unlock';
+    const actionParam = isCallbackAction ? 'verify' : 'unlock';
     const res = await fetch('/api/parental-pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -837,7 +842,7 @@ async function verifyParentalPin() {
     if (d.success || d.ok) {
       const pinUsed = enteredPin;
       closeParentalPinModal();
-      if (isDisableKids) {
+      if (isCallbackAction) {
         if (typeof parentalPinContext.onComplete === 'function') {
           parentalPinContext.onComplete(pinUsed);
         }

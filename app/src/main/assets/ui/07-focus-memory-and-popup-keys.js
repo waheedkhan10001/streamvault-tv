@@ -50,7 +50,7 @@ async function submitResetPin() {
     if (errLbl) errLbl.innerText = 'The email code is exactly 6 digits';
     return;
   }
-  if (newPin.length !== 4 || isNaN(newPin)) {
+  if (!/^\d{4}$/.test(newPin)) {
     if (errLbl) errLbl.innerText = 'New PIN must be exactly 4 numeric digits';
     return;
   }
@@ -237,6 +237,8 @@ let navKeyCounter = 0;
 function focusKeyOf(el) {
   if (!el) return null;
   if (el.id) return '#' + el.id;
+  const dk = el.getAttribute && el.getAttribute('data-dedup-key');
+  if (dk) return 'dk:' + dk;
   const oc = el.getAttribute && el.getAttribute('onclick');
   return oc ? 'o:' + oc : null;
 }
