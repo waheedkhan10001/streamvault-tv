@@ -79,7 +79,7 @@ async function call(env, method, route, { token, body, ip } = {}) {
 }
 
 const clearLimits = (db) => db.sqlite.exec('DELETE FROM rate_limits');
-const nativeHash = (pin, salt) => crypto.createHash('sha256').update(`${pin}:${salt}`, 'utf8').digest('hex');
+const nativeHash = (pin, salt) => 'pbkdf2_sha256$100000$' + crypto.pbkdf2Sync(String(pin), String(salt), 100000, 32, 'sha256').toString('hex');
 
 // sign up + verify an account through the real routes; returns { token, accountId, email }
 async function makeAccount(env, db, email, password = 'AccountPass123!') {
@@ -116,7 +116,7 @@ async function run() {
               INSERT INTO accounts VALUES ('a1','keep@me.com','h',1,1,1);`);
     const dir = path.join(ROOT, 'cloud-sync/migrations');
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
-    assert.equal(files.length, 4, 'four migration files');
+    assert.equal(files.length, 5, 'five migration files');
     for (const f of files) old.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
     const oldCols = old.prepare('PRAGMA table_info(accounts)').all().map(c => c.name);
     assert.ok(oldCols.includes('pin_hash') && oldCols.includes('pin_salt'), 'migrated DB has both PIN columns');
@@ -224,9 +224,8 @@ async function run() {
     db.sqlite.prepare('INSERT INTO sessions (session_id, account_id, token_hash, expires_at, created_at) VALUES (?,?,?,?,?)')
       .run('s_unver', accId, crypto.createHash('sha256').update(unverToken).digest('hex'), Date.now() + 1e6, Date.now());
     const un = await call(env, 'POST', '/api/account/request-pin-reset', { token: unverToken, body: {} });
-    assert.equal(un.status, 400);
-    assert.match(un.json.error, /verify your email/i);
-    pass('request-pin-reset: session required, code only to own email, purpose-isolated, single live code, per-IP + per-account limits, unverified refused.');
+    assert.equal(un.status, 401);
+    pass('request-pin-reset: verified session required, code only to own email, purpose-isolated, single live code, per-IP + per-account limits, unverified refused.');
   }
 
   // ---- 5. reset-pin with the emailed code: attempts counted & locked ----------
@@ -415,8 +414,8 @@ async function run() {
     pass('Login restores hash + salt; PIN verifies on a second device; /api/auth/me does not leak it.');
   }
 
-  // ---- 9. fail-closed vs fail-open when the limiter table is missing ----------
-  console.log('[Test 9] If rate_limits is missing: PIN routes fail CLOSED (503), login stays open...');
+  // ---- 9. fail-closed when the limiter table is missing ----------
+  console.log('[Test 9] If rate_limits is missing: auth & PIN routes fail CLOSED (503)...');
   {
     const { db, env } = newEnv();
     const a = await makeAccount(env, db, 'broken@test.com');
@@ -428,8 +427,8 @@ async function run() {
     const s3 = await call(env, 'POST', '/api/account/request-pin-reset', { token: a.token, body: {} });
     assert.equal(s3.status, 503);
     const login = await call(env, 'POST', '/api/auth/login', { body: { email: a.email, password: a.password } });
-    assert.equal(login.status, 200, 'existing fail-open behaviour for login is unchanged');
-    pass('Missing migration is caught loudly on PIN routes (503) instead of silently disabling protection.');
+    assert.equal(login.status, 503, 'login also fails closed (503) when rate_limits is broken');
+    pass('Missing rate_limits fails closed loudly across PIN and auth routes (503).');
   }
 
   // ---- 10. verification codes are still 6 digits and verify flow intact -------

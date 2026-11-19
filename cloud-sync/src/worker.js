@@ -12,40 +12,27 @@ async function rateLimit(db, key, maxRequests, windowSeconds, consume = true) {
   if (!db) return 'error';
   const now = Date.now();
   try {
-    const record = await db.prepare(
-      `SELECT count, reset_at FROM rate_limits WHERE key = ?`
-    ).bind(key).first();
-
-    if (!record || now > record.reset_at) {
-      if (!consume) return 'ok';
-      const resetAt = now + windowSeconds * 1000;
-      await db.prepare(
-        `INSERT INTO rate_limits (key, count, reset_at) VALUES (?, 1, ?)
-         ON CONFLICT(key) DO UPDATE SET count = 1, reset_at = ?`
-      ).bind(key, resetAt, resetAt).run();
-      return 'ok';
+    if (!consume) {
+      const record = await db.prepare(
+        `SELECT count, reset_at FROM rate_limits WHERE key = ?`
+      ).bind(key).first();
+      if (!record || now > record.reset_at) return 'ok';
+      return record.count >= maxRequests ? 'limited' : 'ok';
     }
-
-    if (record.count >= maxRequests) {
-      return 'limited';
-    }
-
-    if (consume) {
-      await db.prepare(
-        `UPDATE rate_limits SET count = count + 1 WHERE key = ?`
-      ).bind(key).run();
-    }
+    const resetAt = now + windowSeconds * 1000;
+    const row = await db.prepare(
+      `INSERT INTO rate_limits (key, count, reset_at) VALUES (?, 1, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         count = CASE WHEN rate_limits.reset_at < ? THEN 1 ELSE rate_limits.count + 1 END,
+         reset_at = CASE WHEN rate_limits.reset_at < ? THEN ? ELSE rate_limits.reset_at END
+       RETURNING count`
+    ).bind(key, resetAt, now, now, resetAt).first();
+    if (row && row.count > maxRequests) return 'limited';
     return 'ok';
   } catch (err) {
     console.error('[RateLimit Error]', err);
     return 'error';
   }
-}
-
-// Standard limiter used by the sign-up / login / verify routes.
-// Fails OPEN: if the rate_limits table is unavailable the request is allowed.
-async function checkRateLimit(db, key, maxRequests = 15, windowSeconds = 60) {
-  return (await rateLimit(db, key, maxRequests, windowSeconds)) !== 'limited';
 }
 
 // Strict limiter used on every PIN / password-guessable route.
@@ -78,12 +65,19 @@ function generateSixDigitCode() {
   return String(100000 + (buf[0] % 900000));
 }
 
-function safeEqual(a, b) {
-  const x = String(a);
-  const y = String(b);
-  if (x.length !== y.length) return false;
+async function safeEqualAsync(a, b) {
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(String(a ?? ''))),
+    crypto.subtle.digest('SHA-256', enc.encode(String(b ?? '')))
+  ]);
+  if (typeof crypto.subtle.timingSafeEqual === 'function') {
+    return crypto.subtle.timingSafeEqual(da, db);
+  }
+  const ua = new Uint8Array(da);
+  const ub = new Uint8Array(db);
   let diff = 0;
-  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  for (let i = 0; i < ua.length; i++) diff |= ua[i] ^ ub[i];
   return diff === 0;
 }
 
@@ -93,28 +87,131 @@ function maskEmail(email) {
   return `${name.slice(0, 1)}***@${domain}`;
 }
 
-// The TV app stores the Master PIN as SHA-256("<pin>:<salt>") in lowercase hex
-// (see PreferencesManager.hashPin). The Worker uses the identical scheme so a
-// PIN created on one TV verifies on another once hash AND salt are restored.
+// PBKDF2-HMAC-SHA256 Master PIN scheme (with legacy 64-hex SHA-256 read compatibility)
 const PIN_RE = /^\d{4}$/;
-const PIN_HASH_RE = /^[0-9a-f]{64}$/;
+const PIN_HASH_RE = /^(?:[0-9a-f]{64}|pbkdf2_sha256\$(?:10000|[1-9]\d{4,5})\$[0-9a-f]{64})$/;
 const PIN_SALT_RE = /^[A-Za-z0-9-]{8,64}$/;
 
-async function hashPinWithSalt(pin, salt) {
-  return sha256(`${pin}:${salt}`);
+async function hashPinWithSalt(pin, salt, iterations = 100000) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(String(pin)), 'PBKDF2', false, ['deriveBits']);
+  const derived = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode(String(salt)), iterations, hash: 'SHA-256' },
+    keyMaterial,
+    256
+  );
+  return `pbkdf2_sha256$${iterations}$${bytesToHex(derived)}`;
 }
 
-// Security: Standard CORS Headers
-function getCorsHeaders(request) {
-  const origin = request.headers.get('Origin') || '*';
-  return {
-    'Access-Control-Allow-Origin': origin,
+async function verifyPinAgainstHash(pin, salt, storedHash) {
+  const cleanPin = String(pin || '').trim();
+  if (!PIN_RE.test(cleanPin) || !salt || !storedHash) return false;
+  if (storedHash.startsWith('pbkdf2_sha256$')) {
+    const parts = storedHash.split('$');
+    if (parts.length !== 3) return false;
+    const iters = parseInt(parts[1], 10);
+    if (!Number.isInteger(iters) || iters < 10000 || iters > 500000) return false;
+    const actual = await hashPinWithSalt(cleanPin, salt, iters);
+    return await safeEqualAsync(actual, storedHash);
+  }
+  const legacy = await sha256(`${cleanPin}:${salt}`);
+  return await safeEqualAsync(legacy, storedHash);
+}
+
+// Allowlisted CORS Headers (never reflects untrusted origins)
+function isAllowedOrigin(origin, request, env) {
+  if (!origin) return false;
+  const reqOrigin = new URL(request.url).origin;
+  if (origin === reqOrigin || origin === 'https://streamvault-sync.streamvault-app.workers.dev') return true;
+  if (origin === 'null') return true; // Android WebView file:///android_asset/ origin
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(origin)) return true;
+  const extra = env && env.ALLOWED_ORIGINS ? String(env.ALLOWED_ORIGINS).split(',').map(s => s.trim()).filter(Boolean) : [];
+  return extra.includes(origin);
+}
+
+function getCorsHeaders(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-Poll-Secret',
     'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
     'Content-Type': 'application/json'
   };
+  if (isAllowedOrigin(origin, request, env)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
+  return headers;
 }
+
+function noStoreHeaders(corsHeaders) {
+  return { ...corsHeaders, 'Cache-Control': 'no-store' };
+}
+
+function asStr(v, maxLen = 512) {
+  return typeof v === 'string' ? v.slice(0, maxLen) : '';
+}
+
+function isValidHttpUrl(raw) {
+  if (typeof raw !== 'string') return false;
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+async function readJsonBody(request, maxBytes, corsHeaders) {
+  const lenHdr = parseInt(request.headers.get('Content-Length') || '0', 10);
+  if (Number.isFinite(lenHdr) && lenHdr > maxBytes) {
+    return { error: errorResponse('Request body too large', 413, corsHeaders) };
+  }
+  const text = await request.text();
+  if (new TextEncoder().encode(text).length > maxBytes) {
+    return { error: errorResponse('Request body too large', 413, corsHeaders) };
+  }
+  if (!text.trim()) return { data: {} };
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { error: errorResponse('JSON object required', 400, corsHeaders) };
+    }
+    return { data: parsed };
+  } catch (_) {
+    return { error: errorResponse('Invalid JSON body', 400, corsHeaders) };
+  }
+}
+
+async function runBatch(db, stmts) {
+  if (!stmts || stmts.length === 0) return;
+  for (let i = 0; i < stmts.length; i += 50) {
+    const chunk = stmts.slice(i, i + 50);
+    if (typeof db.batch === 'function') {
+      await db.batch(chunk);
+    } else {
+      for (const s of chunk) await s.run();
+    }
+  }
+}
+
+const tmdbRateMap = new Map();
+function checkTmdbAccountLimit(accountId, maxPerMinute = 120) {
+  const now = Date.now();
+  if (tmdbRateMap.size > 2000) tmdbRateMap.clear();
+  const rec = tmdbRateMap.get(accountId);
+  if (!rec || now - rec.start > 60000) {
+    tmdbRateMap.set(accountId, { start: now, count: 1 });
+    return true;
+  }
+  if (rec.count >= maxPerMinute) return false;
+  rec.count++;
+  return true;
+}
+
+const VALID_SYNC_DATA_TYPES = new Set(['progress', 'watchlist', 'ratings', 'searches', 'settings', 'favorites', 'live_favorites']);
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const THEME_RE = /^[A-Za-z0-9 _-]{1,40}$/;
 
 function jsonResponse(data, status = 200, corsHeaders) {
   return new Response(JSON.stringify(data), {
@@ -205,7 +302,7 @@ async function verifyPassword(password, storedHash) {
       256
     );
     const actualHashHex = bytesToHex(derived);
-    return actualHashHex === expectedHashHex;
+    return await safeEqualAsync(actualHashHex, expectedHashHex);
   }
   // Legacy SHA-256 fallback migration
   if (parts.length === 2) {
@@ -213,7 +310,7 @@ async function verifyPassword(password, storedHash) {
     const expected = parts[1];
     const enc = new TextEncoder();
     const hashBuf = await crypto.subtle.digest('SHA-256', enc.encode(password + ':' + saltHex));
-    return bytesToHex(hashBuf) === expected;
+    return await safeEqualAsync(bytesToHex(hashBuf), expected);
   }
   return false;
 }
@@ -243,7 +340,8 @@ async function encryptData(plainText, env) {
 }
 
 async function decryptData(cipherString, env) {
-  if (!cipherString || !cipherString.includes(':')) return '';
+  if (!cipherString) return '';
+  if (!cipherString.includes(':')) throw new Error('Corrupt encrypted payload format');
   try {
     const [ivHex, cipherHex] = cipherString.split(':');
     const key = await getEncryptionKey(env);
@@ -253,8 +351,9 @@ async function decryptData(cipherString, env) {
       hexToBytes(cipherHex)
     );
     return new TextDecoder().decode(decrypted);
-  } catch (_) {
-    return '';
+  } catch (err) {
+    console.error('[DecryptError]', err && err.message ? err.message : err);
+    throw new Error('Decryption failed');
   }
 }
 
@@ -268,7 +367,7 @@ function generateSessionToken() {
 // Authentication Middleware (Bearer Session Token)
 // --------------------------------------------------------------------
 
-async function authenticate(request, env) {
+async function authenticate(request, env, { allowUnverified = false } = {}) {
   const authHeader = request.headers.get('Authorization') || '';
   if (!authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.substring(7).trim();
@@ -285,6 +384,7 @@ async function authenticate(request, env) {
   ).bind(tokenHash, now).first();
 
   if (!session) return null;
+  if (!allowUnverified && session.is_verified !== 1) return null;
   return {
     accountId: session.account_id,
     sessionId: session.session_id,
@@ -443,7 +543,8 @@ export default {
     const pathname = url.pathname;
     const method = request.method;
     const clientIp = request.headers.get('CF-Connecting-IP') || '127.0.0.1';
-    const corsHeaders = getCorsHeaders(request);
+    const corsHeaders = getCorsHeaders(request, env);
+    const authHeaders = noStoreHeaders(corsHeaders);
 
     if (method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
@@ -454,7 +555,15 @@ export default {
       if (pathname === '/' || pathname === '/link') {
         const codeParam = url.searchParams.get('code') || '';
         return new Response(renderWebPairingUi(codeParam), {
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'Referrer-Policy': 'no-referrer',
+            'X-Frame-Options': 'DENY',
+            'X-Content-Type-Options': 'nosniff',
+            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+            'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+          }
         });
       }
 
@@ -464,23 +573,27 @@ export default {
 
       // A. Sign Up (PBKDF2 + Email Verification Code)
       if (method === 'POST' && pathname === '/api/auth/signup') {
-        if (!await checkRateLimit(env.DB, `ip:signup:${clientIp}`, 5, 60)) {
-          return errorResponse('Too many sign-up attempts. Please wait 1 minute.', 429, corsHeaders);
-        }
-        const { email, password, displayName = 'Account Owner' } = await request.json().catch(() => ({}));
+        const blockedIp = await enforceLimit(env.DB, `ip:signup:${clientIp}`, 5, 60,
+          'Too many sign-up attempts. Please wait 1 minute.', authHeaders);
+        if (blockedIp) return blockedIp;
+        const parsed = await readJsonBody(request, 64 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const email = asStr(parsed.data.email, 254);
+        const password = asStr(parsed.data.password, 128);
+        const displayName = asStr(parsed.data.displayName, 60) || 'Account Owner';
         if (!email || !password) {
-          return errorResponse('Email and password are required', 400, corsHeaders);
+          return errorResponse('Email and password are required', 400, authHeaders);
         }
         const cleanEmail = email.trim().toLowerCase();
         if (cleanEmail.length < 5 || !cleanEmail.includes('@')) {
-          return errorResponse('Please enter a valid email address', 400, corsHeaders);
+          return errorResponse('Please enter a valid email address', 400, authHeaders);
         }
         if (password.length < 6) {
-          return errorResponse('Password must be at least 6 characters', 400, corsHeaders);
+          return errorResponse('Password must be at least 6 characters', 400, authHeaders);
         }
-        if (!await checkRateLimit(env.DB, `email:signup:${cleanEmail}`, 3, 60)) {
-          return errorResponse('Too many sign-up attempts for this email. Please wait 1 minute.', 429, corsHeaders);
-        }
+        const blockedEmail = await enforceLimit(env.DB, `email:signup:${cleanEmail}`, 3, 60,
+          'Too many sign-up attempts for this email. Please wait 1 minute.', authHeaders);
+        if (blockedEmail) return blockedEmail;
 
         // Check if account already exists
         const existing = await env.DB.prepare('SELECT account_id, is_verified FROM accounts WHERE email = ?').bind(cleanEmail).first();
@@ -507,7 +620,8 @@ export default {
              VALUES (?, ?, ?, '#8B5CF6', 'StreamVault Purple', 0, 1, ?, ?)`
           ).bind(profileId, accountId, displayName.trim() || 'Account Owner', now, now).run();
         } else {
-          // Update password if unverified re-attempt
+          // Revoke any pre-existing sessions and update password on unverified re-signup
+          await env.DB.prepare(`DELETE FROM sessions WHERE account_id = ?`).bind(accountId).run();
           await env.DB.prepare(
             `UPDATE accounts SET password_hash = ?, updated_at = ? WHERE account_id = ?`
           ).bind(passwordHash, now, accountId).run();
@@ -542,49 +656,54 @@ export default {
           signupResponse.devCode = codeStr;
         }
 
-        return jsonResponse(signupResponse, 201, corsHeaders);
+        return jsonResponse(signupResponse, 201, authHeaders);
       }
 
       // B. Verify Email Code
       if (method === 'POST' && pathname === '/api/auth/verify-code') {
-        if (!await checkRateLimit(env.DB, `ip:verify:${clientIp}`, 10, 60)) {
-          return errorResponse('Too many verification attempts. Please wait 1 minute.', 429, corsHeaders);
-        }
-        const { email, code } = await request.json().catch(() => ({}));
-        if (!email || !code) return errorResponse('Email and code are required', 400, corsHeaders);
+        const blockedIp = await enforceLimit(env.DB, `ip:verify:${clientIp}`, 10, 60,
+          'Too many verification attempts. Please wait 1 minute.', authHeaders);
+        if (blockedIp) return blockedIp;
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const email = asStr(parsed.data.email, 254);
+        const code = typeof parsed.data.code === 'string' || typeof parsed.data.code === 'number' ? String(parsed.data.code) : '';
+        if (!email || !code) return errorResponse('Email and code are required', 400, authHeaders);
         const cleanEmail = email.trim().toLowerCase();
-        const cleanCode = String(code).trim();
-        if (!await checkRateLimit(env.DB, `email:verify:${cleanEmail}`, 5, 60)) {
-          return errorResponse('Too many verification attempts for this email. Please wait 1 minute.', 429, corsHeaders);
-        }
+        const cleanCode = code.trim();
+        const blockedEmail = await enforceLimit(env.DB, `email:verify:${cleanEmail}`, 5, 60,
+          'Too many verification attempts for this email. Please wait 1 minute.', authHeaders);
+        if (blockedEmail) return blockedEmail;
         const now = Date.now();
 
-        // Only sign-up codes work here. PIN-reset codes (purpose 'reset_pin') must
-        // never be usable as a sign-in code.
+        // Only sign-up codes work here. PIN-reset codes (purpose 'reset_pin') must never work here.
         const codeRecord = await env.DB.prepare(
-          `SELECT code_id, attempts, is_used, expires_at
+          `SELECT code_id, code, attempts, is_used, expires_at
            FROM email_codes
-           WHERE email = ? AND code = ? AND is_used = 0 AND purpose = 'verify_email'
+           WHERE email = ? AND is_used = 0 AND purpose = 'verify_email'
            ORDER BY created_at DESC LIMIT 1`
-        ).bind(cleanEmail, cleanCode).first();
+        ).bind(cleanEmail).first();
 
-        if (!codeRecord) {
-          // Increment attempts on recent sign-up codes for this email
-          await env.DB.prepare(
-            `UPDATE email_codes SET attempts = attempts + 1 WHERE email = ? AND is_used = 0 AND purpose = 'verify_email'`
-          ).bind(cleanEmail).run();
-          return errorResponse('Invalid or expired verification code', 401, corsHeaders);
+        if (!codeRecord || now > codeRecord.expires_at) {
+          return errorResponse('Invalid or expired verification code', 401, authHeaders);
         }
-
         if (codeRecord.attempts >= 5) {
-          return errorResponse('Too many failed attempts. Please request a new verification code.', 429, corsHeaders);
+          return errorResponse('Too many failed attempts. Please request a new verification code.', 429, authHeaders);
         }
-        if (now > codeRecord.expires_at) {
-          return errorResponse('Verification code has expired. Please request a new code.', 400, corsHeaders);
+        if (!(await safeEqualAsync(codeRecord.code, cleanCode))) {
+          await env.DB.prepare(
+            `UPDATE email_codes SET attempts = attempts + 1 WHERE code_id = ?`
+          ).bind(codeRecord.code_id).run();
+          return errorResponse('Invalid or expired verification code', 401, authHeaders);
         }
 
-        // Mark code as used & verify account
-        await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(codeRecord.code_id).run();
+        // Atomically consume verification code (single use)
+        const consumeRes = await env.DB.prepare(
+          `UPDATE email_codes SET is_used = 1 WHERE code_id = ? AND is_used = 0`
+        ).bind(codeRecord.code_id).run();
+        if (consumeRes && consumeRes.meta && typeof consumeRes.meta.changes === 'number' && consumeRes.meta.changes !== 1) {
+          return errorResponse('Invalid or expired verification code', 401, authHeaders);
+        }
         await env.DB.prepare(`UPDATE accounts SET is_verified = 1, updated_at = ? WHERE email = ?`).bind(now, cleanEmail).run();
 
         const account = await env.DB.prepare(`SELECT account_id, pin_hash, pin_salt FROM accounts WHERE email = ?`).bind(cleanEmail).first();
@@ -613,24 +732,26 @@ export default {
           pinHash: (account && account.pin_hash) || '',
           pinSalt: (account && account.pin_salt) || '',
           profiles: profiles.results || []
-        }, 200, corsHeaders);
+        }, 200, authHeaders);
       }
 
       // B.1 Resend Email Verification Code
       if (method === 'POST' && pathname === '/api/auth/resend-code') {
-        if (!await checkRateLimit(env.DB, `ip:resend:${clientIp}`, 5, 60)) {
-          return errorResponse('Too many requests. Please wait 1 minute.', 429, corsHeaders);
-        }
-        const { email } = await request.json().catch(() => ({}));
-        if (!email) return errorResponse('Email is required', 400, corsHeaders);
+        const blockedIp = await enforceLimit(env.DB, `ip:resend:${clientIp}`, 5, 60,
+          'Too many requests. Please wait 1 minute.', authHeaders);
+        if (blockedIp) return blockedIp;
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const email = asStr(parsed.data.email, 254);
+        if (!email) return errorResponse('Email is required', 400, authHeaders);
         const cleanEmail = email.trim().toLowerCase();
         if (cleanEmail.length < 5 || !cleanEmail.includes('@')) {
-          return errorResponse('Please enter a valid email address', 400, corsHeaders);
+          return errorResponse('Please enter a valid email address', 400, authHeaders);
         }
 
-        if (!await checkRateLimit(env.DB, `email:resend:${cleanEmail}`, 3, 60)) {
-          return errorResponse('Too many resend attempts for this email. Please wait 1 minute.', 429, corsHeaders);
-        }
+        const blockedEmail = await enforceLimit(env.DB, `email:resend:${cleanEmail}`, 3, 60,
+          'Too many resend attempts for this email. Please wait 1 minute.', authHeaders);
+        if (blockedEmail) return blockedEmail;
 
         const account = await env.DB.prepare(
           `SELECT account_id, is_verified FROM accounts WHERE email = ?`
@@ -670,31 +791,51 @@ export default {
           resData.devCode = codeStr;
         }
 
-        return jsonResponse(resData, 200, corsHeaders);
+        return jsonResponse(resData, 200, authHeaders);
       }
 
-      // C. Sign In (PBKDF2 Check + Session Issue)
+      // C. Sign In (PBKDF2 Check + Verified Check + Session Issue)
       if (method === 'POST' && pathname === '/api/auth/login') {
-        if (!await checkRateLimit(env.DB, `ip:login:${clientIp}`, 8, 60)) {
-          return errorResponse('Too many login attempts. Please wait 1 minute.', 429, corsHeaders);
-        }
-        const { email, password } = await request.json().catch(() => ({}));
-        if (!email || !password) return errorResponse('Email and password are required', 400, corsHeaders);
+        const blockedIp = await enforceLimit(env.DB, `ip:login:${clientIp}`, 8, 60,
+          'Too many login attempts. Please wait 1 minute.', authHeaders);
+        if (blockedIp) return blockedIp;
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const email = asStr(parsed.data.email, 254);
+        const password = asStr(parsed.data.password, 128);
+        if (!email || !password) return errorResponse('Email and password are required', 400, authHeaders);
 
         const cleanEmail = email.trim().toLowerCase();
-        if (!await checkRateLimit(env.DB, `email:login:${cleanEmail}`, 5, 60)) {
-          return errorResponse('Too many login attempts for this email. Please wait 1 minute.', 429, corsHeaders);
-        }
+        const blockedEmail = await enforceLimit(env.DB, `email:login:${cleanEmail}`, 5, 60,
+          'Too many login attempts for this email. Please wait 1 minute.', authHeaders);
+        if (blockedEmail) return blockedEmail;
         const account = await env.DB.prepare(
           `SELECT account_id, email, password_hash, pin_hash, pin_salt, is_verified FROM accounts WHERE email = ?`
         ).bind(cleanEmail).first();
 
-        if (!account) return errorResponse('Invalid email or password', 401, corsHeaders);
+        if (!account) return errorResponse('Invalid email or password', 401, authHeaders);
 
         const isValid = await verifyPassword(password, account.password_hash);
-        if (!isValid) return errorResponse('Invalid email or password', 401, corsHeaders);
+        if (!isValid) return errorResponse('Invalid email or password', 401, authHeaders);
+
+        if (account.is_verified !== 1) {
+          return jsonResponse({
+            success: false,
+            error: 'Please verify your email address before signing in.',
+            requireVerification: true,
+            isVerified: false,
+            email: account.email
+          }, 403, authHeaders);
+        }
 
         const now = Date.now();
+        // Transparently upgrade legacy SHA-256 password hash to PBKDF2 on login
+        if (account.password_hash && account.password_hash.split(':').length === 2) {
+          const upgraded = await hashPassword(password);
+          await env.DB.prepare(
+            `UPDATE accounts SET password_hash = ?, updated_at = ? WHERE account_id = ?`
+          ).bind(upgraded, now, account.account_id).run();
+        }
         // Issue 32-byte session token
         const rawToken = generateSessionToken();
         const tokenHash = await sha256(rawToken);
@@ -725,14 +866,14 @@ export default {
           pinSalt: account.pin_salt || '',
           profiles: profiles.results || [],
           playlists: playlists.results || []
-        }, 200, corsHeaders);
+        }, 200, authHeaders);
       }
 
       // C.1 Validate Session / Get Authenticated Account
       if (method === 'GET' && pathname === '/api/auth/me') {
         const auth = await authenticate(request, env);
         if (!auth) {
-          return jsonResponse({ error: 'Unauthorized', authenticated: false }, 401, corsHeaders);
+          return jsonResponse({ error: 'Unauthorized', authenticated: false }, 401, authHeaders);
         }
         return jsonResponse({
           ok: true,
@@ -743,65 +884,68 @@ export default {
             isVerified: auth.isVerified,
             displayName: auth.email.split('@')[0]
           }
-        }, 200, corsHeaders);
+        }, 200, authHeaders);
       }
 
       // D. Sign Out (Revoke Session Token)
       if (method === 'POST' && pathname === '/api/auth/signout') {
-        const auth = await authenticate(request, env);
+        const auth = await authenticate(request, env, { allowUnverified: true });
         if (auth) {
           await env.DB.prepare(`DELETE FROM sessions WHERE session_id = ?`).bind(auth.sessionId).run();
         }
-        return jsonResponse({ success: true, message: 'Signed out' }, 200, corsHeaders);
+        return jsonResponse({ success: true, message: 'Signed out' }, 200, authHeaders);
       }
 
       // ================================================================
       // PAIRING CODES (TV ↔ Mobile QR Link Flow)
       // ================================================================
 
-      // A. TV Requests Live 6-Digit Pairing Code (e.g. SV-XXXX)
+      // A. TV Requests Live Pairing Code (6-char code + 256-bit X-Poll-Secret bound to initiating TV)
       if (method === 'POST' && pathname === '/api/auth/request-code') {
         const limitedReq = await enforceLimit(env.DB, `ip:reqcode:${clientIp}`, 20, 60,
-          'Too many pairing requests. Please wait a minute.', corsHeaders);
+          'Too many pairing requests. Please wait a minute.', authHeaders);
         if (limitedReq) return limitedReq;
         const now = Date.now();
-        // Generate random 4-character suffix using non-confusing chars
         const charset = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
         let suffix = '';
-        const randBytes = crypto.getRandomValues(new Uint8Array(4));
-        for (let i = 0; i < 4; i++) {
+        const randBytes = crypto.getRandomValues(new Uint8Array(6));
+        for (let i = 0; i < 6; i++) {
           suffix += charset[randBytes[i] % charset.length];
         }
         const code = `SV-${suffix}`;
+        const pollSecret = generateSessionToken();
+        const pollSecretHash = await sha256(pollSecret);
         const expiresAt = now + 10 * 60 * 1000;
 
         await env.DB.prepare(
-          `INSERT INTO pairing_codes (code, status, attempts, created_at, expires_at)
-           VALUES (?, 'pending', 0, ?, ?)`
-        ).bind(code, now, expiresAt).run();
+          `INSERT INTO pairing_codes (code, device_id, status, attempts, created_at, expires_at)
+           VALUES (?, ?, 'pending', 0, ?, ?)`
+        ).bind(code, pollSecretHash, now, expiresAt).run();
 
         const pairingUrl = `https://${url.host}/link?code=${code}`;
         return jsonResponse({
           success: true,
           code,
+          pollSecret,
           expiresInSeconds: 600,
-          pairingUrl,
-          qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pairingUrl)}`
-        }, 200, corsHeaders);
+          pairingUrl
+        }, 200, authHeaders);
       }
 
-      // B. Mobile User Claims TV Code (Must be authenticated)
+      // B. Mobile User Claims TV Code (Must be verified authenticated account)
       if (method === 'POST' && pathname === '/api/auth/claim-code') {
         const auth = await authenticate(request, env);
-        if (!auth) return errorResponse('Authentication required to link device', 401, corsHeaders);
+        if (!auth) return errorResponse('Authentication required to link device', 401, authHeaders);
 
         const limitedClaim = await enforceLimit(env.DB, `acct:claimcode:${auth.accountId}`, 10, 60,
-          'Too many attempts. Please wait a minute.', corsHeaders);
+          'Too many attempts. Please wait a minute.', authHeaders);
         if (limitedClaim) return limitedClaim;
-        const { code } = await request.json().catch(() => ({}));
-        if (!code) return errorResponse('Pairing code is required', 400, corsHeaders);
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const code = asStr(parsed.data.code, 32);
+        if (!code) return errorResponse('Pairing code is required', 400, authHeaders);
 
-        const cleanCode = String(code).trim().toUpperCase();
+        const cleanCode = code.trim().toUpperCase();
         const now = Date.now();
 
         const record = await env.DB.prepare(
@@ -809,77 +953,103 @@ export default {
         ).bind(cleanCode).first();
 
         if (!record || record.status !== 'pending' || now > record.expires_at) {
-          return errorResponse('Code is invalid, expired, or already used', 400, corsHeaders);
+          return errorResponse('Code is invalid, expired, or already used', 400, authHeaders);
         }
 
-        // Generate one-time 32-byte exchange token
+        // Generate one-time 32-byte exchange token atomically
         const exchangeToken = generateSessionToken();
 
-        await env.DB.prepare(
+        const claimRes = await env.DB.prepare(
           `UPDATE pairing_codes
            SET account_id = ?, exchange_token = ?, status = 'claimed'
-           WHERE code = ?`
+           WHERE code = ? AND status = 'pending'`
         ).bind(auth.accountId, exchangeToken, cleanCode).run();
+        if (claimRes && claimRes.meta && typeof claimRes.meta.changes === 'number' && claimRes.meta.changes !== 1) {
+          return errorResponse('Code is invalid, expired, or already used', 400, authHeaders);
+        }
 
         return jsonResponse({
           success: true,
           message: 'TV successfully paired! Your TV will log in automatically.'
-        }, 200, corsHeaders);
+        }, 200, authHeaders);
       }
 
-      // C. TV Polls Code Status (Zero password leakage)
+      // C. TV Polls Code Status (Requires matching X-Poll-Secret issued to initiating TV)
       if (method === 'GET' && pathname === '/api/auth/poll-code') {
         const codeParam = url.searchParams.get('code') || '';
-        if (!codeParam) return errorResponse('Code parameter required', 400, corsHeaders);
-        // Only checks the counter, never writes: the TV asks every 3 seconds and each write used up the daily allowance.
+        if (!codeParam) return errorResponse('Code parameter required', 400, authHeaders);
         const limitedPoll = await enforceLimit(env.DB, `ip:pollcode:${clientIp}`, 60, 60,
-          'Too many requests. Please wait a minute.', corsHeaders, false);
+          'Too many requests. Please wait a minute.', authHeaders, false);
         if (limitedPoll) return limitedPoll;
 
         const cleanCode = codeParam.trim().toUpperCase();
+        const pollSecret = (request.headers.get('X-Poll-Secret') || '').trim();
         const now = Date.now();
 
         const record = await env.DB.prepare(
-          `SELECT status, exchange_token, expires_at FROM pairing_codes WHERE code = ?`
+          `SELECT status, exchange_token, expires_at, device_id FROM pairing_codes WHERE code = ?`
         ).bind(cleanCode).first();
 
         if (!record || now > record.expires_at) {
-          // Only unknown/expired codes count against the limit (this is what a code-guessing attempt looks like).
-          // A TV waiting on its own live code is not counted, so waiting does not write to the database.
           await rateLimit(env.DB, `ip:pollcode:${clientIp}`, 60, 60, true);
-          return jsonResponse({ status: 'expired' }, 200, corsHeaders);
+          return jsonResponse({ status: 'expired' }, 200, authHeaders);
+        }
+
+        if (record.device_id) {
+          const providedHash = pollSecret ? await sha256(pollSecret) : '';
+          if (!providedHash || !(await safeEqualAsync(providedHash, record.device_id))) {
+            await rateLimit(env.DB, `ip:pollcode:${clientIp}`, 60, 60, true);
+            return errorResponse('Invalid pairing poll secret', 403, authHeaders);
+          }
         }
 
         if (record.status === 'claimed' && record.exchange_token) {
-          // Never return passwords here! Only the single-use exchange token.
           return jsonResponse({
             status: 'paired',
             exchangeToken: record.exchange_token
-          }, 200, corsHeaders);
+          }, 200, authHeaders);
         }
 
-        return jsonResponse({ status: 'pending' }, 200, corsHeaders);
+        return jsonResponse({ status: 'pending' }, 200, authHeaders);
       }
 
       // D. TV Exchanges Token for Permanent Session & Credentials
       if (method === 'POST' && pathname === '/api/auth/pair-exchange') {
-        const { code, exchangeToken } = await request.json().catch(() => ({}));
-        if (!code || !exchangeToken) return errorResponse('Code and exchange token required', 400, corsHeaders);
+        const limitedExch = await enforceLimit(env.DB, `ip:pairexch:${clientIp}`, 10, 60,
+          'Too many pairing attempts. Please wait a minute.', authHeaders);
+        if (limitedExch) return limitedExch;
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const code = asStr(parsed.data.code, 32);
+        const exchangeToken = asStr(parsed.data.exchangeToken, 256);
+        if (!code || !exchangeToken) return errorResponse('Code and exchange token required', 400, authHeaders);
 
-        const cleanCode = String(code).trim().toUpperCase();
+        const cleanCode = code.trim().toUpperCase();
+        const pollSecret = (request.headers.get('X-Poll-Secret') || '').trim();
         const now = Date.now();
 
         const record = await env.DB.prepare(
-          `SELECT account_id, exchange_token, status, expires_at
+          `SELECT account_id, exchange_token, status, expires_at, device_id
            FROM pairing_codes WHERE code = ?`
         ).bind(cleanCode).first();
 
-        if (!record || record.status !== 'claimed' || record.exchange_token !== exchangeToken || now > record.expires_at) {
-          return errorResponse('Invalid or expired exchange token', 403, corsHeaders);
+        let secretOk = true;
+        if (record && record.device_id) {
+          const providedHash = pollSecret ? await sha256(pollSecret) : '';
+          secretOk = !!providedHash && (await safeEqualAsync(providedHash, record.device_id));
         }
 
-        // Invalidate exchange token immediately (single use)
-        await env.DB.prepare(`UPDATE pairing_codes SET status = 'exchanged', exchange_token = NULL WHERE code = ?`).bind(cleanCode).run();
+        if (!record || record.status !== 'claimed' || !secretOk || !(await safeEqualAsync(record.exchange_token || '', exchangeToken)) || now > record.expires_at) {
+          return errorResponse('Invalid or expired exchange token', 403, authHeaders);
+        }
+
+        // Atomically invalidate exchange token (single use)
+        const exchRes = await env.DB.prepare(
+          `UPDATE pairing_codes SET status = 'exchanged', exchange_token = NULL WHERE code = ? AND status = 'claimed'`
+        ).bind(cleanCode).run();
+        if (exchRes && exchRes.meta && typeof exchRes.meta.changes === 'number' && exchRes.meta.changes !== 1) {
+          return errorResponse('Invalid or expired exchange token', 403, authHeaders);
+        }
 
         // Issue new session token for the TV
         const rawToken = generateSessionToken();
@@ -920,7 +1090,7 @@ export default {
           pinSalt: (account && account.pin_salt) || '',
           profiles: profiles.results || [],
           playlists: decryptedPlaylists
-        }, 200, corsHeaders);
+        }, 200, authHeaders);
       }
 
       // NOTE: /api/account/reset-pin and /api/account/request-pin-reset live in the
@@ -957,25 +1127,26 @@ export default {
           'Too many incorrect attempts. Please wait 15 minutes.', corsHeaders, false);
         if (locked) return locked;
 
-        const { pinHash, pinSalt, currentPin, password } = await request.json().catch(() => ({}));
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const { pinHash, pinSalt, currentPin, password } = parsed.data;
         const cleanHash = typeof pinHash === 'string' ? pinHash.trim().toLowerCase() : '';
         const cleanSalt = typeof pinSalt === 'string' ? pinSalt.trim() : '';
         if (!PIN_HASH_RE.test(cleanHash) || !PIN_SALT_RE.test(cleanSalt)) {
-          return errorResponse('A valid pinHash and pinSalt are required', 400, corsHeaders);
+          return errorResponse('A valid pinHash and pinSalt are required', 400, authHeaders);
         }
 
         const row = await env.DB.prepare(
           `SELECT password_hash, pin_hash, pin_salt FROM accounts WHERE account_id = ?`
         ).bind(auth.accountId).first();
-        if (!row) return errorResponse('Account not found', 404, corsHeaders);
+        if (!row) return errorResponse('Account not found', 404, authHeaders);
 
         if (row.pin_hash) {
           let proven = false;
           if (typeof password === 'string' && password) {
             proven = await verifyPassword(password, row.password_hash);
           } else if (typeof currentPin === 'string' && PIN_RE.test(currentPin.trim()) && row.pin_salt) {
-            const check = await hashPinWithSalt(currentPin.trim(), row.pin_salt);
-            proven = safeEqual(check, row.pin_hash);
+            proven = await verifyPinAgainstHash(currentPin.trim(), row.pin_salt, row.pin_hash);
           } else {
             return jsonResponse({
               success: false,
@@ -996,7 +1167,7 @@ export default {
         await env.DB.prepare(
           `UPDATE accounts SET pin_hash = ?, pin_salt = ?, updated_at = ? WHERE account_id = ?`
         ).bind(cleanHash, cleanSalt, Date.now(), auth.accountId).run();
-        return jsonResponse({ success: true, message: 'PIN synced' }, 200, corsHeaders);
+        return jsonResponse({ success: true, message: 'PIN synced' }, 200, authHeaders);
       }
 
       // Request a 6-digit email code to reset the Master PIN.
@@ -1098,13 +1269,18 @@ export default {
           if (record.attempts >= 5) {
             return errorResponse('Too many incorrect codes. Please request a new code.', 429, corsHeaders);
           }
-          if (!safeEqual(record.code, code.trim())) {
+          if (!(await safeEqualAsync(record.code, code.trim()))) {
             await env.DB.prepare(
               `UPDATE email_codes SET attempts = attempts + 1 WHERE code_id = ?`
             ).bind(record.code_id).run();
-            return errorResponse('Invalid or expired 6-digit verification code', 401, corsHeaders);
+            return errorResponse('Invalid or expired 6-digit verification code', 401, authHeaders);
           }
-          await env.DB.prepare(`UPDATE email_codes SET is_used = 1 WHERE code_id = ?`).bind(record.code_id).run();
+          const consumeReset = await env.DB.prepare(
+            `UPDATE email_codes SET is_used = 1 WHERE code_id = ? AND is_used = 0`
+          ).bind(record.code_id).run();
+          if (consumeReset && consumeReset.meta && typeof consumeReset.meta.changes === 'number' && consumeReset.meta.changes !== 1) {
+            return errorResponse('Invalid or expired 6-digit verification code', 401, authHeaders);
+          }
         } else {
           return errorResponse('Account password or 6-digit email code required', 400, corsHeaders);
         }
@@ -1144,23 +1320,31 @@ export default {
             updatedAt: r.updated_at
           });
         }
-        return jsonResponse({ success: true, playlists }, 200, corsHeaders);
+        return jsonResponse({ success: true, playlists }, 200, authHeaders);
       }
 
       // Add Playlist
       if (method === 'POST' && pathname === '/api/playlists') {
-        const { name, serverUrl, username, password } = await request.json().catch(() => ({}));
+        const parsed = await readJsonBody(request, 64 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const name = asStr(parsed.data.name, 80) || 'My IPTV';
+        const serverUrl = asStr(parsed.data.serverUrl, 512);
+        const username = asStr(parsed.data.username, 256);
+        const password = asStr(parsed.data.password, 256);
         if (!serverUrl || !username || !password) {
-          return errorResponse('Server URL, username, and password are required', 400, corsHeaders);
+          return errorResponse('Server URL, username, and password are required', 400, authHeaders);
+        }
+        if (!isValidHttpUrl(serverUrl)) {
+          return errorResponse('Server URL must be an http:// or https:// address', 400, authHeaders);
         }
         if (!env.AES_SECRET && !env.ENCRYPTION_KEY) {
-          return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+          return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, authHeaders);
         }
         let passEnc;
         try {
           passEnc = await encryptData(password, env);
         } catch (err) {
-          return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+          return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, authHeaders);
         }
         const now = Date.now();
         const playlistId = 'pl_' + crypto.randomUUID().substring(0, 10);
@@ -1168,42 +1352,55 @@ export default {
         await env.DB.prepare(
           `INSERT INTO playlists (playlist_id, account_id, name, server_url, username, password_enc, is_enabled, status, last_sync_at, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, 1, 'ready', 0, ?, ?)`
-        ).bind(playlistId, auth.accountId, (name || 'My IPTV').trim(), serverUrl.trim(), username.trim(), passEnc, now, now).run();
+        ).bind(playlistId, auth.accountId, name.trim() || 'My IPTV', serverUrl.trim(), username.trim(), passEnc, now, now).run();
 
         return jsonResponse({
           success: true,
           playlist: {
             playlistId,
-            name: (name || 'My IPTV').trim(),
+            name: name.trim() || 'My IPTV',
             serverUrl: serverUrl.trim(),
             username: username.trim(),
             isEnabled: true,
             status: 'ready'
           }
-        }, 201, corsHeaders);
+        }, 201, authHeaders);
       }
 
       // Update Playlist
       if (method === 'PUT' && pathname.startsWith('/api/playlists/')) {
         const playlistId = pathname.replace('/api/playlists/', '').trim();
-        const { name, serverUrl, username, password, isEnabled, status } = await request.json().catch(() => ({}));
+        const parsed = await readJsonBody(request, 64 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const name = parsed.data.name !== undefined ? asStr(parsed.data.name, 80) : null;
+        const serverUrl = parsed.data.serverUrl !== undefined ? asStr(parsed.data.serverUrl, 512) : null;
+        const username = parsed.data.username !== undefined ? asStr(parsed.data.username, 256) : null;
+        const password = parsed.data.password !== undefined ? asStr(parsed.data.password, 256) : null;
+        const isEnabled = parsed.data.isEnabled;
+        const status = parsed.data.status !== undefined ? asStr(parsed.data.status, 32) : null;
+        if (serverUrl !== null && serverUrl.trim() && !isValidHttpUrl(serverUrl)) {
+          return errorResponse('Server URL must be an http:// or https:// address', 400, authHeaders);
+        }
+        if (status !== null && status.trim() && !['ready', 'syncing', 'error'].includes(status.trim())) {
+          return errorResponse('Invalid playlist status', 400, authHeaders);
+        }
         const now = Date.now();
 
         const existing = await env.DB.prepare(
-          `SELECT playlist_id, password_enc FROM playlists WHERE playlist_id = ? AND account_id = ?`
+          `SELECT playlist_id, password_enc FROM playlists WHERE playlist_id = ? AND account_id = ? AND removed_at IS NULL`
         ).bind(playlistId, auth.accountId).first();
 
-        if (!existing) return errorResponse('Playlist not found', 404, corsHeaders);
+        if (!existing) return errorResponse('Playlist not found', 404, authHeaders);
 
         let passEnc = existing.password_enc;
         if (password && password.trim().length > 0) {
           if (!env.AES_SECRET && !env.ENCRYPTION_KEY) {
-            return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+            return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, authHeaders);
           }
           try {
             passEnc = await encryptData(password.trim(), env);
           } catch (err) {
-            return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, corsHeaders);
+            return errorResponse('Server encryption configuration error (AES_SECRET missing)', 500, authHeaders);
           }
         }
 
@@ -1216,20 +1413,20 @@ export default {
                is_enabled = COALESCE(?, is_enabled),
                status = COALESCE(?, status),
                updated_at = ?
-           WHERE playlist_id = ? AND account_id = ?`
+           WHERE playlist_id = ? AND account_id = ? AND removed_at IS NULL`
         ).bind(
-          name ? name.trim() : null,
-          serverUrl ? serverUrl.trim() : null,
-          username ? username.trim() : null,
+          name && name.trim() ? name.trim() : null,
+          serverUrl && serverUrl.trim() ? serverUrl.trim() : null,
+          username && username.trim() ? username.trim() : null,
           passEnc,
-          isEnabled !== undefined ? (isEnabled ? 1 : 0) : null,
-          status || null,
+          typeof isEnabled === 'boolean' ? (isEnabled ? 1 : 0) : null,
+          status && status.trim() ? status.trim() : null,
           now,
           playlistId,
           auth.accountId
         ).run();
 
-        return jsonResponse({ success: true, message: 'Playlist updated' }, 200, corsHeaders);
+        return jsonResponse({ success: true, message: 'Playlist updated' }, 200, authHeaders);
       }
 
       // Delete Playlist (Soft delete: keeps profile data 100% safe!)
@@ -1250,16 +1447,21 @@ export default {
 
       // A. Batch Sync Items from TV App
       if (method === 'POST' && pathname === '/api/catalog/sync-batch') {
-        const { items, playlistId } = await request.json().catch(() => ({}));
+        const parsed = await readJsonBody(request, 512 * 1024, corsHeaders);
+        if (parsed.error) return parsed.error;
+        const { items, playlistId } = parsed.data;
         if (!Array.isArray(items) || items.length === 0) {
           return errorResponse('Items array required', 400, corsHeaders);
+        }
+        if (items.length > 200) {
+          return errorResponse('Maximum 200 items per batch', 400, corsHeaders);
         }
 
         const now = Date.now();
         const stmts = [];
 
         for (const it of items) {
-          if (!it.dedupKey) continue;
+          if (!it || typeof it !== 'object' || typeof it.dedupKey !== 'string' || !it.dedupKey.trim()) continue;
           const itemId = `${auth.accountId}:${it.dedupKey}`;
           stmts.push(
             env.DB.prepare(
@@ -1301,10 +1503,7 @@ export default {
           );
         }
 
-        if (stmts.length > 0) {
-          // Execute batch (max 100 per transaction)
-          await env.DB.batch(stmts);
-        }
+        await runBatch(env.DB, stmts);
 
         return jsonResponse({ success: true, count: stmts.length }, 200, corsHeaders);
       }
@@ -1385,19 +1584,26 @@ export default {
 
       // C. Mark Removed Titles (14-day Soft Delete)
       if (method === 'POST' && pathname === '/api/catalog/mark-removed') {
-        const { dedupKeys } = await request.json().catch(() => ({}));
+        const parsed = await readJsonBody(request, 128 * 1024, corsHeaders);
+        if (parsed.error) return parsed.error;
+        const { dedupKeys } = parsed.data;
         if (!Array.isArray(dedupKeys) || dedupKeys.length === 0) {
           return errorResponse('dedupKeys array required', 400, corsHeaders);
         }
+        if (dedupKeys.length > 200) {
+          return errorResponse('Maximum 200 keys per batch', 400, corsHeaders);
+        }
         const now = Date.now();
-        const stmts = dedupKeys.map(k =>
-          env.DB.prepare(
-            `UPDATE catalog_items
-             SET is_removed = 1, removed_at = ?, updated_at = ?
-             WHERE item_id = ? AND account_id = ?`
-          ).bind(now, now, `${auth.accountId}:${k}`, auth.accountId)
-        );
-        await env.DB.batch(stmts);
+        const stmts = dedupKeys
+          .filter(k => typeof k === 'string' && k.trim().length > 0)
+          .map(k =>
+            env.DB.prepare(
+              `UPDATE catalog_items
+               SET is_removed = 1, removed_at = ?, updated_at = ?
+               WHERE item_id = ? AND account_id = ?`
+            ).bind(now, now, `${auth.accountId}:${k.trim()}`, auth.accountId)
+          );
+        await runBatch(env.DB, stmts);
         return jsonResponse({ success: true, count: stmts.length }, 200, corsHeaders);
       }
 
@@ -1416,8 +1622,6 @@ export default {
       // ----------------------------------------------------------------
 
       if (method === 'GET' && (pathname === '/api/pack/latest' || pathname === '/api/pack/file')) {
-        const auth = await authenticate(request, env);
-        if (!auth) return errorResponse('Unauthorized', 401, corsHeaders);
         if (!env.PACKS) return errorResponse('Pack storage is not configured', 503, corsHeaders);
 
         const latestObj = await env.PACKS.get('packs/latest.json');
@@ -1497,16 +1701,29 @@ export default {
       }
 
       if (method === 'GET' && pathname.startsWith('/api/tmdb/')) {
-        const subPath = pathname.replace('/api/tmdb/', '');
+        if (!checkTmdbAccountLimit(auth.accountId)) {
+          return errorResponse('TMDB rate limit exceeded. Please wait a minute.', 429, corsHeaders);
+        }
+        const subPath = pathname.replace('/api/tmdb/', '').replace(/^\/+/, '');
+        if (subPath.includes('..') || subPath.includes('//') || subPath.includes('%') || subPath.includes('\\') ||
+            !/^(?:(?:movie|tv)\/\d+(?:\/(?:credits|external_ids|release_dates|content_ratings|recommendations|similar))?|search\/(?:movie|tv|multi)|genre\/(?:movie|tv)\/list)$/.test(subPath)) {
+          return errorResponse('Invalid TMDB path', 400, corsHeaders);
+        }
         // No built-in fallback key: the key is a Worker secret and must be configured.
         const apiKey = env.TMDB_API_KEY;
         if (!apiKey) {
           return errorResponse('TMDB_API_KEY is not configured on the server', 500, corsHeaders);
         }
         const now = Date.now();
+        const ALLOWED_TMDB_PARAMS = ['append_to_response', 'query', 'year', 'first_air_date_year', 'page', 'language', 'include_adult'];
+        const canonParams = new URLSearchParams();
+        for (const k of ALLOWED_TMDB_PARAMS) {
+          if (url.searchParams.has(k)) canonParams.set(k, String(url.searchParams.get(k) || '').slice(0, 200));
+        }
+        canonParams.sort();
 
         // 1. Check shared cache
-        const cacheKey = `${subPath}:${url.searchParams.toString()}`;
+        const cacheKey = `${subPath}:${canonParams.toString()}`;
         const cached = await env.DB.prepare(
           `SELECT response_json FROM tmdb_cache WHERE cache_key = ? AND expires_at > ?`
         ).bind(cacheKey, now).first();
@@ -1517,20 +1734,22 @@ export default {
               ...corsHeaders,
               'Content-Type': 'application/json; charset=utf-8',
               'X-Cache': 'HIT',
-              'Cache-Control': 'public, max-age=86400'
+              'Cache-Control': 'private, max-age=86400',
+              'Vary': 'Origin, Authorization'
             }
           });
         }
 
         // 2. Fetch from TMDB API
         const tmdbUrl = new URL(`https://api.themoviedb.org/3/${subPath}`);
-        for (const [k, v] of url.searchParams.entries()) {
+        for (const [k, v] of canonParams.entries()) {
           tmdbUrl.searchParams.set(k, v);
         }
         tmdbUrl.searchParams.set('api_key', apiKey);
 
         const tmdbRes = await fetch(tmdbUrl.toString(), {
-          headers: { 'Accept': 'application/json' }
+          headers: { 'Accept': 'application/json' },
+          signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(10000) : undefined
         });
         const resText = await tmdbRes.text();
 
@@ -1570,53 +1789,123 @@ export default {
         return jsonResponse({ success: true, profiles: rows.results || [] }, 200, corsHeaders);
       }
 
+      // Helper: verify Master PIN or account password when changing sensitive parental state
+      const verifyAccountParentalProof = async (accountId, body, errHeaders) => {
+        const failKey = `fail:accpin:${accountId}`;
+        const locked = await enforceLimit(env.DB, failKey, 5, 900,
+          'Too many incorrect attempts. Please wait 15 minutes.', errHeaders, false);
+        if (locked) return { blocked: locked };
+        const row = await env.DB.prepare(
+          `SELECT password_hash, pin_hash, pin_salt FROM accounts WHERE account_id = ?`
+        ).bind(accountId).first();
+        if (!row || !row.pin_hash) return { ok: true };
+        const pw = asStr(body && body.password, 128);
+        const rawPin = asStr((body && (body.pin !== undefined ? body.pin : body.currentPin)), 16).trim();
+        let proven = false;
+        if (pw) {
+          proven = await verifyPassword(pw, row.password_hash);
+        } else if (PIN_RE.test(rawPin) && row.pin_salt) {
+          proven = await verifyPinAgainstHash(rawPin, row.pin_salt, row.pin_hash);
+        } else {
+          return {
+            ok: false,
+            response: jsonResponse({
+              success: false,
+              requireReauth: true,
+              error: 'Master PIN or account password required'
+            }, 403, errHeaders)
+          };
+        }
+        if (!proven) {
+          await recordFailure(env.DB, failKey, 900);
+          return {
+            ok: false,
+            response: jsonResponse({
+              success: false,
+              requireReauth: true,
+              error: 'Incorrect Master PIN or account password'
+            }, 403, errHeaders)
+          };
+        }
+        return { ok: true };
+      }
+
       // Create Secondary Profile (Max 5 profiles per account)
       if (method === 'POST' && pathname === '/api/profiles/create') {
-        const { displayName, avatarColor = '#8B5CF6', theme = 'StreamVault Purple', isKids = false } = await request.json().catch(() => ({}));
-        if (!displayName || !displayName.trim()) return errorResponse('Profile display name required', 400, corsHeaders);
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const displayName = asStr(parsed.data.displayName, 50).trim();
+        const rawColor = parsed.data.avatarColor !== undefined ? asStr(parsed.data.avatarColor, 16).trim() : '#8B5CF6';
+        const rawTheme = parsed.data.theme !== undefined ? asStr(parsed.data.theme, 40).trim() : 'StreamVault Purple';
+        const isKids = !!parsed.data.isKids;
+        if (!displayName) return errorResponse('Profile display name required', 400, authHeaders);
+        if (!HEX_COLOR_RE.test(rawColor)) return errorResponse('Invalid avatar color', 400, authHeaders);
+        if (!THEME_RE.test(rawTheme)) return errorResponse('Invalid theme name', 400, authHeaders);
 
         const countRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM profiles WHERE account_id = ?`).bind(auth.accountId).first();
         if (countRow && countRow.count >= 5) {
-          return errorResponse('Maximum 5 profiles allowed', 400, corsHeaders);
+          return errorResponse('Maximum 5 profiles allowed', 400, authHeaders);
         }
 
-        const profileId = 'prof_' + crypto.randomUUID().substring(0, 8);
+        const requestedId = asStr(parsed.data.profileId || parsed.data.id, 64).trim();
+        const profileId = (requestedId && /^prof_[A-Za-z0-9_-]{4,48}$/.test(requestedId))
+          ? requestedId
+          : ('prof_' + crypto.randomUUID().substring(0, 8));
         const now = Date.now();
 
         await env.DB.prepare(
           `INSERT INTO profiles (profile_id, account_id, display_name, avatar_color, theme, is_kids, is_primary, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`
-        ).bind(profileId, auth.accountId, displayName.trim(), avatarColor, theme, isKids ? 1 : 0, now, now).run();
+        ).bind(profileId, auth.accountId, displayName, rawColor, rawTheme, isKids ? 1 : 0, now, now).run();
 
         return jsonResponse({
           success: true,
           profile: {
             profileId,
-            displayName: displayName.trim(),
-            avatarColor,
-            theme,
-            isKids: !!isKids,
+            displayName,
+            avatarColor: rawColor,
+            theme: rawTheme,
+            isKids,
             isPrimary: false
           }
-        }, 201, corsHeaders);
+        }, 201, authHeaders);
       }
 
-      // Update Profile (Name, Theme, Color, Kids Mode)
+      // Update Profile (Name, Theme, Color, Kids Mode — turning Kids OFF enforces Master PIN)
       if (method === 'POST' && pathname === '/api/profiles/update') {
-        const { profileId, displayName, avatarColor, theme, isKids } = await request.json().catch(() => ({}));
-        if (!profileId) return errorResponse('Profile ID required', 400, corsHeaders);
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const profileId = asStr(parsed.data.profileId || parsed.data.id, 64).trim();
+        if (!profileId) return errorResponse('Profile ID required', 400, authHeaders);
 
         const profile = await env.DB.prepare(
           `SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE profile_id = ? AND account_id = ?`
         ).bind(profileId, auth.accountId).first();
 
-        if (!profile) return errorResponse('Profile not found', 404, corsHeaders);
+        if (!profile) return errorResponse('Profile not found', 404, authHeaders);
 
         const now = Date.now();
-        const newName = (displayName && displayName.trim()) || profile.display_name;
-        const newColor = avatarColor || profile.avatar_color;
-        const newTheme = theme || profile.theme;
-        const newKids = typeof isKids === 'boolean' ? (isKids ? 1 : 0) : profile.is_kids;
+        const rawName = parsed.data.displayName !== undefined ? asStr(parsed.data.displayName, 50).trim() : '';
+        const newName = rawName || profile.display_name;
+        let newColor = profile.avatar_color;
+        if (parsed.data.avatarColor !== undefined) {
+          const c = asStr(parsed.data.avatarColor, 16).trim();
+          if (!HEX_COLOR_RE.test(c)) return errorResponse('Invalid avatar color', 400, authHeaders);
+          newColor = c;
+        }
+        let newTheme = profile.theme;
+        if (parsed.data.theme !== undefined) {
+          const t = asStr(parsed.data.theme, 40).trim();
+          if (!THEME_RE.test(t)) return errorResponse('Invalid theme name', 400, authHeaders);
+          newTheme = t;
+        }
+        const newKids = typeof parsed.data.isKids === 'boolean' ? (parsed.data.isKids ? 1 : 0) : profile.is_kids;
+
+        if (profile.is_kids === 1 && newKids === 0) {
+          const proof = await verifyAccountParentalProof(auth.accountId, parsed.data, authHeaders);
+          if (proof.blocked) return proof.blocked;
+          if (!proof.ok) return proof.response;
+        }
 
         await env.DB.prepare(
           `UPDATE profiles SET display_name = ?, avatar_color = ?, theme = ?, is_kids = ?, updated_at = ? WHERE profile_id = ? AND account_id = ?`
@@ -1632,19 +1921,21 @@ export default {
             isKids: newKids === 1,
             isPrimary: profile.is_primary === 1
           }
-        }, 200, corsHeaders);
+        }, 200, authHeaders);
       }
 
       // Switch Profile
       if (method === 'POST' && pathname === '/api/profiles/switch') {
-        const { profileId } = await request.json().catch(() => ({}));
-        if (!profileId) return errorResponse('Profile ID required', 400, corsHeaders);
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const profileId = asStr(parsed.data.profileId || parsed.data.id, 64).trim();
+        if (!profileId) return errorResponse('Profile ID required', 400, authHeaders);
 
         const profile = await env.DB.prepare(
           `SELECT profile_id, display_name, avatar_color, theme, is_kids, is_primary FROM profiles WHERE profile_id = ? AND account_id = ?`
         ).bind(profileId, auth.accountId).first();
 
-        if (!profile) return errorResponse('Profile not found', 404, corsHeaders);
+        if (!profile) return errorResponse('Profile not found', 404, authHeaders);
 
         return jsonResponse({
           success: true,
@@ -1657,59 +1948,91 @@ export default {
             isKids: profile.is_kids === 1,
             isPrimary: profile.is_primary === 1
           }
-        }, 200, corsHeaders);
+        }, 200, authHeaders);
       }
 
-      // Delete Secondary Profile (Guards primary profile!)
+      // Delete Secondary Profile (Guards primary profile + Master PIN check!)
       if (method === 'POST' && pathname === '/api/profiles/delete') {
-        const { profileId } = await request.json().catch(() => ({}));
-        if (!profileId) return errorResponse('Profile ID required', 400, corsHeaders);
+        const parsed = await readJsonBody(request, 16 * 1024, authHeaders);
+        if (parsed.error) return parsed.error;
+        const profileId = asStr(parsed.data.profileId || parsed.data.id, 64).trim();
+        if (!profileId) return errorResponse('Profile ID required', 400, authHeaders);
 
         const profile = await env.DB.prepare(
           `SELECT profile_id, is_primary FROM profiles WHERE profile_id = ? AND account_id = ?`
         ).bind(profileId, auth.accountId).first();
 
-        if (!profile) return errorResponse('Profile not found', 404, corsHeaders);
+        if (!profile) return errorResponse('Profile not found', 404, authHeaders);
         if (profile.is_primary === 1) {
-          return errorResponse('Primary account profile cannot be deleted', 403, corsHeaders);
+          return errorResponse('Primary account profile cannot be deleted', 403, authHeaders);
         }
+
+        const proof = await verifyAccountParentalProof(auth.accountId, parsed.data, authHeaders);
+        if (proof.blocked) return proof.blocked;
+        if (!proof.ok) return proof.response;
 
         await env.DB.prepare(`DELETE FROM profiles WHERE profile_id = ? AND account_id = ?`).bind(profileId, auth.accountId).run();
         await env.DB.prepare(`DELETE FROM profile_data WHERE profile_id = ? AND account_id = ?`).bind(profileId, auth.accountId).run();
 
-        return jsonResponse({ success: true, message: 'Profile deleted' }, 200, corsHeaders);
+        return jsonResponse({ success: true, message: 'Profile removed' }, 200, authHeaders);
       }
 
-      // Push Profile Data (Watchlist, Resume Progress, Ratings, Searches)
+      // Push Profile Data (Watchlist, Resume Progress, Ratings, Searches — account-scoped)
       if (method === 'POST' && pathname === '/api/sync/push') {
-        const { profileId, dataType, items } = await request.json().catch(() => ({}));
+        const parsed = await readJsonBody(request, 512 * 1024, corsHeaders);
+        if (parsed.error) return parsed.error;
+        const profileId = asStr(parsed.data.profileId, 64).trim();
+        const dataType = asStr(parsed.data.dataType, 32).trim();
+        const items = parsed.data.items;
         if (!profileId || !dataType || !Array.isArray(items)) {
           return errorResponse('profileId, dataType, and items array required', 400, corsHeaders);
         }
+        if (!VALID_SYNC_DATA_TYPES.has(dataType)) {
+          return errorResponse('Invalid dataType', 400, corsHeaders);
+        }
+        if (items.length > 100) {
+          return errorResponse('Maximum 100 sync items per batch', 400, corsHeaders);
+        }
         const now = Date.now();
-        // The TV makes its own profile ids; the cloud only knows the ones it was told about. A push for an unknown profile
-        // used to fail on the profile link (HTTP 500) and stay "pending" forever, so the profile is registered first.
-        const known = await env.DB.prepare(`SELECT profile_id FROM profiles WHERE profile_id = ? AND account_id = ?`).bind(profileId, auth.accountId).first();
-        if (!known) {
-          const owned = await env.DB.prepare(`SELECT 1 AS x FROM profiles WHERE profile_id = ?`).bind(profileId).first();
-          if (owned) return errorResponse('Profile belongs to another account', 403, corsHeaders);
+        let ownedProfile = await env.DB.prepare(
+          `SELECT profile_id FROM profiles WHERE profile_id = ? AND account_id = ?`
+        ).bind(profileId, auth.accountId).first();
+        if (!ownedProfile) {
+          // Never reveal whether a profileId belongs to another account
+          const anyProfile = await env.DB.prepare(`SELECT account_id FROM profiles WHERE profile_id = ?`).bind(profileId).first();
+          if (anyProfile && anyProfile.account_id !== auth.accountId) {
+            return errorResponse('Profile not found', 404, corsHeaders);
+          }
+          const countRow = await env.DB.prepare(`SELECT COUNT(*) as count FROM profiles WHERE account_id = ?`).bind(auth.accountId).first();
+          if (countRow && countRow.count >= 5) {
+            return errorResponse('Maximum 5 profiles allowed', 400, corsHeaders);
+          }
           await env.DB.prepare(
             `INSERT OR IGNORE INTO profiles (profile_id, account_id, display_name, is_kids, is_primary, created_at, updated_at) VALUES (?, ?, 'TV profile', 0, 0, ?, ?)`
           ).bind(profileId, auth.accountId, now, now).run();
+          ownedProfile = await env.DB.prepare(
+            `SELECT profile_id FROM profiles WHERE profile_id = ? AND account_id = ?`
+          ).bind(profileId, auth.accountId).first();
+          if (!ownedProfile) {
+            return errorResponse('Profile not found', 404, corsHeaders);
+          }
         }
-        const stmts = items.map(it =>
-          env.DB.prepare(
-            `INSERT INTO profile_data (profile_id, account_id, data_type, item_key, data_json, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT(profile_id, data_type, item_key) DO UPDATE SET
-               data_json = excluded.data_json,
-               updated_at = excluded.updated_at`
-          ).bind(profileId, auth.accountId, dataType, it.itemKey || 'list', JSON.stringify(it.data || it), it.updatedAt || now)
-        );
+        const stmts = items
+          .filter(it => it && typeof it === 'object')
+          .map(it => {
+            const itemKey = asStr(it.itemKey || 'list', 128) || 'list';
+            const updatedAt = typeof it.updatedAt === 'number' && Number.isFinite(it.updatedAt) ? it.updatedAt : now;
+            return env.DB.prepare(
+              `INSERT INTO profile_data (profile_id, account_id, data_type, item_key, data_json, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(account_id, profile_id, data_type, item_key) DO UPDATE SET
+                 data_json = excluded.data_json,
+                 updated_at = excluded.updated_at
+               WHERE excluded.updated_at >= profile_data.updated_at`
+            ).bind(profileId, auth.accountId, dataType, itemKey, JSON.stringify(it.data || it), updatedAt);
+          });
 
-        if (stmts.length > 0) {
-          await env.DB.batch(stmts);
-        }
+        await runBatch(env.DB, stmts);
         return jsonResponse({ success: true, count: stmts.length }, 200, corsHeaders);
       }
 
@@ -1759,7 +2082,7 @@ export default {
 // Accepts only a well-formed TV code (SV-XXXX); anything else is dropped so it can never reach the page.
 function cleanTvCode(raw) {
   const c = String(raw || '').trim().toUpperCase();
-  return /^SV-[23456789A-HJKLMNP-Z]{4}$/.test(c) ? c : '';
+  return /^SV-[23456789A-HJKLMNP-Z]{4,8}$/.test(c) ? c : '';
 }
 
 function renderWebPairingUi(initialCode = '') {
@@ -1808,7 +2131,7 @@ function renderWebPairingUi(initialCode = '') {
     <h2>Link your TV</h2>
     <p class="sub">Enter the code shown on your TV screen. It looks like <b>SV-AB12</b>.</p>
     <label for="tvCode">Code on your TV</label>
-    <input id="tvCode" class="big" maxlength="7" autocomplete="off" autocapitalize="characters" placeholder="SV-XXXX">
+    <input id="tvCode" class="big" maxlength="11" autocomplete="off" autocapitalize="characters" placeholder="SV-XXXXXX">
     <button class="btn" id="btnCode">Continue</button>
     <div class="err" id="errCode" hidden></div>
   </section>
@@ -1931,8 +2254,8 @@ function renderWebPairingUi(initialCode = '') {
   // ---- Step 1
   function submitCode() {
     var c = $('tvCode').value.trim().toUpperCase();
-    if (/^[23456789A-HJKLMNP-Z]{4}$/.test(c)) c = 'SV-' + c;
-    if (!/^SV-[23456789A-HJKLMNP-Z]{4}$/.test(c)) { fail('errCode', 'Type the code exactly as shown on your TV, like SV-AB12.'); return; }
+    if (/^[23456789A-HJKLMNP-Z]{4,8}$/.test(c)) c = 'SV-' + c;
+    if (!/^SV-[23456789A-HJKLMNP-Z]{4,8}$/.test(c)) { fail('errCode', 'Type the code exactly as shown on your TV, like SV-AB1234.'); return; }
     tvCode = c; start();
   }
   $('btnCode').onclick = submitCode;
@@ -1956,12 +2279,12 @@ function renderWebPairingUi(initialCode = '') {
     busy($('btnIn'), true);
     api('/api/auth/login', 'POST', { email: email, password: pass }).then(function (res) {
       busy($('btnIn'), false, 'Sign in & link TV');
-      if (res.status !== 200 || !res.data.token) { fail('errAuth', errText(res)); return; }
-      if (res.data.isVerified === false) {            // never finished email verification: do that first
+      if (res.status === 403 && res.data && res.data.requireVerification) {
         pendingEmail = email; pendingPassword = pass;
         api('/api/auth/resend-code', 'POST', { email: email }).then(function () { gotoVerify(email); });
         return;
       }
+      if (res.status !== 200 || !res.data.token) { fail('errAuth', errText(res)); return; }
       afterSignedIn(res.data.token, res.data.email || email);
     });
   };

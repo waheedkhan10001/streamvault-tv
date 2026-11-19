@@ -371,6 +371,7 @@ let tvPairingPollInterval = null;
 
 let welcomeCodeRetryTimer = null;
 let welcomeCodeLoading = false;
+let welcomePollSecret = '';
 
 async function loadWelcomePairingCode() {
   if (welcomeCodeLoading) return;
@@ -382,13 +383,15 @@ async function loadWelcomePairingCode() {
     const res = await fetch('/api/auth/request-code', { method: 'POST' });
     const data = res && res.ok ? await res.json() : null;
     const code = data && data.success !== false && data.code ? String(data.code) : '';
+    const pollSecret = data && data.pollSecret ? String(data.pollSecret) : '';
     if (code) {
+      welcomePollSecret = pollSecret;
       if (codeDisplay) codeDisplay.innerText = code;
       if (qrImg) {
         qrImg.src = svQrDataUrl('https://streamvault-sync.streamvault-app.workers.dev/link?code=' + code);
         qrImg.style.visibility = 'visible';
       }
-      startTvPairingPolling(code);
+      startTvPairingPolling(code, pollSecret);
       loaded = true;
     }
   } catch (err) {
@@ -448,14 +451,16 @@ function refreshWelcomePairingCode() {
   if (ov && ov.style.display === 'flex') loadWelcomePairingCode();
 }
 
-function startTvPairingPolling(code) {
+function startTvPairingPolling(code, pollSecret) {
   stopTvPairingPolling();
+  const secret = pollSecret || welcomePollSecret || '';
   let busy = false;
   tvPairingPollInterval = setInterval(async () => {
     if (busy) return;
     busy = true;
     try {
-      const res = await fetch('/api/auth/poll-code?code=' + encodeURIComponent(code)).catch(() => null);
+      const pollHeaders = secret ? { 'X-Poll-Secret': secret } : {};
+      const res = await fetch('/api/auth/poll-code?code=' + encodeURIComponent(code), { headers: pollHeaders }).catch(() => null);
       if (!res || !res.ok) return;
       const data = await res.json();
       if (data.status === 'expired') { refreshWelcomePairingCode(); return; }
@@ -463,9 +468,11 @@ function startTvPairingPolling(code) {
         stopTvPairingPolling();
         let exData = null;
         try {
+          const exHeaders = { 'Content-Type': 'application/json' };
+          if (secret) exHeaders['X-Poll-Secret'] = secret;
           const exRes = await fetch('/api/auth/pair-exchange', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: exHeaders,
             body: JSON.stringify({ code, exchangeToken: data.exchangeToken })
           });
           exData = exRes && exRes.ok ? await exRes.json() : null;

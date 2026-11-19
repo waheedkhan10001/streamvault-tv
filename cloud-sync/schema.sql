@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS profile_data (
   item_key TEXT NOT NULL,  -- Universal dedupKey or 'list'
   data_json TEXT NOT NULL,
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (profile_id, data_type, item_key),
+  PRIMARY KEY (account_id, profile_id, data_type, item_key),
   FOREIGN KEY (profile_id) REFERENCES profiles(profile_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_profile_data_acc ON profile_data(account_id, updated_at);

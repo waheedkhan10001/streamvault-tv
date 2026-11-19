@@ -28,9 +28,28 @@ function createMockD1() {
                 const id = args[0];
                 return tables.accounts.find(u => u.account_id === id) || null;
               }
+              if (normalized.startsWith('INSERT INTO rate_limits')) {
+                const [key, resetAt, now] = [args[0], args[1], args[2]];
+                const existing = tables.rate_limits.find(r => r.key === key);
+                if (!existing) {
+                  tables.rate_limits.push({ key, count: 1, reset_at: resetAt });
+                  return { count: 1 };
+                }
+                if (existing.reset_at < now) {
+                  existing.count = 1;
+                  existing.reset_at = resetAt;
+                } else {
+                  existing.count++;
+                }
+                return { count: existing.count };
+              }
               if (normalized.includes('FROM email_codes WHERE email =')) {
-                const [email, code] = args;
-                return tables.email_codes.find(c => c.email === email && c.code === code && !c.is_used) || null;
+                const email = args[0];
+                if (normalized.includes('AND code =')) {
+                  return tables.email_codes.find(c => c.email === email && c.code === args[1] && !c.is_used) || null;
+                }
+                const matches = tables.email_codes.filter(c => c.email === email && !c.is_used && c.purpose === 'verify_email');
+                return matches.length ? matches[matches.length - 1] : null;
               }
               if (normalized.includes('FROM rate_limits WHERE key =')) {
                 const key = args[0];
@@ -114,9 +133,21 @@ function createMockD1() {
               } else if (normalized.startsWith('UPDATE accounts SET is_verified = 1')) {
                 const acc = tables.accounts.find(u => u.email === args[1]);
                 if (acc) acc.is_verified = 1;
-              } else if (normalized.startsWith('UPDATE email_codes SET is_used = 1')) {
+              } else if (normalized.startsWith('DELETE FROM sessions WHERE account_id =')) {
+                for (let i = tables.sessions.length - 1; i >= 0; i--) {
+                  if (tables.sessions[i].account_id === args[0]) tables.sessions.splice(i, 1);
+                }
+              } else if (normalized.startsWith('UPDATE email_codes SET attempts = attempts + 1')) {
                 const c = tables.email_codes.find(x => x.code_id === args[0]);
-                if (c) c.is_used = 1;
+                if (c) c.attempts = (c.attempts || 0) + 1;
+              } else if (normalized.startsWith('UPDATE email_codes SET is_used = 1')) {
+                if (normalized.includes('WHERE email =')) {
+                  tables.email_codes.forEach(x => { if (x.email === args[0] && x.purpose === 'verify_email') x.is_used = 1; });
+                } else {
+                  const c = tables.email_codes.find(x => x.code_id === args[0] && !x.is_used);
+                  if (c) { c.is_used = 1; return { success: true, meta: { changes: 1 } }; }
+                  return { success: true, meta: { changes: 0 } };
+                }
               }
               return { success: true };
             }
