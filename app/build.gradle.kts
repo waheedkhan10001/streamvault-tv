@@ -18,11 +18,14 @@ android {
     signingConfigs {
         create("release") {
             val keystoreFile = project.rootProject.file("release.keystore")
-            if (keystoreFile.exists()) {
+            val ksPass = System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+            val kAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() }
+            val kPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+            if (keystoreFile.exists() && ksPass != null && kAlias != null && kPass != null) {
                 storeFile = keystoreFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: "streamvault2026"
-                keyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "streamvault"
-                keyPassword = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: "streamvault2026"
+                storePassword = ksPass
+                keyAlias = kAlias
+                keyPassword = kPass
             } else {
                 val debugKeystore = signingConfigs.getByName("debug")
                 storeFile = debugKeystore.storeFile

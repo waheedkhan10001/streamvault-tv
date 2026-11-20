@@ -57,8 +57,8 @@ async function fetchLiveChannels(rebuildTabs = true) {
 
     if (tabContainer && (rebuildTabs || tabContainer.children.length === 0)) {
       tabContainer.innerHTML = tabs.map((t) => `
-        <button tabindex="0" data-tab-id="${t.id}" class="live-tab-btn tv-focusable ${currentLiveTab === t.id ? 'active' : ''}" onclick="selectLiveTab('${t.id}')">
-          ${t.label}
+        <button tabindex="0" data-tab-id="${escapeHtml(t.id)}" class="live-tab-btn tv-focusable js-live-tab ${currentLiveTab === t.id ? 'active' : ''}">
+          ${escapeHtml(t.label)}
         </button>
       `).join('');
       const activeBtn = tabContainer.querySelector(`.live-tab-btn[data-tab-id="${currentLiveTab}"]`);
@@ -87,7 +87,7 @@ async function fetchLiveChannels(rebuildTabs = true) {
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
-            <button tabindex="0" class="btn btn-primary tv-focusable" style="padding:7px 14px;font-size:12px;" onclick="startLivePlayback('${ch.streamId}', '${escapeHtml(ch.name)}')">
+            <button tabindex="0" class="btn btn-primary tv-focusable js-live-play" style="padding:7px 14px;font-size:12px;" data-stream-id="${escapeHtml(ch.streamId)}" data-ch-name="${escapeHtml(ch.name)}">
               Watch
             </button>
           </div>
@@ -239,10 +239,10 @@ async function loadProfile(vp) {
         <div style="font-size:10px;font-weight:700;color:#9CA3AF;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Select Profile (${profiles.length}/5)</div>
         <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:10px;">
           ${profiles.map(p => `
-            <div tabindex="0" class="profile-card-item tv-focusable ${p.id === activeProf.id ? 'is-active-profile' : ''}"
-                 onclick="switchUserProfile('${p.id}')" onfocus="playNavSound()"
+            <div tabindex="0" class="profile-card-item tv-focusable js-profile-switch ${p.id === activeProf.id ? 'is-active-profile' : ''}"
+                 data-profile-id="${escapeHtml(p.id)}" onfocus="playNavSound()"
                  style="background:var(--panel);border:${p.id === activeProf.id ? '2px solid var(--theme-accent)' : '1.5px solid var(--card-border)'};border-radius:10px;padding:6px 10px;display:flex;align-items:center;gap:10px;cursor:pointer;box-sizing:border-box;min-height:42px;box-shadow:${p.id === activeProf.id ? '0 0 14px var(--theme-glow)' : 'none'};">
-              <div class="profile-avatar-initials" style="width:28px;height:28px;border-radius:50%;background:${escapeHtml(p.avatarColor || 'var(--theme-accent)')};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900;flex-shrink:0;">
+              <div class="profile-avatar-initials" style="width:28px;height:28px;border-radius:50%;background:${safeColor(p.avatarColor, 'var(--theme-accent)')};display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:900;flex-shrink:0;">
                 ${escapeHtml((p.name || 'U').slice(0, 2).toUpperCase())}
               </div>
               <div style="min-width:0;flex:1;">
@@ -474,8 +474,8 @@ async function loadSettings(vp, skipFetch = false) {
                         <div data-pl-reason="${escapeHtml(pl.playlist_id)}" style="display:${live.error ? 'block' : 'none'};font-size:9.5px;color:#FCA5A5;margin-top:2px;">${escapeHtml(live.error)}</div>
                       </div>
                       <div style="display:flex;gap:5px;align-items:center;">
-                        <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;" onclick="openEditPlaylistModal('${pl.playlist_id}')">Edit</button>
-                        <button tabindex="0" class="btn tv-focusable" style="padding:2px 7px;font-size:9.5px;color:#F87171;" onclick="deletePlaylist('${pl.playlist_id}')">✕</button>
+                        <button tabindex="0" class="btn tv-focusable js-playlist-edit" style="padding:2px 7px;font-size:9.5px;" data-playlist-id="${escapeHtml(pl.playlist_id)}">Edit</button>
+                        <button tabindex="0" class="btn tv-focusable js-playlist-del" style="padding:2px 7px;font-size:9.5px;color:#F87171;" data-playlist-id="${escapeHtml(pl.playlist_id)}">✕</button>
                       </div>
                     </div>
                   `;

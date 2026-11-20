@@ -2,19 +2,19 @@
 
 ## 1. Project Overview & Deliverables
 - **Goal**: Native, ultra-smooth, premium Android TV IPTV client tailored for **TCL 55P635 LED TV** (Android TV OS 11, Kernel `4.14.187+`, 2GB RAM) replacing *IPTV Pro Stream Player*.
-- **Project Directory**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv`
+- **Project Directory**: `<project-dir>`
 - **GitHub Repository**: [`waheedkhan10001/streamvault-tv`](https://github.com/waheedkhan10001/streamvault-tv)
-- **Ready Release APK**: `C:\\Users\\wkhan\\.gemini\\antigravity\\scratch\\streamvault-tv\\StreamVault-TV.apk` (3.9 MB, Version 2.7.0, versionCode 2, R8 Minified)
-- **Wi-Fi Install Script**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\Push-To-TCL-TV.bat`
+- **Ready Release APK**: `<project-dir>\\StreamVault-TV.apk` (3.9 MB, Version 2.7.0, versionCode 2, R8 Minified)
+- **Wi-Fi Install Script**: `<project-dir>\Push-To-TCL-TV.bat`
 - **Host Companion Server**: Optional PC Simulator (`pc-runner/server.js`); Android TV app is 100% standalone and does not require PC runner.
 - **Cloud Backend**: Cloudflare Workers + D1 (`cloud-sync/`) with PBKDF2 authentication, sessions, and multi-device sync.
-- **TCL 55P635 Android TV**: Connected wirelessly via ADB at `192.168.100.42:5555`.
+- **TCL 55P635 Android TV**: Connected wirelessly via ADB at `<TV_LAN_IP>:5555`.
 
 ---
 
 ## 2. Real IPTV Account & Database State
 - **IPTV Server**: `[CONFIGURED_IN_APP]` (User: `[REDACTED]`, Pass: `[REDACTED]`)
-- **Database File**: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\pc-runner\data\streamvault_pc_db.json`
+- **Database File**: `<project-dir>\pc-runner\data\streamvault_pc_db.json`
 - **Catalog Scale**:
   - **60,853 clean VOD titles** (family-safe: adult, dancer clips, and stage drama clips automatically filtered).
   - **3,000 Live TV channels** with categories and favorite pinning.
@@ -151,7 +151,7 @@
    - Left: Account & Profile + Factory Reset; Right: Parental PIN + Search & Privacy.
 5. **Custom Display Name & Universal Data Persistence**:
    - Added user `Display Name` field in Settings and saved to `state.credentials.displayName`.
-   - Sidebar profile pill and user profile modal dynamically display `Waleed Khan`.
+   - Sidebar profile pill and user profile modal dynamically display `<Display Name>`.
    - User data architecture verified: Continue Watching, Watchlist, Ratings, and enrichments are keyed by universal `dedupKey` (TMDB ID / normalized title) and remain 100% intact even if IPTV account credentials change.
 6. **Recent Searches Clean Display**:
    - Recent search suggestions container is hidden when browsing catalog grids and only displays when actively typing in the search box.
@@ -187,7 +187,7 @@
    - **Detail Modal Version Selection**: Remote `ArrowDown` from action buttons navigates directly to the version pills row (`.detail-version-pill`), `ArrowLeft`/`ArrowRight` switches versions, `ArrowUp` returns to actions, and `ArrowDown` advances to More Like This chips.
    - **Subtitle Auto-Selection**: ExoPlayer Media3 configured with `TrackSelectionParameters` setting preferred language `"en"` and `Player.Listener.onTracksChanged` to auto-select English (or first discovered subtitle track) upon initial playback without requiring exit and resume.
    - **Soft Keyboard 'X' / Backspace**: Keycode 8 inside `<input>` and `<textarea>` deletes the preceding character rather than closing the dialog or exiting the view.
-   - **Settings Screen Cleanup**: Renamed "Account & Profile" -> "Profile", added editable Display Name (`Waleed Khan`) decoupled from IPTV credentials, renamed "Search and Privacy" -> "Privacy", simplified buttons to "Clear", "Unlock" / "Lock", "Reset", and subtext to "Wipes everything". Entire screen fits on 1080p without vertical scrolling.
+   - **Settings Screen Cleanup**: Renamed "Account & Profile" -> "Profile", added editable Display Name (`<Display Name>`) decoupled from IPTV credentials, renamed "Search and Privacy" -> "Privacy", simplified buttons to "Clear", "Unlock" / "Lock", "Reset", and subtext to "Wipes everything". Entire screen fits on 1080p without vertical scrolling.
    - **Search Bar & Suggestions Polish**: Popup aligns pixel-perfectly with search input width, limited to max 5 items, only appears while typing or clicking search box, dismisses on Enter or navigating Down to cards. Long-pressing OK on remote opens confirmation modal to remove item from history. Search button redesigned as icon-only (`🔍`) with dedicated voice search button (`🎙️`) wired to native `RecognizerIntent`.
    - **Main Screen Left Navigation**: Pressing Left from any content row jumps directly to `.nav-btn.active` in the sidebar instead of falling through to profile/settings at the bottom.
    - **Hero Banner Up Scroll**: Navigating `ArrowUp` from row 0 smoothly scrolls the hero billboard completely back into view.
@@ -205,7 +205,7 @@
    - Instant Recent Searches popup: Focusing or clicking `#filterSearchInput` displays recent searches immediately with clock icons (🕒) and "Hold OK to remove" hints.
 3. **Decoupled User Profiles & Cloud Sync from System Settings**:
    - Industry-standard separation: Avatar pill on bottom left strictly opens "User Profiles & Cloud Sync" (`loadProfile`), while Gear icon on bottom right strictly opens "Settings & System" (`loadSettings`).
-   - Profile Switcher: Horizontal profile cards (`Waleed Khan (Active)`, `Family`, `Kids (Kids Mode)`, `+ Add Profile`) with 1-click D-pad profile switching.
+   - Profile Switcher: Horizontal profile cards (`<Display Name> (Active)`, `Family`, `Kids (Kids Mode)`, `+ Add Profile`) with 1-click D-pad profile switching.
    - Profile Customization: Editable Display Name, 6 avatar color theme chips, and 1-click Kids Mode filter.
 4. **Cloudflare Workers + D1 Cloud Sync Architecture (Live on Edge)**:
    - **Production Edge URL**: `https://streamvault-sync.streamvault-app.workers.dev`
@@ -310,9 +310,9 @@
 
 ## 5. Live TV Verification on TCL 55P635
 - **Latest GitHub Commit**: [`6efd7a1`](https://github.com/waheedkhan10001/streamvault-tv/commit/6efd7a1c7a9aebb0afcce31efcd76062da9d137a) on branch `main` (20 files, +9,799 insertions).
-- Built and signed release APK: `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\StreamVault-TV.apk` (15.27 MB).
-- Installed live over Wi-Fi ADB to TCL 55P635 TV at `192.168.100.42:5555`.
-- Host PC companion running on `192.168.100.66:8765` over Wi-Fi SSID `EME-CORE-HAI`.
+- Built and signed release APK: `<project-dir>\StreamVault-TV.apk` (15.27 MB).
+- Installed live over Wi-Fi ADB to TCL 55P635 TV at `<TV_LAN_IP>:5555`.
+- Host PC companion running on `<PC_LAN_IP>:8765` over Wi-Fi SSID `<YOUR_WIFI_SSID>`.
 - Live screenshot verification:
    - `tv_settings_quad4_to_sidebar.png`: Verified Settings Left navigation cleanly focuses active Settings gear icon in sidebar.
    - `tv_settings_right_return.png`: Verified Right arrow from sidebar returns smoothly into Settings Quadrant 1 (`Playlist Name`).
@@ -363,17 +363,17 @@
 ---
 
 ## 6. Network & Daemon Quick-Check
-- **Wi-Fi Subnet**: Both PC and TV must stay connected to `EME-CORE-HAI` (`192.168.100.x`).
-  - PC IP: `192.168.100.66`
-  - TV IP: `192.168.100.42`
+- **Wi-Fi Subnet**: Both PC and TV must stay connected to `<YOUR_WIFI_SSID>` (`<LAN_SUBNET>`).
+  - PC IP: `<PC_LAN_IP>`
+  - TV IP: `<TV_LAN_IP>`
 - **Companion Daemon Command**:
   ```powershell
-  cd "C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\pc-runner"
+  cd "<project-dir>\pc-runner"
   node server.js
   ```
 - **ADB Reconnect**:
   ```powershell
-  & "C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\.toolchain\android-sdk\platform-tools\adb.exe" connect 192.168.100.42:5555
+  & "<project-dir>\.toolchain\android-sdk\platform-tools\adb.exe" connect <TV_LAN_IP>:5555
   ```
 
 ---
@@ -381,4 +381,4 @@
 ## 7. How to Continue in a New Chat
 1. Open a new chat in Antigravity.
 2. Paste this exact prompt:
-   > "I am continuing development on StreamVault TV (Android TV IPTV app running live on TCL 55P635). All project files, architecture, and live verification state are documented in `C:\Users\wkhan\.gemini\antigravity\scratch\streamvault-tv\STREAMVAULT_HANDOFF.md`. Please review that file and confirm you are up to date so we can proceed with polishing."
+   > "I am continuing development on StreamVault TV (Android TV IPTV app running live on TCL 55P635). All project files, architecture, and live verification state are documented in `<project-dir>\STREAMVAULT_HANDOFF.md`. Please review that file and confirm you are up to date so we can proceed with polishing."

@@ -2,9 +2,21 @@ package com.streamvault.tv.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.SystemClock
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.security.KeyStore
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
 
 /**
  * Manages IPTV credentials, preferred/hidden languages, recent searches,
@@ -30,6 +42,66 @@ class PreferencesManager(context: Context) {
     // Session-only 18+ Vault Unlock (Never persisted to disk, localStorage or cloud!)
     private val adultVaultUnlockedSession = AtomicBoolean(false)
     private val extrasUnlockedSession = AtomicBoolean(false)
+    @Volatile private var pinLockoutElapsedUntil: Long = 0L
+
+    private object SecretCipher {
+        private const val ALIAS = "streamvault_prefs_v1"
+        private const val PREFIX = "enc_v1:"
+
+        private fun getOrCreateKey(): SecretKey? = runCatching {
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            (ks.getKey(ALIAS, null) as? SecretKey) ?: run {
+                val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+                kg.init(
+                    KeyGenParameterSpec.Builder(
+                        ALIAS,
+                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                    )
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setKeySize(256)
+                        .build()
+                )
+                kg.generateKey()
+            }
+        }.getOrNull()
+
+        fun encrypt(plain: String): String {
+            if (plain.isEmpty()) return ""
+            val key = getOrCreateKey() ?: return plain // JVM/Robolectric unit test env lacks AndroidKeyStore
+            return runCatching {
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.ENCRYPT_MODE, key)
+                val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+                val ct = Base64.encodeToString(cipher.doFinal(plain.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+                "$PREFIX$iv:$ct"
+            }.getOrDefault(plain)
+        }
+
+        fun decrypt(stored: String?): String {
+            if (stored.isNullOrEmpty()) return ""
+            if (!stored.startsWith(PREFIX)) return stored // Legacy plaintext value
+            val parts = stored.removePrefix(PREFIX).split(":", limit = 2)
+            if (parts.size != 2) return ""
+            val key = getOrCreateKey() ?: return ""
+            return runCatching {
+                val iv = Base64.decode(parts[0], Base64.NO_WRAP)
+                val ct = Base64.decode(parts[1], Base64.NO_WRAP)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+                String(cipher.doFinal(ct), Charsets.UTF_8)
+            }.getOrDefault("")
+        }
+    }
+
+    private fun getSecretString(key: String, default: String = ""): String {
+        val raw = prefs.getString(key, null) ?: return default
+        return SecretCipher.decrypt(raw).ifEmpty { default }
+    }
+
+    private fun putSecretString(editor: SharedPreferences.Editor, key: String, value: String) {
+        if (value.isBlank()) editor.remove(key) else editor.putString(key, SecretCipher.encrypt(value))
+    }
 
     private val _credentialsFlow = MutableStateFlow(loadCredentials())
     val credentialsFlow: StateFlow<XtreamCredentials> = _credentialsFlow
@@ -54,13 +126,16 @@ class PreferencesManager(context: Context) {
         val hiddenLangs = prefs.getStringSet("hidden_langs", emptySet()) ?: emptySet()
         val subLangsStr = prefs.getString("sub_langs", "en,ur,hi,ar") ?: "en,ur,hi,ar"
 
+        val decodedPassword = getSecretString("password", "")
+        val decodedTmdb = getSecretString("tmdb_api_key", XtreamCredentials.DEFAULT_TMDB_KEY)
+            .takeIf { it.isNotBlank() } ?: XtreamCredentials.DEFAULT_TMDB_KEY
+
         return XtreamCredentials(
             playlistName = prefs.getString("playlist_name", "My IPTV") ?: "My IPTV",
             serverUrl = prefs.getString("server_url", "") ?: "",
             username = prefs.getString("username", "") ?: "",
-            password = prefs.getString("password", "") ?: "",
-            tmdbApiKey = prefs.getString("tmdb_api_key", XtreamCredentials.DEFAULT_TMDB_KEY)
-                ?.takeIf { it.isNotBlank() } ?: XtreamCredentials.DEFAULT_TMDB_KEY,
+            password = decodedPassword,
+            tmdbApiKey = decodedTmdb,
             preferredLanguages = prefLangs,
             hiddenLanguages = hiddenLangs,
             preferredSubtitleLanguages = subLangsStr.split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -68,39 +143,44 @@ class PreferencesManager(context: Context) {
     }
 
     fun saveCredentials(creds: XtreamCredentials) {
-        prefs.edit()
+        val editor = prefs.edit()
             .putString("playlist_name", creds.playlistName.trim())
             .putString("server_url", creds.serverUrl.trim())
             .putString("username", creds.username.trim())
-            .putString("password", creds.password.trim())
-            .putString("tmdb_api_key", creds.tmdbApiKey.trim().ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY })
             .putStringSet("preferred_langs", creds.preferredLanguages)
             .putStringSet("hidden_langs", creds.hiddenLanguages)
             .putString("sub_langs", creds.preferredSubtitleLanguages.joinToString(","))
-            .commit()
+        putSecretString(editor, "password", creds.password.trim())
+        putSecretString(editor, "tmdb_api_key", creds.tmdbApiKey.trim().ifBlank { XtreamCredentials.DEFAULT_TMDB_KEY })
+        editor.commit()
         _credentialsFlow.value = creds
     }
 
     // --- Cloud Session & Authentication ---
     fun getCloudSyncBaseUrl(): String {
-        return prefs.getString("cloud_sync_base_url", "https://streamvault-sync.streamvault-app.workers.dev")
+        val stored = prefs.getString("cloud_sync_base_url", "https://streamvault-sync.streamvault-app.workers.dev")
             ?: "https://streamvault-sync.streamvault-app.workers.dev"
+        return if (stored.startsWith("https://", ignoreCase = true)) stored else "https://streamvault-sync.streamvault-app.workers.dev"
     }
 
     fun setCloudSyncBaseUrl(url: String) {
-        prefs.edit().putString("cloud_sync_base_url", url.trim().trimEnd('/')).apply()
+        val clean = url.trim().trimEnd('/')
+        if (!clean.startsWith("https://", ignoreCase = true)) return
+        prefs.edit().putString("cloud_sync_base_url", clean).apply()
     }
 
     fun getAuthToken(): String? {
-        return prefs.getString("auth_token", null)?.takeIf { it.isNotBlank() }
+        return getSecretString("auth_token", "").takeIf { it.isNotBlank() }
     }
 
     fun setAuthToken(token: String?) {
+        val editor = prefs.edit()
         if (token.isNullOrBlank()) {
-            prefs.edit().remove("auth_token").apply()
+            editor.remove("auth_token")
         } else {
-            prefs.edit().putString("auth_token", token.trim()).apply()
+            putSecretString(editor, "auth_token", token.trim())
         }
+        editor.apply()
     }
 
     fun getAccountEmail(): String? {
@@ -144,9 +224,16 @@ class PreferencesManager(context: Context) {
             .remove("parental_pin_salt")
             .remove("pin_failed_attempts")
             .remove("pin_lockout_until")
-            .apply()
+            .remove("server_url")
+            .remove("username")
+            .remove("password")
+            .remove("playlist_name")
+            .remove("tmdb_api_key")
+            .commit()
+        pinLockoutElapsedUntil = 0L
         adultVaultUnlockedSession.set(false)
         extrasUnlockedSession.set(false)
+        _credentialsFlow.value = XtreamCredentials()
     }
 
     var lastFullSyncTimestamp: Long
@@ -226,12 +313,29 @@ class PreferencesManager(context: Context) {
         return salt
     }
 
-    private fun hashPin(pin: String): String {
-        val salt = getPinSalt()
-        val md = java.security.MessageDigest.getInstance("SHA-256")
+    companion object {
+        private val PIN_REGEX = Regex("^\\d{4}$")
+        private val PIN_HASH_REGEX = Regex("^(?:[0-9a-f]{64}|pbkdf2_sha256\\x24(?:10000|[1-9]\\d{4,5})\\x24[0-9a-f]{64})$")
+        private val PIN_SALT_REGEX = Regex("^[A-Za-z0-9-]{8,64}$")
+        private const val PIN_PBKDF2_ITERATIONS = 100_000
+    }
+
+    private fun hashPinPbkdf2(pin: String, salt: String, iterations: Int = PIN_PBKDF2_ITERATIONS): String {
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val spec = PBEKeySpec(pin.toCharArray(), salt.toByteArray(Charsets.UTF_8), iterations, 256)
+        val bytes = factory.generateSecret(spec).encoded
+        spec.clearPassword()
+        val hex = bytes.joinToString("") { "%02x".format(it) }
+        return "pbkdf2_sha256" + '$' + iterations + '$' + hex
+    }
+
+    private fun hashPinLegacySha256(pin: String, salt: String): String {
+        val md = MessageDigest.getInstance("SHA-256")
         val bytes = md.digest("$pin:$salt".toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }
     }
+
+    private fun hashPin(pin: String): String = hashPinPbkdf2(pin, getPinSalt())
 
     fun hasCustomParentalPin(): Boolean {
         val hash = prefs.getString("parental_pin_hash", null)
@@ -244,38 +348,68 @@ class PreferencesManager(context: Context) {
 
     fun getPinLockoutUntil(): Long = prefs.getLong("pin_lockout_until", 0L)
 
+    fun isPinLockedOut(): Boolean {
+        val elapsedNow = SystemClock.elapsedRealtime()
+        if (pinLockoutElapsedUntil > 0L && elapsedNow < pinLockoutElapsedUntil) return true
+        return System.currentTimeMillis() < getPinLockoutUntil()
+    }
+
+    @Synchronized
     fun verifyParentalPin(inputPin: String): Boolean {
-        val failedAttempts = prefs.getInt("pin_failed_attempts", 0)
-        val lockoutUntil = prefs.getLong("pin_lockout_until", 0L)
-        val now = System.currentTimeMillis()
-        if (now < lockoutUntil) return false
+        val cleanPin = inputPin.trim()
+        if (isPinLockedOut()) return false
 
         val storedHash = prefs.getString("parental_pin_hash", null)
-        if (storedHash.isNullOrBlank()) {
-            return false
-        }
-        val inputHash = hashPin(inputPin.trim())
+        if (storedHash.isNullOrBlank()) return false
 
-        if (inputHash == storedHash) {
-            prefs.edit().putInt("pin_failed_attempts", 0).putLong("pin_lockout_until", 0L).apply()
+        val now = System.currentTimeMillis()
+        val failedAttempts = prefs.getInt("pin_failed_attempts", 0)
+        val matched = if (PIN_REGEX.matches(cleanPin)) {
+            val salt = getPinSalt()
+            if (storedHash.startsWith("pbkdf2_sha256\$")) {
+                val parts = storedHash.split("\$")
+                val iters = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                if (parts.size == 3 && iters in 10_000..500_000) {
+                    val computed = hashPinPbkdf2(cleanPin, salt, iters)
+                    MessageDigest.isEqual(computed.toByteArray(Charsets.UTF_8), storedHash.toByteArray(Charsets.UTF_8))
+                } else false
+            } else {
+                val legacy = hashPinLegacySha256(cleanPin, salt)
+                MessageDigest.isEqual(legacy.toByteArray(Charsets.UTF_8), storedHash.toByteArray(Charsets.UTF_8))
+            }
+        } else {
+            false
+        }
+
+        if (matched) {
+            pinLockoutElapsedUntil = 0L
+            val editor = prefs.edit().putInt("pin_failed_attempts", 0).putLong("pin_lockout_until", 0L)
+            if (!storedHash.startsWith("pbkdf2_sha256\$")) {
+                editor.putString("parental_pin_hash", hashPin(cleanPin))
+            }
+            editor.commit()
             return true
         } else {
             val newAttempts = failedAttempts + 1
             val editor = prefs.edit().putInt("pin_failed_attempts", newAttempts)
             if (newAttempts >= 5) {
-                editor.putLong("pin_lockout_until", now + 60_000L) // 60s cooldown
+                pinLockoutElapsedUntil = SystemClock.elapsedRealtime() + 60_000L
+                editor.putLong("pin_lockout_until", now + 60_000L)
             }
-            editor.apply()
+            editor.commit()
             return false
         }
     }
 
+    @Synchronized
     fun setParentalPin(currentPin: String?, newPin: String): Boolean {
-        if (newPin.trim().length != 4) return false
+        val cleanNew = newPin.trim()
+        if (!PIN_REGEX.matches(cleanNew)) return false
         if (hasCustomParentalPin()) {
             if (currentPin == null || !verifyParentalPin(currentPin)) return false
         }
-        val newHash = hashPin(newPin.trim())
+        pinLockoutElapsedUntil = 0L
+        val newHash = hashPin(cleanNew)
         return prefs.edit()
             .putString("parental_pin_hash", newHash)
             .putInt("pin_failed_attempts", 0)
@@ -283,25 +417,32 @@ class PreferencesManager(context: Context) {
             .commit()
     }
 
+    @Synchronized
     fun restorePinHash(hash: String?, salt: String? = null) {
-        if (hash.isNullOrBlank()) return
-        val editor = prefs.edit().putString("parental_pin_hash", hash)
-        if (!salt.isNullOrBlank()) {
-            editor.putString("parental_pin_salt", salt)
+        val cleanHash = hash?.trim()?.lowercase(java.util.Locale.ROOT) ?: ""
+        val cleanSalt = salt?.trim() ?: ""
+        if (!PIN_HASH_REGEX.matches(cleanHash)) return
+        val editor = prefs.edit().putString("parental_pin_hash", cleanHash)
+        if (PIN_SALT_REGEX.matches(cleanSalt)) {
+            editor.putString("parental_pin_salt", cleanSalt)
         }
+        pinLockoutElapsedUntil = 0L
         editor.putInt("pin_failed_attempts", 0)
             .putLong("pin_lockout_until", 0L)
-            .apply()
+            .commit()
     }
 
+    @Synchronized
     fun resetParentalPinWithAuth(newPin: String): Boolean {
-        if (newPin.trim().length != 4) return false
-        val newHash = hashPin(newPin.trim())
+        val cleanNew = newPin.trim()
+        if (!PIN_REGEX.matches(cleanNew)) return false
+        pinLockoutElapsedUntil = 0L
+        val newHash = hashPin(cleanNew)
         prefs.edit()
             .putString("parental_pin_hash", newHash)
             .putInt("pin_failed_attempts", 0)
             .putLong("pin_lockout_until", 0L)
-            .apply()
+            .commit()
         return true
     }
 

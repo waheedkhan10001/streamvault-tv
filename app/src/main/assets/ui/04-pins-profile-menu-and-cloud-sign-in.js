@@ -11,8 +11,8 @@ async function announceCheckResult() {
       const sync = (appStatus && appStatus.syncStatus) || {};
       if (sync.isSyncing) { started = true; continue; }
       if (!started && i < 4) continue;   // give it a few seconds to start
-      if (sync.error) { showToast("⚠ Check failed: " + escapeHtml(String(sync.error)), 8000); }
-      else showToast('✓ ' + escapeHtml(String(sync.note || 'Your catalog is up to date.')), 8000);
+      if (sync.error) { showToast("⚠ Check failed: " + String(sync.error), 8000); }
+      else showToast('✓ ' + String(sync.note || 'Your catalog is up to date.'), 8000);
       break;
     }
   } catch (_) {} finally { checkResultWatcher = false; }
@@ -252,7 +252,7 @@ function showToast(msg, durationMs = 3200) {
     toast.style.cssText = 'position:fixed;bottom:36px;left:50%;transform:translateX(-50%);background:#1A1333;border:1.5px solid var(--theme-border);border-radius:30px;padding:11px 26px;font-size:13.5px;font-weight:800;color:#FFFFFF;box-shadow:0 12px 36px rgba(0,0,0,0.85);z-index:99999;pointer-events:none;opacity:0;transition:opacity 0.25s ease,transform 0.25s ease;display:flex;align-items:center;gap:10px;';
     document.body.appendChild(toast);
   }
-  toast.innerHTML = msg;
+  toast.textContent = String(msg == null ? '' : msg);
   toast.style.opacity = '1';
   toast.style.transform = 'translateX(-50%) translateY(0)';
   if (window._toastTimer) clearTimeout(window._toastTimer);
@@ -418,6 +418,13 @@ async function handleCloudAuthSubmit(e) {
     });
     const data = await res.json();
     if (data.requireVerification) {
+      if (endpoint === '/api/auth/login') {
+        await fetch(CLOUD_SYNC_BASE + '/api/auth/resend-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        }).catch(() => null);
+      }
       currentPendingVerifyEmail = email;
       const lbl = document.getElementById('cloudVerifyEmailLabel');
       if (lbl) lbl.innerText = email;
@@ -543,11 +550,11 @@ function closeSignOutModal() {
 
 let signOutUnsyncedAcknowledged = false;
 
-async function confirmSignOutAccount() {
+async function confirmSignOutAccount(force = false) {
   playNavSound();
   const token = getStoredAuthToken();
-  // Push any unsynced profile changes BEFORE the token and local data are wiped.
-  if (token && !signOutUnsyncedAcknowledged && ProfileSyncManager.getPendingCount() > 0) {
+  // Push any unsynced profile changes BEFORE the token and local data are wiped (skip if forced by 401 expiry).
+  if (!force && token && !signOutUnsyncedAcknowledged && ProfileSyncManager.getPendingCount() > 0) {
     const btn = document.getElementById('btnConfirmSignOut');
     const warn = document.getElementById('signOutUnsyncedWarning');
     if (btn) btn.disabled = true;
@@ -573,13 +580,21 @@ async function confirmSignOutAccount() {
       }).catch(() => {});
     } catch (_) {}
   }
-  try { localStorage.removeItem(ProfileSyncManager.queueKey); localStorage.removeItem(ProfileSyncManager.lastSyncKey); } catch (_) {}
+  try {
+    localStorage.removeItem(ProfileSyncManager.queueKey);
+    localStorage.removeItem(ProfileSyncManager.lastSyncKey);
+    localStorage.removeItem('sv_vault_before_kids');
+  } catch (_) {}
   localStorage.removeItem('sv_auth_token');
   localStorage.removeItem('streamvault_session_token');
   localStorage.removeItem('streamvault_account');
   localStorage.removeItem('sv_last_profile_id');
   localStorage.removeItem('streamvault_active_theme');
   sessionStorage.clear();
+  window.vaultBeforeKids = null;
+  if (typeof lastVerifiedPin !== 'undefined') lastVerifiedPin = '';
+  if (typeof cachedPlaylists !== 'undefined') cachedPlaylists = [];
+  if (typeof latestData !== 'undefined') latestData = null;
 
   try {
     await fetch('/api/session', { method: 'DELETE' }).catch(() => {});
@@ -847,7 +862,7 @@ async function triggerCloudSync() {
     await loadPlaylistsData();
     const left = ProfileSyncManager.getPendingCount();
     if (left > 0) {
-      showToast('⚠ ' + left + ' change' + (left > 1 ? 's' : '') + ' could not be sent yet' + (ProfileSyncManager.lastError ? ' (' + escapeHtml(ProfileSyncManager.lastError) + ')' : '') + '. They stay saved here and will retry.', 7000);
+      showToast('⚠ ' + left + ' change' + (left > 1 ? 's' : '') + ' could not be sent yet' + (ProfileSyncManager.lastError ? ' (' + ProfileSyncManager.lastError + ')' : '') + '. They stay saved here and will retry.', 7000);
     } else {
       ProfileSyncManager.setLastSyncTimestamp(Date.now());
       showToast('✓ Cloud Synchronized');

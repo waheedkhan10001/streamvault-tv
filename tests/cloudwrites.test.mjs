@@ -35,8 +35,8 @@ globalThis.fetch = async (u) => {
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? '  PASS' : '  FAIL'}  ${name}${ok || !detail ? '' : '  -> ' + detail}`); };
 let ip = 10;
-const call = async (method, route, body, token, fixedIp) => {
-  const res = await worker.fetch(new Request('https://sync.test' + route, { method, headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': fixedIp || ('198.51.100.' + (ip++)), ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: body ? JSON.stringify(body) : undefined }), env);
+const call = async (method, route, body, token, fixedIp, extraHeaders = {}) => {
+  const res = await worker.fetch(new Request('https://sync.test' + route, { method, headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': fixedIp || ('198.51.100.' + (ip++)), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...extraHeaders }, body: body ? JSON.stringify(body) : undefined }), env);
   const text = await res.text();
   let json = null; try { json = JSON.parse(text); } catch (_) {}
   return { status: res.status, json, text };
@@ -59,9 +59,12 @@ check('a title\'s details are stored once', dr.status === 200 && writesTo(/tmdb_
 // 2. Waiting for the phone link does not write
 const rc = await call('POST', '/api/auth/request-code', {}, null, '203.0.113.5');
 const code = rc.json.code;
+const pollSecret = rc.json.pollSecret;
+const noSec = await call('GET', '/api/auth/poll-code?code=' + code, null, null, '203.0.113.4');
+check('poll-code without X-Poll-Secret is rejected (403)', noSec.status === 403, String(noSec.status));
 log.length = 0;
 let allPending = true;
-for (let i = 0; i < 30; i++) { const p = await call('GET', '/api/auth/poll-code?code=' + code, null, null, '203.0.113.5'); if (p.json.status !== 'pending') allPending = false; }
+for (let i = 0; i < 30; i++) { const p = await call('GET', '/api/auth/poll-code?code=' + code, null, null, '203.0.113.5', { 'X-Poll-Secret': pollSecret }); if (p.json.status !== 'pending') allPending = false; }
 check('30 checks of a live code all answer "pending"', allPending);
 check('...and write nothing at all', log.filter(isWrite).length === 0, String(log.filter(isWrite).length));
 // guessing wrong codes is still limited (61st attempt in a minute is refused)

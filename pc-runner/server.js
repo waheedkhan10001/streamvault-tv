@@ -14,13 +14,65 @@ const path = require('path');
 const os = require('os');
 const { URL } = require('url');
 
-const PORT = 8765;
+const PORT = parseInt(process.env.PORT || '8765', 10) || 8765;
+const HOST = process.env.HOST || '127.0.0.1';
+const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_SUB_BYTES = 2 * 1024 * 1024;
+
+function escHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function redactSecret(msg) {
+  let s = String(msg == null ? '' : msg);
+  s = s.replace(/(password=|api_key=|token=)[^&\s"']+/gi, '$1***');
+  s = s.replace(/\/(movie|series|live)\/[^/\s]+\/[^/\s]+\//gi, '/$1/***/***/');
+  return s;
+}
+
+function isValidHttpUrl(raw) {
+  try {
+    const u = new URL(String(raw || '').trim());
+    return (u.protocol === 'http:' || u.protocol === 'https:') && Boolean(u.hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
+function isSafeExternalUrl(raw) {
+  try {
+    const u = new URL(String(raw || '').trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    if (!h || h === 'localhost' || h.endsWith('.local') || h === '::1') return false;
+    if (/^127\.|^10\.|^192\.168\.|^169\.254\.|^0\./.test(h)) return false;
+    const m172 = h.match(/^172\.(\d+)\./);
+    if (m172 && Number(m172[1]) >= 16 && Number(m172[1]) <= 31) return false;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function corsHeadersFor(req) {
+  const origin = req && req.headers ? req.headers.origin : '';
+  if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+    return { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' };
+  }
+  return { 'Vary': 'Origin' };
+}
+
 process.on('uncaughtException', (err) => {
   if (err.code === 'EOF' || err.code === 'EPIPE' || err.code === 'ECONNRESET') return;
-  console.error('[Daemon Error]', err.message);
+  console.error('[Daemon Error]', redactSecret(err.message));
 });
 process.on('unhandledRejection', (err) => {
-  console.error('[Daemon Rejection]', err?.message || err);
+  console.error('[Daemon Rejection]', redactSecret(err?.message || err));
 });
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -97,7 +149,7 @@ let state = {
   liveChannels: [],
   parentalControl: {
     isLocked: true,
-    pin: '0000',
+    pin: null,
     showAdult: false
   },
   favoriteLiveChannels: [],
@@ -138,7 +190,7 @@ function scheduleSaveState() {
   }, 45000);
 }
 
-// Smart Classification of Category & Title for Real IPTV Providers (e.g., aadiflix.online)
+// Smart Classification of Category & Title for Xtream Codes IPTV Providers
 function classifyCategoryAndTitle(rawTitle, categoryName = '', existingTmdbId = 0) {
   const catUpper = String(categoryName || '').toUpperCase();
   let working = String(rawTitle || '').trim();
@@ -545,8 +597,9 @@ function getLocalIp() {
   return '127.0.0.1';
 }
 
-function fetchJsonUrl(urlStr, timeoutMs = 35000) {
+function fetchJsonUrl(urlStr, timeoutMs = 35000, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
+    if (!isValidHttpUrl(urlStr)) return reject(new Error('Invalid URL scheme'));
     const parsed = new URL(urlStr);
     const lib = parsed.protocol === 'https:' ? https : http;
     const req = lib.get(
@@ -554,7 +607,10 @@ function fetchJsonUrl(urlStr, timeoutMs = 35000) {
       { headers: { 'User-Agent': 'IPTVSmartersPlayer/1.0' }, timeout: timeoutMs },
       (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(fetchJsonUrl(res.headers.location, timeoutMs));
+          res.resume();
+          if (redirectsLeft <= 0) return reject(new Error('Too many redirects'));
+          const nextUrl = new URL(res.headers.location, parsed).toString();
+          return resolve(fetchJsonUrl(nextUrl, timeoutMs, redirectsLeft - 1));
         }
         if (res.statusCode !== 200) {
           res.resume();
@@ -611,7 +667,7 @@ async function runLiveIptvSync(force = false) {
         vods = await fetchJsonUrl(`${apiBase}&action=get_vod_streams`, 120000);
         console.log(`[Sync] VOD Streams received: ${vods?.length || 0}`);
       } catch (e) {
-        console.error(`[Sync] VOD Streams error: ${e.message}`);
+        console.error(`[Sync] VOD Streams error: ${redactSecret(e.message)}`);
       }
 
       const catMap = {};
@@ -1420,6 +1476,23 @@ function srtToWebVtt(srtText, offsetSec = 0) {
 }
 
 const server = http.createServer(async (req, res) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+
+  if (req.method === 'POST') {
+    let bodyBytes = 0;
+    req.on('data', (chunk) => {
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_BODY_BYTES) {
+        if (!res.headersSent) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Payload too large' }));
+        }
+        req.destroy();
+      }
+    });
+  }
+
   const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = parsedUrl.pathname;
 
@@ -1472,8 +1545,8 @@ const server = http.createServer(async (req, res) => {
         } catch (_) {}
 
         state.cloudSyncAccount = {
-          email: email || 'waleed@streamvault.tv',
-          displayName: displayName || 'Waleed Khan',
+          email: String(email || '').trim(),
+          displayName: String(displayName || '').trim() || 'User',
           linkedAt: Date.now()
         };
         if (state.activeTvCode && state.activeTvCode.code === (code || '').toUpperCase()) {
@@ -1595,7 +1668,7 @@ const server = http.createServer(async (req, res) => {
     const safeParental = {
       isLocked: state.parentalControl ? state.parentalControl.isLocked : true,
       showAdult: state.parentalControl ? state.parentalControl.showAdult : false,
-      hasCustomPin: ((state.parentalControl && state.parentalControl.pin) || '0000') !== '0000'
+      hasCustomPin: Boolean(state.parentalControl && state.parentalControl.pin && state.parentalControl.pin !== '0000')
     };
     // Same shape as the real TV: the password is never sent to the screen (only hasPassword)
     const { password: _pw, ...safeCredentials } = state.credentials || {};
@@ -2261,9 +2334,9 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
             res.writeHead(403, { 'Content-Type': 'application/json' });
             return res.end(JSON.stringify({ success: false, error: 'Current PIN is incorrect' }));
           }
-          if (!newPin || String(newPin).length !== 4) {
+          if (!/^\d{4}$/.test(String(newPin || ''))) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            return res.end(JSON.stringify({ success: false, error: 'New PIN must be exactly 4 digits' }));
+            return res.end(JSON.stringify({ success: false, error: 'New PIN must be exactly 4 numeric digits' }));
           }
           state.parentalControl.pin = String(newPin);
           scheduleSaveState();
@@ -2617,11 +2690,11 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
         res.writeHead(502);
         return res.end('Too many redirects');
       }
-      let u;
-      try { u = new URL(urlStr); } catch (_) {
+      if (!isValidHttpUrl(urlStr)) {
         res.writeHead(400);
         return res.end('Invalid url');
       }
+      const u = new URL(urlStr);
       const lib = u.protocol === 'https:' ? https : http;
       const headers = { 'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18' };
       if (req.headers.range) headers.Range = req.headers.range;
@@ -2630,6 +2703,10 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
         if (upRes.statusCode >= 300 && upRes.statusCode < 400 && upRes.headers.location) {
           upRes.resume();
           const nextUrl = new URL(upRes.headers.location, urlStr).toString();
+          if (!isValidHttpUrl(nextUrl)) {
+            if (!res.headersSent) res.writeHead(400);
+            return res.end('Invalid redirect target');
+          }
           return proxyStream(nextUrl, redirectsLeft - 1);
         }
 
@@ -2639,7 +2716,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
         // For PC Browser Playback: Remux MKV on-the-fly to fragmented MP4 (80ms start, 0% CPU, universal browser compatibility)
         if (!isRaw && isMatroska) {
           res.writeHead(200, {
-            'Access-Control-Allow-Origin': '*',
+            ...corsHeadersFor(req),
             'Content-Type': 'video/mp4',
             'Cache-Control': 'no-cache, no-store'
           });
@@ -2670,7 +2747,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
 
         // Direct Range Passthrough (for Android TV ExoPlayer / MP4 streams)
         const resHeaders = {
-          'Access-Control-Allow-Origin': '*',
+          ...corsHeadersFor(req),
           'Accept-Ranges': upRes.headers['accept-ranges'] || 'bytes',
           'Content-Type': upRes.headers['content-type'] || 'video/mp4'
         };
@@ -2711,16 +2788,35 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
       res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8' });
       return res.end('WEBVTT\n\n00:00:01.000 --> 00:05:00.000\nSubtitles Active\n');
     }
+    if (!isSafeExternalUrl(subUrl)) {
+      res.writeHead(400, { 'Content-Type': 'text/vtt; charset=utf-8' });
+      return res.end('WEBVTT\n\n');
+    }
     try {
       const parsed = new URL(subUrl);
       const lib = parsed.protocol === 'https:' ? https : http;
       lib.get(subUrl, { headers: { 'User-Agent': 'StreamVaultTV/1.0' } }, (upRes) => {
         let srt = '';
-        upRes.on('data', (c) => (srt += c));
+        let subBytes = 0;
+        let aborted = false;
+        upRes.on('data', (c) => {
+          subBytes += c.length;
+          if (subBytes > MAX_SUB_BYTES) {
+            aborted = true;
+            upRes.destroy();
+            if (!res.headersSent) {
+              res.writeHead(413, { 'Content-Type': 'text/vtt; charset=utf-8' });
+              res.end('WEBVTT\n\n');
+            }
+            return;
+          }
+          srt += c;
+        });
         upRes.on('end', () => {
+          if (aborted) return;
           res.writeHead(200, {
-            'Content-Type': 'text/vtt; charset=utf-8',
-            'Access-Control-Allow-Origin': '*'
+            ...corsHeadersFor(req),
+            'Content-Type': 'text/vtt; charset=utf-8'
           });
           res.end(srtToWebVtt(srt, offsetSec));
         });
@@ -2772,10 +2868,15 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
         }
         if (pathname === '/api/playlists' && req.method === 'POST') {
           const data = JSON.parse(body || '{}');
+          const candUrl = data.serverUrl !== undefined ? String(data.serverUrl).trim() : '';
+          if (candUrl && !isValidHttpUrl(candUrl)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ success: false, error: 'Invalid http/https serverUrl' }));
+          }
           state.credentials = {
             ...state.credentials,
             playlistName: data.name || data.playlistName || state.credentials.playlistName,
-            serverUrl: data.serverUrl || state.credentials.serverUrl,
+            serverUrl: candUrl || state.credentials.serverUrl,
             username: data.username || state.credentials.username,
             password: data.password || state.credentials.password
           };
@@ -2808,14 +2909,19 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
         if (pathname === '/api/save-credentials') {
           const isJson = (req.headers['content-type'] || '').includes('application/json');
           const data = isJson ? JSON.parse(body) : Object.fromEntries(new URLSearchParams(body));
-          const serverChanged = data.serverUrl && data.serverUrl !== state.credentials.serverUrl;
+          const candUrl = data.serverUrl !== undefined ? String(data.serverUrl).trim() : '';
+          if (candUrl && !isValidHttpUrl(candUrl)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ ok: false, error: 'Invalid http/https serverUrl' }));
+          }
+          const serverChanged = candUrl && candUrl !== state.credentials.serverUrl;
           state.credentials = {
             ...state.credentials,
-            displayName: data.displayName !== undefined ? data.displayName.trim() : (state.credentials.displayName || 'Waleed Khan'),
+            displayName: data.displayName !== undefined ? data.displayName.trim() : (state.credentials.displayName || 'User'),
             playlistName: data.playlistName || state.credentials.playlistName,
-            serverUrl: data.serverUrl !== undefined ? data.serverUrl : state.credentials.serverUrl,
+            serverUrl: data.serverUrl !== undefined ? candUrl : state.credentials.serverUrl,
             username: data.username !== undefined ? data.username : state.credentials.username,
-            password: data.password !== undefined ? data.password : state.credentials.password
+            password: (typeof data.password === 'string' && data.password.length > 0) ? data.password : state.credentials.password
           };
           scheduleSaveState();
           runLiveIptvSync(serverChanged);
@@ -2910,7 +3016,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
           state.favoriteLiveChannels = [];
           state.recentSearches = [];
           state.pinnedSmartRows = [];
-          state.parentalControl = { isLocked: true, pin: '0000', showAdult: false };
+          state.parentalControl = { isLocked: true, pin: null, showAdult: false };
           for (const m of state.mediaItems) {
             m.inWatchlist = false;
             m.isWatched = false;
@@ -2934,7 +3040,7 @@ function computeSmartSimilarity(source, candidate, userRatings = {}, matchMode =
 
 function buildPhonePortalHtml(msg = '') {
   const c = state.credentials;
-  const banner = msg ? `<div style="background:#14532d;border:1px solid #22c55e;padding:12px;border-radius:8px;margin-bottom:16px;">${msg}</div>` : '';
+  const banner = msg ? `<div style="background:#14532d;border:1px solid #22c55e;padding:12px;border-radius:8px;margin-bottom:16px;">${escHtml(msg)}</div>` : '';
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>StreamVault TV — Phone Companion</title>
   <style>
@@ -2952,10 +3058,10 @@ function buildPhonePortalHtml(msg = '') {
   <div class="card">
     <h3 style="margin-top:0">⚡ IPTV Subscription Login</h3>
     <form method="POST" action="/api/save-credentials">
-      <label>Playlist Name</label><input name="playlistName" value="${c.playlistName}"/>
-      <label>Xtream Server URL</label><input name="serverUrl" value="${c.serverUrl}" placeholder="http://your-iptv-server.com:8080"/>
-      <label>Username</label><input name="username" value="${c.username}"/>
-      <label>Password</label><input type="password" name="password" value="${c.password}"/>
+      <label>Playlist Name</label><input name="playlistName" value="${escHtml(c.playlistName)}"/>
+      <label>Xtream Server URL</label><input name="serverUrl" value="${escHtml(c.serverUrl)}" placeholder="http://your-iptv-server.com:8080"/>
+      <label>Username</label><input name="username" value="${escHtml(c.username)}"/>
+      <label>Password</label><input type="password" name="password" value="" placeholder="Enter password (leave blank to keep existing)"/>
       <button type="submit">💾 Save & Sync TV</button>
     </form>
   </div></body></html>`;
@@ -3001,17 +3107,17 @@ function renderWebPairingUi(defaultCode) {
     <form id="linkForm" onsubmit="submitLink(event)">
       <div class="field">
         <label>TV Pairing Code</label>
-        <input id="codeInp" class="code-input" maxlength="7" placeholder="SV-XXXX" value="${defaultCode || ''}" required />
+        <input id="codeInp" class="code-input" maxlength="7" placeholder="SV-XXXX" value="${escHtml(defaultCode || '')}" required />
       </div>
 
       <div class="field">
         <label>Display Name</label>
-        <input id="nameInp" placeholder="Waleed Khan" value="Waleed Khan" required />
+        <input id="nameInp" placeholder="Your Name" value="" required />
       </div>
 
       <div class="field">
         <label>Email (Optional for backup)</label>
-        <input id="emailInp" type="email" placeholder="waleed@streamvault.tv" value="waleed@streamvault.tv" />
+        <input id="emailInp" type="email" placeholder="you@example.com" value="" />
       </div>
 
       <button type="submit" class="btn" id="submitBtn">Link &amp; Sync TV Now</button>
@@ -3061,9 +3167,9 @@ function renderWebPairingUi(defaultCode) {
 </html>`;
 }
 
-server.listen(PORT, () => {
-  console.log(`StreamVault TV PC Runner active at http://localhost:${PORT}/tv`);
-  console.log(`Phone Wi-Fi Companion active at http://${getLocalIp()}:${PORT}/phone`);
+server.listen(PORT, HOST, () => {
+  console.log(`StreamVault TV PC Runner active at http://${HOST}:${PORT}/tv`);
+  console.log(`Phone Wi-Fi Companion active at http://${HOST === '0.0.0.0' ? getLocalIp() : HOST}:${PORT}/phone`);
   // Automatically resume background sync & smart-priority TMDB enrichment on startup!
   if (state.credentials.serverUrl && state.credentials.username) {
     runLiveIptvSync(false);

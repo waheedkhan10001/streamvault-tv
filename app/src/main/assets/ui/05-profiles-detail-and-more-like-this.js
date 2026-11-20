@@ -44,24 +44,23 @@ async function saveActiveProfileChanges() {
   updateUserProfileUI();
   window.pendingKids = null;
   if (!wasKids && currentActiveProfile.isKids) {
-    // Kids Mode just turned on: remember what was open, then close 18+ and Extras
+    // Kids Mode just turned on: remember in-memory only (never in localStorage), then close 18+ and Extras
     const pc = (appStatus && appStatus.parentalControl) || {};
     window.vaultBeforeKids = { adult: !!pc.showAdult, extras: !!pc.showExtras };
-    try { localStorage.setItem('sv_vault_before_kids', JSON.stringify(window.vaultBeforeKids)); } catch (e) {}
+    try { localStorage.removeItem('sv_vault_before_kids'); } catch (e) {}
     await lockVault('adult', true);
     await lockVault('extras', true);
     if (['VAULT_18', 'EXTRAS', 'LIVE_TV'].includes(currentTab)) navigateToTab('HOME');
   } else if (wasKids && !currentActiveProfile.isKids && pinUsed) {
-    if (!window.vaultBeforeKids) { try { window.vaultBeforeKids = JSON.parse(localStorage.getItem('sv_vault_before_kids') || 'null'); } catch (e) {} }
     if (window.vaultBeforeKids) {
-    // Kids Mode just turned off with the PIN: what was open before Kids Mode comes straight back
-    for (const target of ['adult', 'extras']) {
-      if (!window.vaultBeforeKids[target]) continue;
-      try { await fetch('/api/parental-pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unlock', pin: pinUsed, target }) }); } catch (e) {}
+      // Kids Mode just turned off with the PIN: restore session-only state without persisting to disk
+      for (const target of ['adult', 'extras']) {
+        if (!window.vaultBeforeKids[target]) continue;
+        try { await fetch('/api/parental-pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unlock', pin: pinUsed, target }) }); } catch (e) {}
+      }
+      window.vaultBeforeKids = null;
     }
-    window.vaultBeforeKids = null;
     try { localStorage.removeItem('sv_vault_before_kids'); } catch (e) {}
-    }
   }
   try { await refreshAppStatus(); } catch (e) {}   // the Adult / Extras tabs depend on the saved Kids setting
   renderSidebar();
@@ -70,7 +69,7 @@ async function saveActiveProfileChanges() {
   pushProfileUpdateToWorker(currentActiveProfile);
 }
 
-async function switchUserProfile(profileId) {
+async function switchUserProfile(profileId, pin = '') {
   playNavSound();
   if (typeof ProfileSyncManager !== 'undefined') {
     await ProfileSyncManager.flush();
@@ -79,14 +78,19 @@ async function switchUserProfile(profileId) {
     const res = await fetch('/api/profiles/switch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: profileId })
+      body: JSON.stringify({ id: profileId, pin: pin || '' })
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.profile) {
-        currentActiveProfile = { ...data.profile };
-        window.currentActiveProfile = currentActiveProfile;
-      }
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403 || data.requirePin) {
+      openParentalPinModal({
+        action: 'verify_only',
+        onComplete: (verifiedPin) => switchUserProfile(profileId, verifiedPin)
+      });
+      return;
+    }
+    if (res.ok && data.profile) {
+      currentActiveProfile = { ...data.profile };
+      window.currentActiveProfile = currentActiveProfile;
     }
   } catch (_) {}
 
@@ -177,7 +181,7 @@ function closeAddProfileModal() {
   if (firstProf) firstProf.focus();
 }
 
-async function confirmCreateProfile() {
+async function confirmCreateProfile(pin = '') {
   playNavSound();
   const nameInp = document.getElementById('newProfileNameInput');
   const name = nameInp ? nameInp.value.trim() : '';
@@ -193,13 +197,22 @@ async function confirmCreateProfile() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name,
-        avatarColor: newProfileAvatarColor,
+        avatarColor: safeColor(newProfileAvatarColor, '#7C3AED'),
         theme: 'purple',
-        isKids: newProfileIsKids
+        isKids: newProfileIsKids,
+        pin: pin || ''
       })
     });
     const d = await res.json();
     if (!d.ok && !d.success) {
+      if (d.status === 403 || res.status === 403) {
+        closeAddProfileModal();
+        openParentalPinModal({
+          action: 'verify_only',
+          onComplete: (verifiedPin) => confirmCreateProfile(verifiedPin)
+        });
+        return;
+      }
       if (err) err.innerText = d.error || 'Failed to create profile';
       return;
     }
@@ -250,17 +263,25 @@ function closeDeleteProfileModal() {
   if (saveBtn) saveBtn.focus();
 }
 
-async function confirmDeleteProfile() {
+async function confirmDeleteProfile(pin = '') {
   playNavSound();
   const idToDelete = currentActiveProfile.id;
   try {
     const res = await fetch('/api/profiles/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: idToDelete })
+      body: JSON.stringify({ id: idToDelete, pin: pin || '' })
     });
     const d = await res.json();
     if (!d.ok && !d.success) {
+      if (d.status === 403 || res.status === 403) {
+        closeDeleteProfileModal();
+        openParentalPinModal({
+          action: 'verify_only',
+          onComplete: (verifiedPin) => confirmDeleteProfile(verifiedPin)
+        });
+        return;
+      }
       showToast(d.error || 'Failed to delete profile');
       return;
     }
@@ -323,53 +344,58 @@ function getDetailActionButtonsHtml(item) {
     const firstEp = (item.episodes && item.episodes.length > 0) ? item.episodes[0] : null;
     const epId = firstEp ? firstEp.id : '';
     const epLabel = firstEp ? `S${firstEp.season} E${firstEp.episodeNum}` : 'Episode 1';
+    const safeDk = escapeHtml(item.dedupKey);
+    const safeEpId = escapeHtml(epId);
+    const safeResumeMs = Number(item.resumePositionMs) || 0;
 
     return `
       <div id="detailActionButtonsContainer" style="display:flex;gap:12px;align-items:center;padding-top:10px;flex-wrap:wrap;">
         ${hasResume ? `
-          <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn" onclick="startMoviePlayback('${item.dedupKey}', 0, ${item.resumePositionMs}, '${epId}')" onfocus="playNavSound()">
-            ▶ Resume ${epLabel}
+          <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn js-detail-play" data-dedup-key="${safeDk}" data-ver-idx="0" data-start-ms="${safeResumeMs}" data-ep-id="${safeEpId}" onfocus="playNavSound()">
+            ▶ Resume ${escapeHtml(epLabel)}
           </button>
-          <button tabindex="0" class="btn tv-focusable detail-action-btn" onclick="startMoviePlayback('${item.dedupKey}', 0, 0, '${epId}')" onfocus="playNavSound()">
+          <button tabindex="0" class="btn tv-focusable detail-action-btn js-detail-play" data-dedup-key="${safeDk}" data-ver-idx="0" data-start-ms="0" data-ep-id="${safeEpId}" onfocus="playNavSound()">
             ↺ Restart
           </button>
         ` : `
-          <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn" onclick="startMoviePlayback('${item.dedupKey}', 0, 0, '${epId}')" onfocus="playNavSound()">
-            ▶ Play ${epLabel}
+          <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn js-detail-play" data-dedup-key="${safeDk}" data-ver-idx="0" data-start-ms="0" data-ep-id="${safeEpId}" onfocus="playNavSound()">
+            ▶ Play ${escapeHtml(epLabel)}
           </button>
         `}
-        <button tabindex="0" id="detailWatchlistBtn" class="btn tv-focusable detail-action-btn" onclick="toggleWatchlist('${item.dedupKey}')" onfocus="playNavSound()">
+        <button tabindex="0" id="detailWatchlistBtn" class="btn tv-focusable detail-action-btn js-detail-watchlist" data-dedup-key="${safeDk}" onfocus="playNavSound()">
           ${item.inWatchlist ? '✓ In My List' : '+ Add to List'}
         </button>
-        <button tabindex="0" id="detailWatchedBtn" class="btn tv-focusable detail-action-btn ${isWatched ? 'btn-watched-active' : ''}" onclick="toggleWatchedCoupled('${item.dedupKey}')" onfocus="playNavSound()">
+        <button tabindex="0" id="detailWatchedBtn" class="btn tv-focusable detail-action-btn js-detail-watched ${isWatched ? 'btn-watched-active' : ''}" data-dedup-key="${safeDk}" onfocus="playNavSound()">
           ${isWatched ? '✓ Watched' : 'Mark Watched'}
         </button>
-        ${hasResume ? `<span style="font-size:12px;color:var(--theme-border);font-weight:700;margin-left:4px;">(at ${resumeTimeStr})</span>` : ''}
+        ${hasResume ? `<span style="font-size:12px;color:var(--theme-border);font-weight:700;margin-left:4px;">(at ${escapeHtml(resumeTimeStr)})</span>` : ''}
       </div>
     `;
   }
 
+  const safeDk = escapeHtml(item.dedupKey);
+  const safeResumeMs = Number(item.resumePositionMs) || 0;
   return `
     <div id="detailActionButtonsContainer" style="display:flex;gap:12px;align-items:center;padding-top:10px;flex-wrap:wrap;">
       ${hasResume ? `
-        <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn" onclick="startMoviePlayback('${item.dedupKey}', 0, ${item.resumePositionMs})" onfocus="playNavSound()">
+        <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn js-detail-play" data-dedup-key="${safeDk}" data-ver-idx="0" data-start-ms="${safeResumeMs}" onfocus="playNavSound()">
           ▶ Resume
         </button>
-        <button tabindex="0" class="btn tv-focusable detail-action-btn" onclick="startMoviePlayback('${item.dedupKey}', 0, 0)" onfocus="playNavSound()">
+        <button tabindex="0" class="btn tv-focusable detail-action-btn js-detail-play" data-dedup-key="${safeDk}" data-ver-idx="0" data-start-ms="0" onfocus="playNavSound()">
           ↺ Restart
         </button>
       ` : `
-        <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn" onclick="startMoviePlayback('${item.dedupKey}', 0, 0)" onfocus="playNavSound()">
+        <button tabindex="0" class="btn btn-primary tv-focusable detail-action-btn js-detail-play" data-dedup-key="${safeDk}" data-ver-idx="0" data-start-ms="0" onfocus="playNavSound()">
           ▶ Watch Now
         </button>
       `}
-      <button tabindex="0" id="detailWatchlistBtn" class="btn tv-focusable detail-action-btn" onclick="toggleWatchlist('${item.dedupKey}')" onfocus="playNavSound()">
+      <button tabindex="0" id="detailWatchlistBtn" class="btn tv-focusable detail-action-btn js-detail-watchlist" data-dedup-key="${safeDk}" onfocus="playNavSound()">
         ${item.inWatchlist ? '✓ In My List' : '+ Add to List'}
       </button>
-      <button tabindex="0" id="detailWatchedBtn" class="btn tv-focusable detail-action-btn ${isWatched ? 'btn-watched-active' : ''}" onclick="toggleWatchedCoupled('${item.dedupKey}')" onfocus="playNavSound()">
+      <button tabindex="0" id="detailWatchedBtn" class="btn tv-focusable detail-action-btn js-detail-watched ${isWatched ? 'btn-watched-active' : ''}" data-dedup-key="${safeDk}" onfocus="playNavSound()">
         ${isWatched ? '✓ Watched' : 'Mark Watched'}
       </button>
-      ${hasResume ? `<span style="font-size:12px;color:var(--theme-border);font-weight:700;margin-left:4px;">(at ${resumeTimeStr})</span>` : ''}
+      ${hasResume ? `<span style="font-size:12px;color:var(--theme-border);font-weight:700;margin-left:4px;">(at ${escapeHtml(resumeTimeStr)})</span>` : ''}
       ${(item.versions && item.versions.length > 1) ? `
         <div id="detailVersionsContainer" style="display:flex;gap:8px;align-items:center;width:100%;margin-top:6px;flex-wrap:wrap;">
           <span style="font-size:11px;font-weight:700;color:var(--muted);margin-right:2px;">Versions (${item.versions.length}):</span>
@@ -386,9 +412,9 @@ function getDetailActionButtonsHtml(item) {
               vLabel = `Version ${vIdx + 1}: ${v.languageTag || 'Standard'} (${v.qualityTag || 'HD'}${sizeStr})`;
             }
             return `
-              <button tabindex="0" class="btn tv-focusable detail-version-pill"
+              <button tabindex="0" class="btn tv-focusable detail-version-pill js-detail-play"
                       style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid ${isCam ? '#EF4444' : vIdx === 0 ? 'var(--theme-accent)' : '#2D3345'};background:${isCam ? 'rgba(239,68,68,0.15)' : vIdx === 0 ? 'rgba(var(--theme-accent-rgb),0.2)' : 'rgba(255,255,255,0.05)'};color:${isCam ? '#FCA5A5' : vIdx === 0 ? 'var(--theme-pale)' : '#9CA3AF'};"
-                      onclick="startMoviePlayback('${item.dedupKey}', ${vIdx}, 0)" onfocus="playNavSound()">
+                      data-dedup-key="${safeDk}" data-ver-idx="${vIdx}" data-start-ms="0" onfocus="playNavSound()">
                 ▶ ${escapeHtml(vLabel)}
               </button>
             `;
@@ -404,8 +430,9 @@ function renderEpisodeCardsHtml(item, season) {
   if (eps.length === 0) {
     return '<div style="color:var(--muted);font-size:13px;padding:12px 0;">No episodes found for Season ' + season + '.</div>';
   }
+  const safeDk = escapeHtml(item.dedupKey);
   return eps.map(ep => `
-    <div tabindex="0" class="episode-card tv-focusable" onclick="startMoviePlayback('${item.dedupKey}', 0, 0, '${ep.id}')" onfocus="playNavSound()">
+    <div tabindex="0" class="episode-card tv-focusable" data-dedup-key="${safeDk}" data-ep-id="${escapeHtml(ep.id)}" onfocus="playNavSound()">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <span class="episode-badge">S${ep.season} E${ep.episodeNum}</span>
         ${ep.durationSecs > 0 ? `<span style="font-size:11px;color:#9CA3AF;font-weight:700;">${Math.round(ep.durationSecs / 60)} min</span>` : ''}
@@ -459,7 +486,7 @@ function renderRelatedStripHtml(related, item) {
   }
   if (related.length < 8) return related.map((r) => renderPosterCard(r)).join('');   // fewer than a full row: nothing more to show
   return related.map((r) => renderPosterCard(r)).join('') + `
-    <div tabindex="0" class="poster-card show-more-card tv-focusable" onclick="openFullMltCatalog('${item.dedupKey}')" onfocus="playNavSound()">
+    <div tabindex="0" class="poster-card show-more-card tv-focusable" data-dedup-key="${escapeHtml(item.dedupKey)}" onfocus="playNavSound()">
       <div class="poster-img-wrap" style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(145deg, rgba(var(--theme-deep-rgb),0.36) 0%, var(--card) 100%);border:1px solid rgba(var(--theme-border-rgb),0.35);border-radius:10px;">
         <div style="width:44px;height:44px;border-radius:50%;background:rgba(var(--theme-deep-rgb),0.35);display:flex;align-items:center;justify-content:center;margin-bottom:10px;border:1.5px solid var(--theme-border);box-shadow:0 4px 14px rgba(var(--theme-deep-rgb),0.4);">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
@@ -536,7 +563,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
     selectedDetailItem = item;
 
     userStarRating = ((appStatus && appStatus.userRatings) || {})[item.dedupKey] || 0;
-    const backdrop = item.backdropUrl || item.posterUrl || '';
+    const backdrop = safeUrl(item.backdropUrl || item.posterUrl || '');
     const isWatched = Boolean(item.isWatched);
     const isSeries = item.mediaType === 'SERIES';
     const seasons = (item.episodes && item.episodes.length > 0) ? [...new Set(item.episodes.map(e => e.season))].sort((a,b) => a - b) : [1];
@@ -554,15 +581,14 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
 
     ov.innerHTML = `
       <!-- Ambient Fullscreen Blurred Backdrop -->
-      <div style="position:fixed;inset:0;background-image:url('${backdrop}');background-size:cover;background-position:center 20%;filter:brightness(0.18) blur(22px);transform:scale(1.08);z-index:0;pointer-events:none;"></div>
+      <div style="position:fixed;inset:0;${backdrop ? `background-image:url('${backdrop}');` : ''}background-size:cover;background-position:center 20%;filter:brightness(0.18) blur(22px);transform:scale(1.08);z-index:0;pointer-events:none;"></div>
       <div style="position:fixed;inset:0;background:linear-gradient(90deg, var(--bg) 0%, rgba(9,7,20,0.88) 48%, rgba(9,7,20,0.96) 100%);z-index:1;pointer-events:none;"></div>
 
       <div style="position:relative;z-index:2;height:100%;display:flex;flex-direction:column;justify-content:space-between;max-width:1240px;margin:0 auto;width:100%;">
         <!-- Upper Hero Section: Fits 100% On-Screen with 0 vertical scroll -->
         <div style="display:flex;gap:28px;align-items:flex-start;">
           <div id="detailPosterBox" style="position:relative;width:176px;height:264px;flex-shrink:0;">
-            <img src="${item.posterUrl || ''}" onerror="this.style.display='none'"
-                 style="width:176px;height:264px;object-fit:cover;border-radius:10px;border:1.5px solid #2B3042;box-shadow:0 12px 30px rgba(0,0,0,0.85);" />
+            ${safeUrl(item.posterUrl) ? `<img src="${safeUrl(item.posterUrl)}" data-fallback-hide="1" style="width:176px;height:264px;object-fit:cover;border-radius:10px;border:1.5px solid #2B3042;box-shadow:0 12px 30px rgba(0,0,0,0.85);" />` : ''}
             ${isWatched ? `<div style="position:absolute;top:8px;right:8px;background:#10B981;color:#fff;font-size:10px;font-weight:900;padding:2px 7px;border-radius:5px;box-shadow:0 4px 10px rgba(16,185,129,0.5);">✓ Watched</div>` : ''}
           </div>
 
@@ -571,7 +597,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
               <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                 <div style="font-size:28px;font-weight:900;margin-bottom:6px;line-height:1.15;letter-spacing:-0.3px;">
                   ${escapeHtml(item.cleanTitle)}
-                  ${isSeries ? `<span class="detail-season-tag">${seriesTag}</span>` : ''}
+                  ${isSeries ? `<span class="detail-season-tag">${escapeHtml(seriesTag)}</span>` : ''}
                 </div>
                 <button tabindex="0" id="detailCloseBtn" class="btn-icon-round tv-focusable" style="margin-left:16px;flex-shrink:0;" onclick="closeDetailModal()" title="Close">✕</button>
               </div>
@@ -579,21 +605,21 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
               <div style="display:flex;gap:7px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px;flex-wrap:wrap;">
                 ${item.certification ? `<span class="badge-age" title="Age rating" style="border:1.5px solid #E5E7EB;color:#F9FAFB;padding:1px 7px;border-radius:4px;font-size:11px;font-weight:900;letter-spacing:0.3px;">${escapeHtml(ageRatingLabel(item.certification))}</span>` : ''}
                 <span class="badge-rating" style="padding:2px 7px;font-size:11px;">${item.rating > 0 ? ratingStar(item) + ' ' + ratingText(item, true) : 'Not rated'}</span>
-                ${(item.qualityBadges || []).slice(0, 1).map((q) => `<span class="badge-quality" style="padding:2px 7px;font-size:11px;">${q}</span>`).join('')}
-                <span class="badge-language" style="padding:2px 7px;font-size:11px;">${item.language || 'English'}</span>
+                ${(item.qualityBadges || []).slice(0, 1).map((q) => `<span class="badge-quality" style="padding:2px 7px;font-size:11px;">${escapeHtml(q)}</span>`).join('')}
+                <span class="badge-language" style="padding:2px 7px;font-size:11px;">${escapeHtml(item.language || 'English')}</span>
                 <span class="badge-audio" style="background:#2E1065;color:var(--theme-pale);border:1px solid var(--theme-deep);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;">Multi-Audio</span>
                 <span class="badge-subtitles" style="padding:2px 7px;font-size:11px;">CC Subtitles</span>
-                <span style="color:#9CA3AF;font-weight:700;">${item.year || ''}</span>
+                <span style="color:#9CA3AF;font-weight:700;">${escapeHtml(item.year || '')}</span>
                 <span>${!isSeries && item.runtimeMins ? item.runtimeMins + ' min' : (isSeries ? (item.episodes || []).length + ' Episodes' : '')}</span>
-                ${genresToShow.map((g) => `<span class="badge-genre-cinema">${g}</span>`).join('')}
+                ${genresToShow.map((g) => `<span class="badge-genre-cinema">${escapeHtml(g)}</span>`).join('')}
               </div>
 
               <!-- 5-Star Interactive Rating Widget -->
               <div id="detailStarRatingRow" class="star-rating-row" style="margin-bottom:8px;">
                 <span style="font-size:11px;color:var(--muted);margin-right:6px;">Your Rating:</span>
                 ${[1,2,3,4,5].map((s) => `
-                  <span tabindex="0" class="star-btn tv-focusable ${userStarRating >= s ? 'gold' : ''}"
-                        onclick="toggleUserRating('${item.dedupKey}', ${s})"
+                  <span tabindex="0" class="star-btn tv-focusable js-detail-star ${userStarRating >= s ? 'gold' : ''}"
+                        data-dedup-key="${escapeHtml(item.dedupKey)}" data-star="${s}"
                         title="Click to rate ${s} stars">★</span>
                 `).join('')}
                 <span id="userRatingLabel" style="font-size:11px;color:#F59E0B;margin-left:8px;font-weight:700;">
@@ -626,7 +652,7 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
               </div>
               <div id="seasonPillsContainer" style="display:flex;gap:8px;align-items:center;">
                 ${seasons.map(s => `
-                  <button tabindex="0" class="season-pill tv-focusable ${s === selectedDetailSeason ? 'active' : ''}" data-season="${s}" onclick="selectSeriesSeason(${s})">Season ${s}</button>
+                  <button tabindex="0" class="season-pill tv-focusable ${s === selectedDetailSeason ? 'active' : ''}" data-season="${s}">Season ${s}</button>
                 `).join('')}
               </div>
             </div>
@@ -640,11 +666,11 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
               <div style="font-size:18px;font-weight:800;">More Like This</div>
               <div class="mlt-filter-chips">
-                <button tabindex="0" class="mlt-chip tv-focusable ${currentMltMode === 'everything' ? 'active' : ''}" data-mode="everything" onclick="changeMltMode('${item.dedupKey}', 'everything')">Everything</button>
-                <button tabindex="0" class="mlt-chip tv-focusable ${currentMltMode === 'story' ? 'active' : ''}" data-mode="story" onclick="changeMltMode('${item.dedupKey}', 'story')">Story & Tone</button>
-                <button tabindex="0" class="mlt-chip tv-focusable ${currentMltMode === 'setting' ? 'active' : ''}" data-mode="setting" onclick="changeMltMode('${item.dedupKey}', 'setting')">Setting</button>
-                <button tabindex="0" class="mlt-chip tv-focusable ${currentMltMode === 'cast_director' ? 'active' : ''}" data-mode="cast_director" onclick="changeMltMode('${item.dedupKey}', 'cast_director')">Cast & Director</button>
-                <button tabindex="0" id="mltHideWatchedChip" class="mlt-chip tv-focusable ${currentMltHideWatched ? 'active' : ''}" onclick="toggleMltHideWatched('${item.dedupKey}')">Hide Watched</button>
+                <button tabindex="0" class="mlt-chip tv-focusable js-mlt-chip ${currentMltMode === 'everything' ? 'active' : ''}" data-mode="everything" data-dedup-key="${escapeHtml(item.dedupKey)}">Everything</button>
+                <button tabindex="0" class="mlt-chip tv-focusable js-mlt-chip ${currentMltMode === 'story' ? 'active' : ''}" data-mode="story" data-dedup-key="${escapeHtml(item.dedupKey)}">Story & Tone</button>
+                <button tabindex="0" class="mlt-chip tv-focusable js-mlt-chip ${currentMltMode === 'setting' ? 'active' : ''}" data-mode="setting" data-dedup-key="${escapeHtml(item.dedupKey)}">Setting</button>
+                <button tabindex="0" class="mlt-chip tv-focusable js-mlt-chip ${currentMltMode === 'cast_director' ? 'active' : ''}" data-mode="cast_director" data-dedup-key="${escapeHtml(item.dedupKey)}">Cast & Director</button>
+                <button tabindex="0" id="mltHideWatchedChip" class="mlt-chip tv-focusable js-mlt-hide-watched ${currentMltHideWatched ? 'active' : ''}" data-dedup-key="${escapeHtml(item.dedupKey)}">Hide Watched</button>
               </div>
             </div>
             <div class="poster-strip" id="mltPosterStrip" style="min-height:115px;padding:16px 20px 22px 20px;overflow-y:visible;overflow-x:auto;">
@@ -704,9 +730,9 @@ async function openDetailModal(dedupKey, matchMode = null, hideWatched = null) {
                     vLabel = `Version ${vIdx + 1}: ${v.languageTag || 'Standard'} (${v.qualityTag || 'HD'}${sizeStr})`;
                   }
                   return `
-                    <button tabindex="0" class="btn tv-focusable detail-version-pill"
+                    <button tabindex="0" class="btn tv-focusable detail-version-pill js-detail-play"
                             style="padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid ${isCam ? '#EF4444' : vIdx === 0 ? 'var(--theme-accent)' : '#2D3345'};background:${isCam ? 'rgba(239,68,68,0.15)' : vIdx === 0 ? 'rgba(var(--theme-accent-rgb),0.2)' : 'rgba(255,255,255,0.05)'};color:${isCam ? '#FCA5A5' : vIdx === 0 ? 'var(--theme-pale)' : '#9CA3AF'};"
-                            onclick="startMoviePlayback('${item.dedupKey}', ${vIdx}, 0)" onfocus="playNavSound()">
+                            data-dedup-key="${escapeHtml(item.dedupKey)}" data-ver-idx="${vIdx}" data-start-ms="0" onfocus="playNavSound()">
                       ▶ ${escapeHtml(vLabel)}
                     </button>
                   `;
@@ -727,7 +753,7 @@ function startDetailPreviewBuffer(item) {
   previewBufferTimeout = setTimeout(async () => {
     const ver = (item.versions || [])[0] || { streamId: item.primaryStreamId, containerExtension: 'mp4' };
     const typePart = item.mediaType === 'SERIES' ? 'series' : 'movie';
-    const directUrl = await resolveStreamUrl(typePart, ver.streamId, ver.containerExtension || 'mp4');
+    const directUrl = await resolveStreamUrl(typePart, ver.streamId, ver.containerExtension || 'mp4', false, item.dedupKey);
     if (!directUrl) return;
     const proxyUrl = `/api/stream-proxy?url=${encodeURIComponent(directUrl)}`;
 
@@ -925,7 +951,7 @@ async function openFullMltCatalog(dedupKey) {
   vp.innerHTML = `
     <div style="padding:0 0 6px 0;">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
-        <button tabindex="0" id="mltPageBack" class="btn tv-focusable" style="padding:7px 14px;font-size:12px;" onclick="openDetailModal('${dedupKey}')">← Back</button>
+        <button tabindex="0" id="mltPageBack" class="btn tv-focusable js-open-detail" style="padding:7px 14px;font-size:12px;" data-dedup-key="${escapeHtml(dedupKey)}">← Back</button>
         <div style="font-size:18px;font-weight:900;color:#fff;">More like ${escapeHtml(mltPageState.title)}</div>
       </div>
       <div id="mltPageNote" style="font-size:11px;color:#9CA3AF;margin-bottom:10px;">Closest matches first.</div>

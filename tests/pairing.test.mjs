@@ -53,7 +53,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function routeToWorker(req) {
   const u = new URL(req.url());
   const headers = { 'CF-Connecting-IP': '203.0.113.7' };
-  for (const [k, v] of Object.entries(req.headers())) if (['content-type', 'authorization', 'origin'].includes(k)) headers[k] = v;
+  for (const [k, v] of Object.entries(req.headers())) if (['content-type', 'authorization', 'origin', 'x-poll-secret'].includes(k)) headers[k] = v;
   const post = req.postData();
   const res = await worker.fetch(new Request('https://sync.test' + u.pathname + u.search, { method: req.method(), headers, body: post || undefined }), env);
   const h = {}; res.headers.forEach((v, k) => { h[k] = v; });
@@ -90,7 +90,7 @@ async function newTv(browser) {
     localStorage.clear();
   });
   await page.goto(UI_PATH, { waitUntil: 'networkidle0' });
-  await page.waitForFunction(() => /^SV-[A-Z0-9]{4}$/.test(document.getElementById('welcomeCodeDisplay')?.innerText || ''), { timeout: 10000 });
+  await page.waitForFunction(() => /^SV-[A-Z0-9]{4,8}$/.test(document.getElementById('welcomeCodeDisplay')?.innerText || ''), { timeout: 10000 });
   return page;
 }
 const tvCode = page => page.evaluate(() => document.getElementById('welcomeCodeDisplay').innerText);

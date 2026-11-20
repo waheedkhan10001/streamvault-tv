@@ -23,8 +23,25 @@ class SubtitleService(private val context: Context) {
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
-        .followRedirects(true)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
+
+    private fun isSafeExternalHttpsUrl(urlStr: String): Boolean {
+        return runCatching {
+            val uri = java.net.URI(urlStr.trim())
+            if (!uri.scheme.equals("https", ignoreCase = true)) return false
+            val host = uri.host?.takeIf { it.isNotBlank() } ?: return false
+            val addrs = java.net.InetAddress.getAllByName(host)
+            if (addrs.isEmpty()) return false
+            addrs.none { addr ->
+                val b = addr.address
+                val isUla = b.size == 16 && (b[0].toInt() and 0xfe) == 0xfc
+                addr.isAnyLocalAddress || addr.isLoopbackAddress || addr.isLinkLocalAddress ||
+                    addr.isSiteLocalAddress || addr.isMulticastAddress || isUla
+            }
+        }.getOrDefault(false)
+    }
 
     private val subtitleCacheDir = File(context.cacheDir, "downloaded_subs").apply { mkdirs() }
 
@@ -76,7 +93,7 @@ class SubtitleService(private val context: Context) {
 
     /** For a title the app never found a TMDB/IMDb id for: asks TMDB (through the cloud) once, at play time, and accepts only an exact match. */
     suspend fun resolveTmdbIdByTitle(cloudBase: String, token: String, title: String, year: Int, isSeries: Boolean): Int = withContext(Dispatchers.IO) {
-        if (token.isBlank() || title.isBlank()) return@withContext 0
+        if (!cloudBase.startsWith("https://", ignoreCase = true) || token.isBlank() || title.isBlank()) return@withContext 0
         runCatching {
             val type = if (isSeries) "tv" else "movie"
             val q = java.net.URLEncoder.encode(title, "UTF-8")
@@ -162,13 +179,47 @@ class SubtitleService(private val context: Context) {
         runCatching {
             val rawFile = File(subtitleCacheDir, "raw_${track.id.replace(Regex("[^a-zA-Z0-9_-]"), "")}.srt")
             if (!rawFile.exists() || rawFile.length() == 0L) {
-                val req = Request.Builder().url(track.downloadUrl).header("User-Agent", "StreamVaultTV/1.0").build()
-                httpClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withContext null
-                    val bytes = resp.body?.bytes() ?: return@withContext null
-                    val decoded = decodeSubtitleBytes(bytes)
-                    rawFile.writeText(decoded, Charsets.UTF_8)
+                var currentUrl = track.downloadUrl
+                var hop = 0
+                var downloadedBytes: ByteArray? = null
+                while (hop < 4) {
+                    if (!isSafeExternalHttpsUrl(currentUrl)) return@withContext null
+                    val req = Request.Builder().url(currentUrl).header("User-Agent", "StreamVaultTV/1.0").build()
+                    val nextUrl = httpClient.newCall(req).execute().use { resp ->
+                        if (resp.isRedirect) {
+                            val loc = resp.header("Location") ?: return@withContext null
+                            val resolved = java.net.URI(currentUrl).resolve(loc).toString()
+                            return@use resolved
+                        }
+                        if (!resp.isSuccessful) return@withContext null
+                        val body = resp.body ?: return@withContext null
+                        val maxBytes = 2 * 1024 * 1024
+                        if (body.contentLength() > maxBytes) return@withContext null
+                        val baos = java.io.ByteArrayOutputStream()
+                        body.byteStream().use { input ->
+                            val buf = ByteArray(16 * 1024)
+                            var total = 0
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                total += n
+                                if (total > maxBytes) throw java.io.IOException("Subtitle exceeds 2 MB limit")
+                                baos.write(buf, 0, n)
+                            }
+                        }
+                        downloadedBytes = baos.toByteArray()
+                        null
+                    }
+                    if (nextUrl != null) {
+                        currentUrl = nextUrl
+                        hop++
+                    } else {
+                        break
+                    }
                 }
+                val bytes = downloadedBytes ?: return@withContext null
+                val decoded = decodeSubtitleBytes(bytes)
+                rawFile.writeText(decoded, Charsets.UTF_8)
             }
             if (offsetMs == 0L) {
                 return@withContext rawFile

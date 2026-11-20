@@ -1421,6 +1421,63 @@ class StreamVaultDatabase(context: Context) :
         return false
     }
 
+    /** Returns Pair(isAdult, isExtra) from media_items flags. */
+    fun getMediaAccessFlags(dedupKey: String): Pair<Boolean, Boolean> {
+        readableDatabase.rawQuery(
+            "SELECT is_adult, is_extra FROM media_items WHERE dedup_key = ?",
+            arrayOf(dedupKey)
+        ).use { c ->
+            if (c.moveToFirst()) return (c.getInt(0) == 1) to (c.getInt(1) == 1)
+        }
+        return false to false
+    }
+
+    /** Resolves parent item access metadata for a stream/episode id when dedupKey is not passed directly. */
+    fun findMediaAccessByStreamId(kind: String, streamId: String): Pair<String, Boolean>? {
+        val db = readableDatabase
+        val safeId = streamId.replace("\"", "")
+        if (kind == "series") {
+            db.rawQuery(
+                "SELECT m.dedup_key, m.is_adult, m.is_extra, m.kids_ok, m.certification FROM series_episodes ep " +
+                    "JOIN media_items m ON (m.primary_stream_id = ep.series_id OR m.versions_json LIKE ?) " +
+                    "WHERE ep.episode_id = ? LIMIT 1",
+                arrayOf("%\"streamId\":\"$safeId\"%", streamId)
+            ).use { c ->
+                if (c.moveToFirst()) {
+                    val key = c.getString(0) ?: ""
+                    val isAdult = c.getInt(1) == 1
+                    val isExtra = c.getInt(2) == 1
+                    return key to (isAdult || isExtra)
+                }
+            }
+        } else {
+            db.rawQuery(
+                "SELECT dedup_key, is_adult, is_extra FROM media_items " +
+                    "WHERE primary_stream_id = ? OR versions_json LIKE ? LIMIT 1",
+                arrayOf(streamId, "%\"streamId\":\"$safeId\"%")
+            ).use { c ->
+                if (c.moveToFirst()) {
+                    val key = c.getString(0) ?: ""
+                    return key to (c.getInt(1) == 1 || c.getInt(2) == 1)
+                }
+            }
+        }
+        return null
+    }
+
+    /** Returns 'adult', 'extras', or 'normal' for a live channel stream ID. */
+    fun getLiveChannelGroup(streamId: String): String {
+        readableDatabase.rawQuery(
+            "SELECT CASE WHEN (${liveGroupClause("adult")} OR lower(lc.name) LIKE '%xxx%') THEN 'adult' " +
+                "WHEN ${liveGroupClause("extras")} THEN 'extras' ELSE 'normal' END " +
+                "FROM live_channels lc WHERE lc.stream_id = ?",
+            arrayOf(streamId)
+        ).use { c ->
+            if (c.moveToFirst()) return c.getString(0) ?: "normal"
+        }
+        return "normal"
+    }
+
     fun getContinueWatchingList(profileId: String = "", isKids: Boolean = false, limit: Int = 20): List<MediaItem> {
         val db = readableDatabase
         // Phase B Rule: Adult content NEVER appears in Continue Watching!

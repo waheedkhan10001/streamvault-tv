@@ -5,7 +5,13 @@ import androidx.test.core.app.ApplicationProvider
 import com.streamvault.tv.data.ContentCertifications
 import com.streamvault.tv.data.MediaItem
 import com.streamvault.tv.data.MediaType
+import com.streamvault.tv.data.AppApiRouter
+import com.streamvault.tv.data.CatalogSyncEngine
+import com.streamvault.tv.data.PackManager
 import com.streamvault.tv.data.PreferencesManager
+import com.streamvault.tv.data.XtreamCredentials
+import java.io.File
+import java.io.RandomAccessFile
 import com.streamvault.tv.data.StreamVaultDatabase
 import com.streamvault.tv.data.SuperFilterState
 import org.junit.After
@@ -238,10 +244,12 @@ class RobolectricSecurityAndContentTest {
         assertFalse("Non-4-digit PIN '12345' should be rejected", prefs.setParentalPin(null, "12345"))
 
         // First-time creation without currentPin succeeds
+        assertFalse("Non-digit PIN '12a4' must be rejected", prefs.setParentalPin(null, "12a4"))
         assertTrue("Setting initial 4-digit PIN must succeed", prefs.setParentalPin(null, "8492"))
         assertTrue("PIN is now configured", prefs.hasCustomParentalPin())
         assertTrue("isPinConfigured is true", prefs.isPinConfigured())
         assertNotNull("PIN hash is non-null", prefs.getPinHash())
+        assertTrue("New PINs use PBKDF2-HMAC-SHA256", prefs.getPinHash()!!.startsWith("pbkdf2_sha256" + '$' + "100000" + '$'))
 
         // Verification checks
         assertTrue("Correct PIN '8492' must verify", prefs.verifyParentalPin("8492"))
@@ -297,6 +305,68 @@ class RobolectricSecurityAndContentTest {
         assertEquals("PIN lockout must be cleared", 0L, prefs.getPinLockoutUntil())
         assertEquals("Active profile must be cleared", "", prefs.getActiveProfileId())
         assertFalse("Auth session must be false", prefs.hasActiveSession())
+    }
+
+    @Test
+    fun testWave1Security_ApiRouterAuthRestoreTicketsAndPackBounds() {
+        val syncEngine = CatalogSyncEngine(db, prefs, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO))
+        val router = AppApiRouter(context, db, prefs, syncEngine)
+
+        // SEC-04: Reject arbitrary Bearer tokens & protect destructive routes when logged out
+        val unauthReset = router.handle("POST", "/api/factory-reset", "{}", "Bearer fake_token_value")
+        assertTrue("Fake Bearer token must be rejected on /api/factory-reset", unauthReset.contains("\"status\":401"))
+
+        val validToken = "a".repeat(64)
+        prefs.setAuthToken(validToken)
+        prefs.saveCredentials(XtreamCredentials(serverUrl = "http://iptv.example.com:8080", username = "u1", password = "mySecretPassword99"))
+
+        val spoofedDetail = router.handle("GET", "/api/detail?dedupKey=x", "", "Bearer wrong_token_value")
+        assertTrue("Mismatched Bearer token must be rejected", spoofedDetail.contains("\"status\":401"))
+
+        // SEC-04: action=restore blocked once PIN is configured
+        assertTrue(prefs.setParentalPin(null, "2468"))
+        val restoreBlocked = router.handle(
+            "POST",
+            "/api/parental-pin",
+            """{"action":"restore","pinHash":"${"b".repeat(64)}","pinSalt":"salt-1234-5678"}""",
+            "Bearer $validToken"
+        )
+        assertTrue("restore must fail once PIN is already configured", restoreBlocked.contains("\"success\":false"))
+
+        // SEC-04: Adult item blocked when vault locked; stream-url returns opaque ticket without password
+        val familyItem = createTestMediaItem("fam_sec", "Family Film", certification = "G", isAdult = false)
+        val adultItem = createTestMediaItem("adult_sec", "Adult Feature", certification = "R", isAdult = true)
+        db.upsertMediaBatch(listOf(familyItem, adultItem), markNewIfInserted = false)
+
+        val lockedAdult = router.handle("GET", "/api/detail?dedupKey=adult_sec", "", "Bearer $validToken")
+        assertTrue("Locked adult detail must be refused", lockedAdult.contains("\"status\":403"))
+
+        val streamResp = router.handle("POST", "/api/stream-url", """{"kind":"movie","id":"stream_fam_sec","ext":"mp4"}""", "Bearer $validToken")
+        val ticketUrl = org.json.JSONObject(streamResp).getString("url")
+        assertTrue("Stream response uses opaque sv-stream ticket: $streamResp", ticketUrl.startsWith("sv-stream://"))
+        assertFalse("Stream response must NEVER expose IPTV password to WebView", streamResp.contains("mySecretPassword99"))
+        val resolved = router.resolveStreamTicket(ticketUrl)
+        assertNotNull("Valid ticket resolves natively", resolved)
+        assertTrue(resolved!!.first.contains("mySecretPassword99"))
+        assertNull("Ticket is single-use", router.resolveStreamTicket(ticketUrl))
+
+        // SEC-12: Legacy SHA-256 PIN backward compat still verifies + clearAuthSession clears password
+        prefs.clearAuthSession()
+        assertEquals("clearAuthSession must wipe IPTV password", "", prefs.loadCredentials().password)
+
+        // SEC-10: PackManager rejects corrupt header length (>4084)
+        val pm = PackManager(context, prefs)
+        val badPack = File(context.cacheDir, "bad_header.svpack")
+        RandomAccessFile(badPack, "rw").use { raf ->
+            val hdr = ByteArray(4096)
+            "SVPACK01".toByteArray(Charsets.US_ASCII).copyInto(hdr, 0)
+            hdr[8] = 0x10; hdr[9] = 0x27 // length = 10000 > 4084
+            raf.write(hdr)
+        }
+        var headerRejected = false
+        try { pm.readHeader(badPack) } catch (_: java.io.IOException) { headerRejected = true }
+        assertTrue("PackManager must reject out-of-range header length", headerRejected)
+        badPack.delete()
     }
 
     // =========================================================================

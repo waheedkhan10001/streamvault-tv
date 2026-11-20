@@ -109,7 +109,7 @@ async function pollCatalogStrip() {
     if (getStoredAuthToken()) {
       await refreshSyncStatusOnly();
       const sync = (appStatus && appStatus.syncStatus) || {};
-      if (catalogStripWasSyncing && !sync.isSyncing && sync.note) showToast(escapeHtml(sync.note));
+      if (catalogStripWasSyncing && !sync.isSyncing && sync.note) showToast(sync.note);
       catalogStripWasSyncing = !!sync.isSyncing;
       // When the details lookup finishes while the app is open: say so once ("everything is ready")
       const doneNow = enrichmentIsComplete(sync);

@@ -150,6 +150,9 @@ function redact(msg, secret) { return secret ? String(msg).split(secret).join('*
 function getJson(urlStr, secret, redirects = 0) {
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return reject(new Error('Unsupported URL protocol'));
+    }
     const lib = u.protocol === 'https:' ? https : http;
     const t0 = Date.now();
     const req = lib.get(u, { headers: { 'User-Agent': 'okhttp/4.12.0', 'Accept-Encoding': 'gzip', 'Accept': '*/*' }, timeout: 600000 }, (res) => {
@@ -276,7 +279,7 @@ async function main() {
   let pass = process.env.SV_PASS || '';
   console.log('\nStreamVault - Count my titles');
   console.log('Your login is used only to read your provider\'s lists. It is never saved to any file.\n');
-  if (!server) server = await ask(rl, 'Server address', 'http://aadiflix.online:8080');
+  if (!server) server = await ask(rl, 'Server address (e.g. http://your-provider:8080)');
   if (!user) user = await ask(rl, 'Username');
   if (!pass) pass = await ask(rl, 'Password');
   rl.close();

@@ -12,8 +12,13 @@ echo   1. On your TCL TV, go to Settings -^> Device Preferences -^> About
 echo   2. Scroll to "Build" and press OK 7 times to enable Developer Options
 echo   3. Go back one screen -^> Developer Options -^> Turn ON "Network Debugging"
 echo.
-set TV_IP=192.168.100.42
-set /p TV_IP="Enter your TCL TV Wi-Fi IP Address [%TV_IP%]: "
+set TV_IP=
+set /p TV_IP="Enter your Android TV Wi-Fi IP Address (e.g. 192.168.1.x): "
+if "%TV_IP%"=="" (
+  echo Error: TV IP address is required.
+  pause
+  exit /b 1
+)
 
 echo.
 echo [1/3] Connecting to TCL 55P635 at %TV_IP%:5555 over Wi-Fi...
