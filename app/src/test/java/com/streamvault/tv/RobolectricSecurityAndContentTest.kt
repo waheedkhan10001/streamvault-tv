@@ -318,7 +318,7 @@ class RobolectricSecurityAndContentTest {
 
         val validToken = "a".repeat(64)
         prefs.setAuthToken(validToken)
-        prefs.saveCredentials(XtreamCredentials(serverUrl = "http://iptv.example.com:8080", username = "u1", password = "mySecretPassword!"))
+        prefs.saveCredentials(XtreamCredentials(serverUrl = "http://iptv.example.com:8080", username = "u1", password = "mySecretPassword99"))
 
         val spoofedDetail = router.handle("GET", "/api/detail?dedupKey=x", "", "Bearer wrong_token_value")
         assertTrue("Mismatched Bearer token must be rejected", spoofedDetail.contains("\"status\":401"))
@@ -342,12 +342,12 @@ class RobolectricSecurityAndContentTest {
         assertTrue("Locked adult detail must be refused", lockedAdult.contains("\"status\":403"))
 
         val streamResp = router.handle("POST", "/api/stream-url", """{"kind":"movie","id":"stream_fam_sec","ext":"mp4"}""", "Bearer $validToken")
-        assertTrue("Stream response uses opaque sv-stream ticket", streamResp.contains("sv-stream://"))
-        assertFalse("Stream response must NEVER expose IPTV password to WebView", streamResp.contains("mySecretPassword!"))
         val ticketUrl = org.json.JSONObject(streamResp).getString("url")
+        assertTrue("Stream response uses opaque sv-stream ticket: $streamResp", ticketUrl.startsWith("sv-stream://"))
+        assertFalse("Stream response must NEVER expose IPTV password to WebView", streamResp.contains("mySecretPassword99"))
         val resolved = router.resolveStreamTicket(ticketUrl)
         assertNotNull("Valid ticket resolves natively", resolved)
-        assertTrue(resolved!!.first.contains("mySecretPassword!"))
+        assertTrue(resolved!!.first.contains("mySecretPassword99"))
         assertNull("Ticket is single-use", router.resolveStreamTicket(ticketUrl))
 
         // SEC-12: Legacy SHA-256 PIN backward compat still verifies + clearAuthSession clears password
